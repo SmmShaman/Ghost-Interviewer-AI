@@ -415,7 +415,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
   // Constants for file upload
   const MAX_KB_SIZE = 5 * 1024 * 1024; // 5MB limit (localStorage safe)
-  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB per file
+  const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB per file
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
@@ -428,7 +428,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       Array.from(files).forEach((file) => {
           // Check single file size
           if (file.size > MAX_FILE_SIZE) {
-              alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 2MB per file.`);
+              alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 8MB per file.`);
               return;
           }
 
