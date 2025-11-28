@@ -1,0 +1,7 @@
+{
+  "name": "Ghost Interviewer AI",
+  "description": "A stealthy, real-time interview assistant that bridges the gap between your resume and job requirements in your target language.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
