@@ -306,13 +306,13 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                 <label className="text-xs font-medium text-blue-400 uppercase">{t.ghostModel.label}</label>
                 <div className="relative">
                     <select
-                        className="w-full bg-blue-900/10 border border-blue-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500"
+                        className="w-full bg-gray-900 border border-blue-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500"
                         value={context.ghostModel}
                         onChange={(e) => handleChange('ghostModel', e.target.value)}
                         disabled={!localModelReady && !context.ghostModel}
                     >
-                        <option value="opus">{t.ghostModel.opus}</option>
-                        <option value="nllb">{t.ghostModel.nllb}</option>
+                        <option value="opus" className="bg-gray-900 text-gray-200">{t.ghostModel.opus}</option>
+                        <option value="nllb" className="bg-gray-900 text-gray-200">{t.ghostModel.nllb}</option>
                     </select>
                     <div className="absolute right-3 top-2.5 flex items-center gap-2 pointer-events-none">
                         <span className={`w-2 h-2 rounded-full ${localModelReady ? 'bg-emerald-500' : 'bg-yellow-500 animate-pulse'}`}></span>
@@ -325,12 +325,12 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             <div className="space-y-2">
                 <label className="text-xs font-medium text-purple-400 uppercase">{t.llmModel.label}</label>
                 <select
-                    className="w-full bg-purple-900/10 border border-purple-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-purple-500"
+                    className="w-full bg-gray-900 border border-purple-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-purple-500"
                     value={context.llmProvider}
                     onChange={(e) => handleChange('llmProvider', e.target.value)}
                 >
-                    <option value="azure">{t.llmModel.azure}</option>
-                    <option value="groq">{t.llmModel.groq}</option>
+                    <option value="azure" className="bg-gray-900 text-gray-200">{t.llmModel.azure}</option>
+                    <option value="groq" className="bg-gray-900 text-gray-200">{t.llmModel.groq}</option>
                 </select>
 
                 {/* GROQ API KEY INPUT */}
@@ -441,14 +441,14 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
         {/* Microphone Selection & Test */}
         <div className="space-y-2">
             <label className="text-xs font-medium text-gray-400 uppercase">{t.inputSource}</label>
-            <select 
+            <select
                 className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-emerald-500 outline-none"
                 value={selectedDeviceId}
                 onChange={(e) => handleDeviceChange(e.target.value)}
             >
-                <option value="">{t.defaultMic}</option>
+                <option value="" className="bg-gray-900 text-gray-200">{t.defaultMic}</option>
                 {availableDevices.map(device => (
-                    <option key={device.deviceId} value={device.deviceId}>
+                    <option key={device.deviceId} value={device.deviceId} className="bg-gray-900 text-gray-200">
                         {device.label || `Microphone ${device.deviceId.slice(0,5)}...`}
                     </option>
                 ))}
@@ -489,14 +489,14 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                 <span>{t.profiles.title}</span>
              </label>
              <div className="flex gap-2 mb-2">
-                <select 
+                <select
                     className="flex-1 bg-gray-900 border border-gray-700 rounded text-xs px-2 py-1 text-gray-300 outline-none"
                     value={selectedProfileId}
                     onChange={(e) => handleProfileSelect(e.target.value)}
                 >
-                    <option value="">{t.profiles.select}</option>
+                    <option value="" className="bg-gray-900 text-gray-200">{t.profiles.select}</option>
                     {context.savedProfiles.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                        <option key={p.id} value={p.id} className="bg-gray-900 text-gray-200">{p.name}</option>
                     ))}
                 </select>
                 <button onClick={handleNewProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white">+</button>
@@ -592,29 +592,29 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <label className="text-xs font-medium text-gray-400 uppercase">{t.targetLang}</label>
-            <select 
+            <select
               className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 outline-none"
               value={context.targetLanguage}
               onChange={(e) => handleChange('targetLanguage', e.target.value)}
             >
-              <option>Norwegian</option>
-              <option>English</option>
-              <option>German</option>
-              <option>French</option>
-              <option>Spanish</option>
+              <option className="bg-gray-900 text-gray-200">Norwegian</option>
+              <option className="bg-gray-900 text-gray-200">English</option>
+              <option className="bg-gray-900 text-gray-200">German</option>
+              <option className="bg-gray-900 text-gray-200">French</option>
+              <option className="bg-gray-900 text-gray-200">Spanish</option>
             </select>
           </div>
           <div className="space-y-2">
             <label className="text-xs font-medium text-gray-400 uppercase">{t.nativeLang}</label>
-             <select 
+             <select
               className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 outline-none"
               value={context.nativeLanguage}
               onChange={(e) => handleChange('nativeLanguage', e.target.value)}
             >
-              <option>Ukrainian</option>
-              <option>English</option>
-              <option>Russian</option>
-              <option>Polish</option>
+              <option className="bg-gray-900 text-gray-200">Ukrainian</option>
+              <option className="bg-gray-900 text-gray-200">English</option>
+              <option className="bg-gray-900 text-gray-200">Russian</option>
+              <option className="bg-gray-900 text-gray-200">Polish</option>
             </select>
           </div>
         </div>
@@ -626,14 +626,14 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
              {/* Prompt Manager UI */}
              <div className="flex gap-2 mb-2">
-                <select 
+                <select
                     className="flex-1 bg-gray-900 border border-gray-700 rounded text-xs px-2 py-1 text-gray-300 outline-none"
                     value={selectedPresetId}
                     onChange={(e) => handlePresetSelect(e.target.value)}
                 >
-                    <option value="">{t.prompts.select}</option>
+                    <option value="" className="bg-gray-900 text-gray-200">{t.prompts.select}</option>
                     {context.savedPrompts.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                        <option key={p.id} value={p.id} className="bg-gray-900 text-gray-200">{p.name}</option>
                     ))}
                 </select>
                 <button onClick={handleNewPreset} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white">+</button>
