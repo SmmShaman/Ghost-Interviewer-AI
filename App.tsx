@@ -158,7 +158,9 @@ const App: React.FC = () => {
 
   // --- SPEECH BUFFERING REFS ---
   const accumulatedTranscriptRef = useRef<string>(""); // Stores "final" events that haven't been committed
+  const lastInterimRef = useRef<string>(""); // Stores last interim for overflow commits
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCommittingRef = useRef<boolean>(false); // Prevent multiple rapid commits
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
@@ -492,14 +494,33 @@ const App: React.FC = () => {
   };
 
   // Helper to force commit speech when timer hits OR max words hit
-  const commitBufferedSpeech = useCallback(() => {
-      const final = accumulatedTranscriptRef.current.trim();
-      if (!final) return;
+  // includeInterim: when true, also include lastInterimRef in the commit (for overflow cases)
+  const commitBufferedSpeech = useCallback((includeInterim = false) => {
+      // Prevent multiple rapid commits
+      if (isCommittingRef.current) return;
 
-      console.log(`📦 Committing Block: "${final.substring(0, 20)}..."`);
+      let textToCommit = accumulatedTranscriptRef.current.trim();
 
-      // Reset
+      // For overflow situations, include interim text that hasn't been finalized yet
+      if (includeInterim && lastInterimRef.current.trim()) {
+          const interimText = lastInterimRef.current.trim();
+          if (textToCommit) {
+              textToCommit = textToCommit + ' ' + interimText;
+          } else {
+              textToCommit = interimText;
+          }
+      }
+
+      if (!textToCommit) return;
+
+      // Lock to prevent rapid re-commits
+      isCommittingRef.current = true;
+
+      console.log(`📦 Committing Block: "${textToCommit.substring(0, 30)}..." (${textToCommit.split(/\s+/).length} words)`);
+
+      // Reset ALL buffers
       accumulatedTranscriptRef.current = "";
+      lastInterimRef.current = "";
       setTranscript("");
       setInterimTranscript("");
       setLiveTranslation("");
@@ -508,7 +529,7 @@ const App: React.FC = () => {
 
       // Processing Logic
       let speaker = 'interviewer';
-           
+
       if (isUserSpeakingRef.current) {
           speaker = 'candidate';
       } else if (contextRef.current.stereoMode) {
@@ -516,10 +537,15 @@ const App: React.FC = () => {
       }
 
       if (speaker === 'candidate') {
-          handleCandidateMessage(final);
+          handleCandidateMessage(textToCommit);
       } else {
-          finalizeBlock(final);
+          finalizeBlock(textToCommit);
       }
+
+      // Unlock after a short delay to allow speech recognition to catch up
+      setTimeout(() => {
+          isCommittingRef.current = false;
+      }, 100);
   }, []);
 
   // Condition Checker
@@ -604,13 +630,17 @@ const App: React.FC = () => {
         if (currentInterim.trim().length > 0) {
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
+            // Store interim for potential overflow commit
+            lastInterimRef.current = currentInterim.trim();
+
             // SAFETY CHECK: Force commit if total (accumulated + interim) is too long
             // This prevents the buffer from growing unbounded during continuous speech
             const totalText = (accumulatedTranscriptRef.current + ' ' + currentInterim).trim();
             const totalWords = totalText.split(/\s+/).length;
             if (totalWords >= BLOCK_CONFIG.MAX_WORDS_PER_BLOCK * 2) {
                 console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Interim overflow (${totalWords} words)`);
-                commitBufferedSpeech();
+                // Pass true to include interim text in the commit
+                commitBufferedSpeech(true);
                 return;
             }
 
