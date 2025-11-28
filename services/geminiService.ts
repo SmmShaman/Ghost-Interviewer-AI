@@ -3,15 +3,16 @@
 import { InterviewContext } from "../types";
 import { knowledgeSearch } from "./knowledgeSearch";
 
-// Azure Configuration
-const AZURE_ENDPOINT = "https://jobbot.openai.azure.com";
-const AZURE_API_KEY = ""; // SECURITY: Removed hardcoded key. Use UI Settings to inject key or process.env
-const API_VERSION = "2024-10-01-preview";
-const DEPLOYMENT = "gpt-5.1-codex-mini";
+// Azure Configuration (from .env via Vite)
+const AZURE_ENDPOINT = import.meta.env.VITE_AZURE_ENDPOINT || "https://jobbot.openai.azure.com";
+const AZURE_API_KEY = import.meta.env.VITE_AZURE_API_KEY || "";
+const API_VERSION = import.meta.env.VITE_API_VERSION || "2024-10-01-preview";
+const DEPLOYMENT = import.meta.env.VITE_DEPLOYMENT || "gpt-5.1-codex-mini";
 
-// Groq Configuration
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.3-70b-versatile"; 
+// Groq Configuration (from .env via Vite)
+const GROQ_ENDPOINT = import.meta.env.VITE_GROQ_ENDPOINT || "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_API_KEY_DEFAULT = import.meta.env.VITE_GROQ_API_KEY || ""; 
 
 // Helper to mask imperative commands that trigger Azure Jailbreak detection
 function sanitizeForAzure(text: string): string {
@@ -70,7 +71,7 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void) {
      // For now, if empty, it will likely fail unless user has configured backend proxy or local overrides
      
      if (!AZURE_API_KEY) {
-         throw new Error("Azure API Key is missing. Please configure it in the code or use Groq in settings.");
+         throw new Error("Azure API Key is missing. Set VITE_AZURE_API_KEY in .env or use Groq in Settings.");
      }
 
      const response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
@@ -97,13 +98,14 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void) {
 
 // GROQ IMPLEMENTATION
 async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: any) => void) {
-    if (!apiKey) throw new Error("Groq API Key is missing");
+    const key = apiKey || GROQ_API_KEY_DEFAULT;
+    if (!key) throw new Error("Groq API Key is missing. Set VITE_GROQ_API_KEY in .env or enter in Settings.");
 
     const response = await fetch(GROQ_ENDPOINT, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': `Bearer ${key}`
         },
         body: JSON.stringify({
             model: GROQ_MODEL,
