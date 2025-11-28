@@ -19,6 +19,7 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 - **Local AI**: Hugging Face Transformers (`@huggingface/transformers`)
 - **Cloud AI**: Azure OpenAI or Groq (Llama 3)
 - **Speech Recognition**: Web Speech API (browser-native)
+- **Hosting**: Netlify (auto-deploy from main branch)
 
 ## Directory Structure
 
@@ -26,9 +27,10 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 /
 ├── App.tsx                     # Main application component (state, speech recognition, AI queue)
 ├── index.tsx                   # React entry point
-├── index.html                  # HTML template with Tailwind config and custom animations
+├── index.html                  # HTML template with Tailwind config, animations, and entry script
 ├── types.ts                    # TypeScript interfaces and types
 ├── translations.ts             # i18n strings (English and Ukrainian)
+├── netlify.toml                # Netlify deployment configuration
 ├── components/
 │   ├── SetupPanel.tsx          # Settings sidebar (profiles, models, audio config)
 │   ├── BrickRow.tsx            # Main message display row (interviewer + AI response)
@@ -63,6 +65,58 @@ npm run build
 # Preview production build
 npm run preview
 ```
+
+## Deployment
+
+### Netlify Configuration (netlify.toml)
+
+```toml
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+```
+
+### Critical: Entry Point in index.html
+
+The React app is loaded via a module script in `index.html`:
+
+```html
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+```
+
+**Important**: Without this script tag, the app will show a blank page!
+
+### Import Maps
+
+The project uses browser import maps for CDN dependencies:
+
+```html
+<script type="importmap">
+{
+  "imports": {
+    "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0"
+  }
+}
+</script>
+```
+
+### Deployment URL
+
+- **Production**: https://ghost-interviewer-ai.netlify.app
+- **Auto-deploy**: Enabled from `main` branch
 
 ## Architecture Patterns
 
@@ -219,6 +273,10 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 
 ## Common Issues
 
+### Blank Page After Deployment
+- **Cause**: Missing entry point script in `index.html`
+- **Solution**: Ensure `<script type="module" src="/index.tsx"></script>` exists in body
+
 ### Model Loading Fails
 - Check browser console for CORS errors
 - Ensure Hugging Face CDN is accessible
@@ -232,6 +290,11 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 ### Azure API Errors
 - Common cause: Jailbreak detection from imperative prompts
 - Solution: The `sanitizeForAzure()` function masks problematic phrases
+
+### Netlify Deploy Issues
+- Verify `netlify.toml` exists with correct build command
+- Check that `publish` directory is `dist`
+- Ensure Node version is set to 20
 
 ## Testing Notes
 
