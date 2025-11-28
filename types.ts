@@ -5,6 +5,24 @@ export interface PromptPreset {
   content: string;
 }
 
+// STATIC: Candidate's personal data (rarely changes)
+export interface CandidateProfile {
+  id: string;
+  name: string;
+  resume: string;           // CV/Resume content
+  knowledgeBase: string;    // Technical docs, project details, skills reference
+}
+
+// DYNAMIC: Per-interview data (changes for each job application)
+export interface JobProfile {
+  id: string;
+  name: string;
+  companyDescription: string;  // Company values, products, culture
+  jobDescription: string;      // Job requirements, responsibilities
+  applicationLetter: string;   // Søknad - cover letter for this position
+}
+
+// LEGACY: Keep for backward compatibility during migration
 export interface InterviewProfile {
   id: string;
   name: string;
@@ -17,24 +35,40 @@ export interface InterviewProfile {
 export type ViewMode = 'FULL' | 'FOCUS' | 'SIMPLE';
 
 export interface InterviewContext {
+  // === ACTIVE DATA (loaded from selected profiles) ===
   resume: string;
+  knowledgeBase: string;
+  companyDescription: string;
   jobDescription: string;
-  companyDescription: string; // New field for company values/products
-  knowledgeBase: string; // New field for raw data/technical docs
+  applicationLetter: string; // NEW: Søknad content
+
+  // === LANGUAGE SETTINGS ===
   targetLanguage: string; // The language of the interview (e.g., Norwegian)
   nativeLanguage: string; // The language you read (e.g., Ukrainian)
   proficiencyLevel: string; // e.g., "B1", "Native"
   tone: 'Professional' | 'Casual' | 'Confident' | 'Humble';
+
+  // === AI CONFIGURATION ===
   systemInstruction: string; // User-editable prompt logic
   savedPrompts: PromptPreset[]; // List of saved prompts
-  savedProfiles: InterviewProfile[]; // List of saved data sets
-  activeProfileId: string; // Currently selected profile ID
   activePromptId: string; // Currently selected prompt ID
+
+  // === NEW PROFILE SYSTEM ===
+  savedCandidateProfiles: CandidateProfile[]; // Static: Resume + Knowledge
+  savedJobProfiles: JobProfile[]; // Dynamic: Company + Job + Søknad
+  activeCandidateProfileId: string; // Selected candidate profile
+  activeJobProfileId: string; // Selected job profile
+
+  // === LEGACY (for migration) ===
+  savedProfiles: InterviewProfile[]; // Old combined profiles
+  activeProfileId: string; // Old profile ID
+
+  // === UI & HARDWARE ===
   stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
-  viewMode: ViewMode; // New: Controls the layout and processing depth
-  ghostModel: 'opus' | 'nllb'; // New: Select local model type
-  llmProvider: 'azure' | 'groq'; // New: Select Cloud Provider
-  groqApiKey: string; // New: Store Groq Key
+  viewMode: ViewMode; // Controls the layout and processing depth
+  ghostModel: 'opus' | 'nllb'; // Select local model type
+  llmProvider: 'azure' | 'groq'; // Select Cloud Provider
+  groqApiKey: string; // Store Groq Key
 }
 
 export interface TextBlock {

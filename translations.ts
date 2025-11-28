@@ -54,6 +54,22 @@ export const translations = {
           namePlaceholder: "Profile Name (e.g., Google Java)",
           confirmDelete: "Delete this profile?"
       },
+      candidateProfiles: {
+          title: "CANDIDATE PROFILE (YOU)",
+          subtitle: "Static data - your resume and knowledge",
+          select: "Select Candidate...",
+          namePlaceholder: "Profile Name (e.g., My Main CV)",
+          confirmDelete: "Delete this candidate profile?"
+      },
+      jobProfiles: {
+          title: "JOB PROFILE (VACANCY)",
+          subtitle: "Dynamic data - per job application",
+          select: "Select Job...",
+          namePlaceholder: "Job Name (e.g., Google Java)",
+          confirmDelete: "Delete this job profile?"
+      },
+      applicationLetter: "APPLICATION LETTER (SØKNAD)",
+      applicationLetterPlaceholder: "Paste your cover letter / søknad for this position...",
       resume: "RESUME SUMMARY",
       resumePlaceholder: "Paste your key resume points here...",
       jobDesc: "JOB DESCRIPTION",
@@ -222,6 +238,22 @@ Example:
           namePlaceholder: "Назва профілю (напр. Google Java)",
           confirmDelete: "Видалити цей профіль?"
       },
+      candidateProfiles: {
+          title: "ПРОФІЛЬ КАНДИДАТА (ВИ)",
+          subtitle: "Статичні дані - резюме та знання",
+          select: "Оберіть кандидата...",
+          namePlaceholder: "Назва профілю (напр. Моє основне CV)",
+          confirmDelete: "Видалити профіль кандидата?"
+      },
+      jobProfiles: {
+          title: "ПРОФІЛЬ ВАКАНСІЇ",
+          subtitle: "Динамічні дані - для кожної заявки",
+          select: "Оберіть вакансію...",
+          namePlaceholder: "Назва вакансії (напр. Google Java)",
+          confirmDelete: "Видалити профіль вакансії?"
+      },
+      applicationLetter: "СУПРОВІДНИЙ ЛИСТ (SØKNAD)",
+      applicationLetterPlaceholder: "Вставте ваш супровідний лист / søknad для цієї позиції...",
       resume: "РЕЗЮМЕ (ОСНОВНЕ)",
       resumePlaceholder: "Вставте ключові пункти вашого резюме...",
       jobDesc: "ОПИС ВАКАНСІЇ",

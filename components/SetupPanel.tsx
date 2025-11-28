@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { InterviewContext, PromptPreset, InterviewProfile, ViewMode } from '../types';
+import { InterviewContext, PromptPreset, InterviewProfile, ViewMode, CandidateProfile, JobProfile } from '../types';
 import { translations } from '../translations';
 import { localTranslator } from '../services/localTranslator';
 
@@ -24,12 +24,18 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   
   // Prompt Manager State
   const [presetName, setPresetName] = useState("");
-  // Use context for persistence, with fallback
   const selectedPresetId = context.activePromptId || "";
 
-  // Profile Manager State
+  // NEW: Candidate Profile Manager State
+  const [candidateProfileName, setCandidateProfileName] = useState("");
+  const selectedCandidateProfileId = context.activeCandidateProfileId || "";
+
+  // NEW: Job Profile Manager State
+  const [jobProfileName, setJobProfileName] = useState("");
+  const selectedJobProfileId = context.activeJobProfileId || "";
+
+  // LEGACY: Old Profile Manager State (for backward compatibility)
   const [profileName, setProfileName] = useState("");
-  // Use context for persistence, with fallback
   const selectedProfileId = context.activeProfileId || "";
 
   // File Upload
@@ -61,10 +67,22 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
   // Initialize profile/prompt names from saved context
   useEffect(() => {
+      // NEW: Initialize candidate profile name
+      if (context.activeCandidateProfileId && context.savedCandidateProfiles) {
+          const profile = context.savedCandidateProfiles.find(p => p.id === context.activeCandidateProfileId);
+          if (profile) setCandidateProfileName(profile.name);
+      }
+      // NEW: Initialize job profile name
+      if (context.activeJobProfileId && context.savedJobProfiles) {
+          const profile = context.savedJobProfiles.find(p => p.id === context.activeJobProfileId);
+          if (profile) setJobProfileName(profile.name);
+      }
+      // LEGACY: Initialize old profile name
       if (context.activeProfileId) {
           const profile = context.savedProfiles.find(p => p.id === context.activeProfileId);
           if (profile) setProfileName(profile.name);
       }
+      // Initialize prompt name
       if (context.activePromptId) {
           const preset = context.savedPrompts.find(p => p.id === context.activePromptId);
           if (preset) setPresetName(preset.name);
@@ -268,6 +286,124 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       handleChange('activeProfileId', "");
       setProfileName("");
       // Don't clear fields automatically, user might want to clone current state
+  };
+
+  // === NEW: CANDIDATE PROFILE HANDLERS ===
+  const handleCandidateProfileSelect = (id: string) => {
+      handleChange('activeCandidateProfileId', id);
+      if (id === "") {
+          setCandidateProfileName("");
+          return;
+      }
+      const profiles = context.savedCandidateProfiles || [];
+      const profile = profiles.find(p => p.id === id);
+      if (profile) {
+          setCandidateProfileName(profile.name);
+          onContextChange({
+              ...context,
+              activeCandidateProfileId: id,
+              resume: profile.resume,
+              knowledgeBase: profile.knowledgeBase
+          });
+      }
+  };
+
+  const handleSaveCandidateProfile = () => {
+      if (!candidateProfileName.trim()) return;
+
+      const newProfile: CandidateProfile = {
+          id: selectedCandidateProfileId || Date.now().toString(),
+          name: candidateProfileName,
+          resume: context.resume,
+          knowledgeBase: context.knowledgeBase
+      };
+
+      const profiles = context.savedCandidateProfiles || [];
+      const existingIndex = profiles.findIndex(p => p.id === newProfile.id);
+      let updatedProfiles = [...profiles];
+
+      if (existingIndex >= 0) {
+          updatedProfiles[existingIndex] = newProfile;
+      } else {
+          updatedProfiles.push(newProfile);
+      }
+
+      onContextChange({ ...context, savedCandidateProfiles: updatedProfiles, activeCandidateProfileId: newProfile.id });
+  };
+
+  const handleDeleteCandidateProfile = () => {
+      if (!selectedCandidateProfileId) return;
+      if (window.confirm(t.candidateProfiles?.confirmDelete || "Delete this profile?")) {
+          const profiles = context.savedCandidateProfiles || [];
+          const updated = profiles.filter(p => p.id !== selectedCandidateProfileId);
+          onContextChange({ ...context, savedCandidateProfiles: updated, activeCandidateProfileId: "" });
+          setCandidateProfileName("");
+      }
+  };
+
+  const handleNewCandidateProfile = () => {
+      handleChange('activeCandidateProfileId', "");
+      setCandidateProfileName("");
+  };
+
+  // === NEW: JOB PROFILE HANDLERS ===
+  const handleJobProfileSelect = (id: string) => {
+      handleChange('activeJobProfileId', id);
+      if (id === "") {
+          setJobProfileName("");
+          return;
+      }
+      const profiles = context.savedJobProfiles || [];
+      const profile = profiles.find(p => p.id === id);
+      if (profile) {
+          setJobProfileName(profile.name);
+          onContextChange({
+              ...context,
+              activeJobProfileId: id,
+              companyDescription: profile.companyDescription,
+              jobDescription: profile.jobDescription,
+              applicationLetter: profile.applicationLetter
+          });
+      }
+  };
+
+  const handleSaveJobProfile = () => {
+      if (!jobProfileName.trim()) return;
+
+      const newProfile: JobProfile = {
+          id: selectedJobProfileId || Date.now().toString(),
+          name: jobProfileName,
+          companyDescription: context.companyDescription,
+          jobDescription: context.jobDescription,
+          applicationLetter: context.applicationLetter || ""
+      };
+
+      const profiles = context.savedJobProfiles || [];
+      const existingIndex = profiles.findIndex(p => p.id === newProfile.id);
+      let updatedProfiles = [...profiles];
+
+      if (existingIndex >= 0) {
+          updatedProfiles[existingIndex] = newProfile;
+      } else {
+          updatedProfiles.push(newProfile);
+      }
+
+      onContextChange({ ...context, savedJobProfiles: updatedProfiles, activeJobProfileId: newProfile.id });
+  };
+
+  const handleDeleteJobProfile = () => {
+      if (!selectedJobProfileId) return;
+      if (window.confirm(t.jobProfiles?.confirmDelete || "Delete this profile?")) {
+          const profiles = context.savedJobProfiles || [];
+          const updated = profiles.filter(p => p.id !== selectedJobProfileId);
+          onContextChange({ ...context, savedJobProfiles: updated, activeJobProfileId: "" });
+          setJobProfileName("");
+      }
+  };
+
+  const handleNewJobProfile = () => {
+      handleChange('activeJobProfileId', "");
+      setJobProfileName("");
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -493,110 +629,175 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             </div>
         </div>
 
-        {/* Profile Manager */}
-        <div className="space-y-2 pt-4 border-t border-gray-800">
-             <label className="text-xs font-medium text-purple-400 uppercase flex justify-between">
-                <span>{t.profiles.title}</span>
-             </label>
-             <div className="flex gap-2 mb-2">
+        {/* ============================================ */}
+        {/* CANDIDATE PROFILE (Static - Your Data) */}
+        {/* ============================================ */}
+        <div className="space-y-3 pt-4 border-t border-emerald-900/50">
+             <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <label className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    {t.candidateProfiles?.title || "CANDIDATE PROFILE (YOU)"}
+                </label>
+             </div>
+             <p className="text-[10px] text-gray-500 -mt-2">{t.candidateProfiles?.subtitle || "Static data - your resume and knowledge"}</p>
+
+             <div className="flex gap-2">
                 <select
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded text-xs px-2 py-1 text-gray-300 outline-none"
-                    value={selectedProfileId}
-                    onChange={(e) => handleProfileSelect(e.target.value)}
+                    className="flex-1 bg-gray-900 border border-emerald-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-emerald-500"
+                    value={selectedCandidateProfileId}
+                    onChange={(e) => handleCandidateProfileSelect(e.target.value)}
                 >
-                    <option value="" className="bg-gray-900 text-gray-200">{t.profiles.select}</option>
-                    {context.savedProfiles.map(p => (
+                    <option value="" className="bg-gray-900 text-gray-200">{t.candidateProfiles?.select || "Select Candidate..."}</option>
+                    {(context.savedCandidateProfiles || []).map(p => (
                         <option key={p.id} value={p.id} className="bg-gray-900 text-gray-200">{p.name}</option>
                     ))}
                 </select>
-                <button onClick={handleNewProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white">+</button>
-                <button onClick={handleDeleteProfile} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
+                <button onClick={handleNewCandidateProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-emerald-500">+</button>
+                <button onClick={handleDeleteCandidateProfile} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
              </div>
              <div className="flex gap-2">
-                 <input 
-                    type="text" 
-                    placeholder={t.profiles.namePlaceholder}
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-purple-500"
-                    value={profileName}
-                    onChange={(e) => setProfileName(e.target.value)}
+                 <input
+                    type="text"
+                    placeholder={t.candidateProfiles?.namePlaceholder || "Profile Name"}
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
+                    value={candidateProfileName}
+                    onChange={(e) => setCandidateProfileName(e.target.value)}
                  />
-                 <button 
-                    onClick={handleSaveProfile}
-                    className="px-3 py-1 bg-purple-600 rounded text-xs font-bold text-white hover:bg-purple-500"
+                 <button
+                    onClick={handleSaveCandidateProfile}
+                    className="px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white hover:bg-emerald-500"
                  >
                     {t.profiles.save}
                  </button>
              </div>
+
+            {/* Resume */}
+            <div className="space-y-2 mt-3">
+              <label className="text-xs font-medium text-emerald-400/80 uppercase">{t.resume}</label>
+              <textarea
+                className="w-full h-28 bg-gray-900 border border-emerald-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none"
+                value={context.resume}
+                onChange={(e) => handleChange('resume', e.target.value)}
+                placeholder={t.resumePlaceholder}
+              />
+            </div>
+
+            {/* Knowledge Base */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-end">
+                 <label className="text-xs font-medium text-emerald-400/80 uppercase">{t.knowledgeBase}</label>
+                 <div className={`text-[10px] font-mono px-2 py-0.5 rounded border border-gray-700 flex items-center gap-2 ${status.color}`}>
+                    <span>{kbLength.toLocaleString()} chars</span>
+                    <span className={`w-2 h-2 rounded-full ${status.bg}`}></span>
+                    <span>{status.label}</span>
+                 </div>
+              </div>
+
+              <textarea
+                className="w-full h-28 bg-gray-900 border border-emerald-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none font-mono text-xs"
+                value={context.knowledgeBase}
+                onChange={(e) => handleChange('knowledgeBase', e.target.value)}
+                placeholder={t.knowledgeBasePlaceholder}
+              />
+
+              <div className="flex justify-end gap-2">
+                 <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    accept=".txt,.md,.json"
+                 />
+                 <button
+                    onClick={() => handleChange('knowledgeBase', '')}
+                    className="text-xs text-gray-500 hover:text-white underline"
+                 >
+                    {t.clearFile}
+                 </button>
+                 <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs bg-gray-800 border border-gray-700 px-3 py-1 rounded text-emerald-300 hover:text-white hover:border-emerald-500 transition-colors"
+                 >
+                    📁 {t.uploadFile}
+                 </button>
+              </div>
+            </div>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-gray-400 uppercase">{t.resume}</label>
-          <textarea 
-            className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none"
-            value={context.resume}
-            onChange={(e) => handleChange('resume', e.target.value)}
-            placeholder={t.resumePlaceholder}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-gray-400 uppercase">{t.jobDesc}</label>
-          <textarea 
-            className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none"
-            value={context.jobDescription}
-            onChange={(e) => handleChange('jobDescription', e.target.value)}
-            placeholder={t.jobDescPlaceholder}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-gray-400 uppercase text-blue-400">{t.companyDesc}</label>
-          <textarea 
-            className="w-full h-24 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
-            value={context.companyDescription}
-            onChange={(e) => handleChange('companyDescription', e.target.value)}
-            placeholder={t.companyDescPlaceholder}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex justify-between items-end">
-             <label className="text-xs font-medium text-gray-400 uppercase text-purple-400">{t.knowledgeBase}</label>
-             <div className={`text-[10px] font-mono px-2 py-0.5 rounded border border-gray-700 flex items-center gap-2 ${status.color}`}>
-                <span>{kbLength.toLocaleString()} chars</span>
-                <span className={`w-2 h-2 rounded-full ${status.bg}`}></span>
-                <span>{status.label}</span>
+        {/* ============================================ */}
+        {/* JOB PROFILE (Dynamic - Per Application) */}
+        {/* ============================================ */}
+        <div className="space-y-3 pt-4 border-t border-blue-900/50">
+             <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <label className="text-xs font-bold text-blue-400 uppercase tracking-wider">
+                    {t.jobProfiles?.title || "JOB PROFILE (VACANCY)"}
+                </label>
              </div>
-          </div>
-          
-          <textarea 
-            className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-200 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none resize-none font-mono text-xs"
-            value={context.knowledgeBase}
-            onChange={(e) => handleChange('knowledgeBase', e.target.value)}
-            placeholder={t.knowledgeBasePlaceholder}
-          />
+             <p className="text-[10px] text-gray-500 -mt-2">{t.jobProfiles?.subtitle || "Dynamic data - per job application"}</p>
 
-          <div className="flex justify-end gap-2">
-             <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                className="hidden" 
-                accept=".txt,.md,.json"
-             />
-             <button 
-                onClick={() => handleChange('knowledgeBase', '')}
-                className="text-xs text-gray-500 hover:text-white underline"
-             >
-                {t.clearFile}
-             </button>
-             <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="text-xs bg-gray-800 border border-gray-700 px-3 py-1 rounded text-purple-300 hover:text-white hover:border-purple-500 transition-colors"
-             >
-                📁 {t.uploadFile}
-             </button>
-          </div>
+             <div className="flex gap-2">
+                <select
+                    className="flex-1 bg-gray-900 border border-blue-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-blue-500"
+                    value={selectedJobProfileId}
+                    onChange={(e) => handleJobProfileSelect(e.target.value)}
+                >
+                    <option value="" className="bg-gray-900 text-gray-200">{t.jobProfiles?.select || "Select Job..."}</option>
+                    {(context.savedJobProfiles || []).map(p => (
+                        <option key={p.id} value={p.id} className="bg-gray-900 text-gray-200">{p.name}</option>
+                    ))}
+                </select>
+                <button onClick={handleNewJobProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-blue-500">+</button>
+                <button onClick={handleDeleteJobProfile} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
+             </div>
+             <div className="flex gap-2">
+                 <input
+                    type="text"
+                    placeholder={t.jobProfiles?.namePlaceholder || "Job Name"}
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-blue-500"
+                    value={jobProfileName}
+                    onChange={(e) => setJobProfileName(e.target.value)}
+                 />
+                 <button
+                    onClick={handleSaveJobProfile}
+                    className="px-3 py-1 bg-blue-600 rounded text-xs font-bold text-white hover:bg-blue-500"
+                 >
+                    {t.profiles.save}
+                 </button>
+             </div>
+
+            {/* Company Description */}
+            <div className="space-y-2 mt-3">
+              <label className="text-xs font-medium text-blue-400/80 uppercase">{t.companyDesc}</label>
+              <textarea
+                className="w-full h-24 bg-gray-900 border border-blue-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+                value={context.companyDescription}
+                onChange={(e) => handleChange('companyDescription', e.target.value)}
+                placeholder={t.companyDescPlaceholder}
+              />
+            </div>
+
+            {/* Job Description */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-blue-400/80 uppercase">{t.jobDesc}</label>
+              <textarea
+                className="w-full h-28 bg-gray-900 border border-blue-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+                value={context.jobDescription}
+                onChange={(e) => handleChange('jobDescription', e.target.value)}
+                placeholder={t.jobDescPlaceholder}
+              />
+            </div>
+
+            {/* Application Letter (Søknad) - NEW */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-blue-400/80 uppercase">{t.applicationLetter || "APPLICATION LETTER (SØKNAD)"}</label>
+              <textarea
+                className="w-full h-28 bg-gray-900 border border-blue-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+                value={context.applicationLetter || ""}
+                onChange={(e) => handleChange('applicationLetter', e.target.value)}
+                placeholder={t.applicationLetterPlaceholder || "Paste your cover letter / søknad for this position..."}
+              />
+            </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
