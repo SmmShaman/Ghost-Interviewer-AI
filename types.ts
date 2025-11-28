@@ -28,6 +28,8 @@ export interface InterviewContext {
   systemInstruction: string; // User-editable prompt logic
   savedPrompts: PromptPreset[]; // List of saved prompts
   savedProfiles: InterviewProfile[]; // List of saved data sets
+  activeProfileId: string; // Currently selected profile ID
+  activePromptId: string; // Currently selected prompt ID
   stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
   viewMode: ViewMode; // New: Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // New: Select local model type
