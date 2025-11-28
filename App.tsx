@@ -574,10 +574,10 @@ const App: React.FC = () => {
       }
 
       // Unlock after delay - needs to be long enough for speech recognition buffer to clear
-      // Speech events can pile up for 500-1000ms after commit
+      // Speech events can pile up for 500-1500ms after commit
       setTimeout(() => {
           isCommittingRef.current = false;
-      }, 500);
+      }, 1500);
   }, []);
 
   // Condition Checker
@@ -622,6 +622,9 @@ const App: React.FC = () => {
       recognition.lang = langMap[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
+        // Early return if we're in the middle of committing - prevents race condition
+        if (isCommittingRef.current) return;
+
         const eventTime = performance.now();
         let currentInterim = '';
         let currentFinalChunk = '';
