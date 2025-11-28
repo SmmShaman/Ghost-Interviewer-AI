@@ -414,7 +414,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   };
 
   // Constants for file upload
-  const MAX_KB_SIZE = 5 * 1024 * 1024; // 5MB limit (localStorage safe)
+  const MAX_KB_SIZE = 3 * 1024 * 1024; // 3MB limit (leave room for other data in localStorage)
   const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB per file
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -456,7 +456,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
                   // Check total size
                   if (newContent.length > MAX_KB_SIZE) {
-                      alert(`Total Knowledge Base would exceed 5MB limit!\nCurrent: ${(context.knowledgeBase.length / 1024 / 1024).toFixed(2)}MB\nAdding: ${(totalNewSize / 1024 / 1024).toFixed(2)}MB`);
+                      alert(`Total Knowledge Base would exceed 3MB limit!\nCurrent: ${(context.knowledgeBase.length / 1024 / 1024).toFixed(2)}MB\nAdding: ${(totalNewSize / 1024 / 1024).toFixed(2)}MB`);
                       return;
                   }
 
@@ -745,7 +745,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
               <div className="flex justify-between items-end">
                  <label className="text-xs font-medium text-emerald-400/80 uppercase">{t.knowledgeBase}</label>
                  <div className={`text-[10px] font-mono px-2 py-0.5 rounded border ${kbLength > MAX_KB_SIZE ? 'border-red-500 bg-red-900/20' : 'border-gray-700'} flex items-center gap-2 ${status.color}`}>
-                    <span>{(kbLength / 1024).toFixed(1)} KB / 5MB</span>
+                    <span>{(kbLength / 1024).toFixed(1)} KB / 3MB</span>
                     <span className={`w-2 h-2 rounded-full ${status.bg}`}></span>
                     <span>{status.label}</span>
                  </div>
