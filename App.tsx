@@ -8,6 +8,7 @@ import { MicIcon, StopIcon, SettingsIcon, SendIcon, EyeIcon, EyeOffIcon, Downloa
 import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile } from './types';
 import { generateInterviewAssist, translateText } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
+import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
 
 // --- CONFIGURATION CONSTANTS ---
@@ -216,6 +217,17 @@ const App: React.FC = () => {
     // Interviewer speaks targetLang -> Translate to nativeLang
     localTranslator.setLanguages(context.targetLanguage, context.nativeLanguage);
   }, [context.targetLanguage, context.nativeLanguage]);
+
+  // INDEX KNOWLEDGE BASE FOR TF-IDF SEARCH
+  useEffect(() => {
+    if (context.knowledgeBase && context.knowledgeBase.trim().length > 0) {
+      knowledgeSearch.index(context.knowledgeBase, 'knowledgeBase');
+      const stats = knowledgeSearch.getStats();
+      console.log(`📚 Knowledge Base indexed: ${stats.chunks} chunks, ${stats.terms} terms`);
+    } else {
+      knowledgeSearch.clear();
+    }
+  }, [context.knowledgeBase]);
 
   // Update System Prompt when language changes (if using default)
   useEffect(() => {

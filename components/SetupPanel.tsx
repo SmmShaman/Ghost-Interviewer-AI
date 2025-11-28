@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { InterviewContext, PromptPreset, InterviewProfile, ViewMode, CandidateProfile, JobProfile } from '../types';
 import { translations } from '../translations';
 import { localTranslator } from '../services/localTranslator';
+import { knowledgeSearch } from '../services/knowledgeSearch';
 
 interface SetupPanelProps {
   context: InterviewContext;
@@ -21,7 +22,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [localModelReady, setLocalModelReady] = useState(false);
-  
+  const [searchStats, setSearchStats] = useState({ chunks: 0, terms: 0, isReady: false });
+
   // Prompt Manager State
   const [presetName, setPresetName] = useState("");
   const selectedPresetId = context.activePromptId || "";
@@ -64,6 +66,11 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           return () => clearInterval(interval);
       }
   }, [isOpen]);
+
+  // Update search stats when knowledge base changes
+  useEffect(() => {
+      setSearchStats(knowledgeSearch.getStats());
+  }, [context.knowledgeBase]);
 
   // Initialize profile/prompt names from saved context
   useEffect(() => {
@@ -692,6 +699,13 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                     <span>{status.label}</span>
                  </div>
               </div>
+              {/* TF-IDF Search Stats */}
+              {searchStats.isReady && (
+                <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Indexed: {searchStats.chunks} chunks, {searchStats.terms} terms</span>
+                </div>
+              )}
 
               <textarea
                 className="w-full h-28 bg-gray-900 border border-emerald-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none font-mono text-xs"

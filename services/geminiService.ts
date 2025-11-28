@@ -1,6 +1,7 @@
 
 
 import { InterviewContext } from "../types";
+import { knowledgeSearch } from "./knowledgeSearch";
 
 // Azure Configuration
 const AZURE_ENDPOINT = "https://jobbot.openai.azure.com";
@@ -31,6 +32,9 @@ function sanitizeForAzure(text: string): string {
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
 
+    // Use TF-IDF search to get relevant context from knowledge base
+    const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 3000);
+
     return `
       Request: Process the input data and generate a structured response based on the formatting rules.
 
@@ -38,7 +42,7 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
       Resume: "${context.resume}"
       Job: "${context.jobDescription}"
       Company: "${context.companyDescription}"
-      KB: "${context.knowledgeBase}"
+      KB: "${relevantKnowledge || context.knowledgeBase}"
       
       [SESSION CONFIG]
       Target Language: ${context.targetLanguage}

@@ -76,8 +76,8 @@ export const translations = {
       jobDescPlaceholder: "Paste the job description here...",
       companyDesc: "COMPANY DESCRIPTION",
       companyDescPlaceholder: "Paste company values, mission, or products...",
-      knowledgeBase: "KNOWLEDGE BASE (RAW DATA)",
-      knowledgeBasePlaceholder: "Paste FAQ, technical docs, or project history here...",
+      knowledgeBase: "KNOWLEDGE BASE (CONTEXT)",
+      knowledgeBasePlaceholder: "Paste FAQ, technical docs, or project history (plain text, max ~20KB recommended)...",
       uploadFile: "Upload File (.txt, .md, .json)",
       clearFile: "Clear",
       latency: {
@@ -260,8 +260,8 @@ Example:
       jobDescPlaceholder: "Вставте текст вакансії сюди...",
       companyDesc: "ОПИС КОМПАНІЇ",
       companyDescPlaceholder: "Вставте цінності, місію або продукти компанії...",
-      knowledgeBase: "БАЗА ЗНАНЬ (RAW DATA)",
-      knowledgeBasePlaceholder: "Вставте FAQ, технічну документацію або історію проектів...",
+      knowledgeBase: "БАЗА ЗНАНЬ (КОНТЕКСТ)",
+      knowledgeBasePlaceholder: "Вставте FAQ, техдоки або історію проектів (текст, рекомендовано до ~20KB)...",
       uploadFile: "Завантажити файл (.txt, .md, .json)",
       clearFile: "Очистити",
       latency: {
