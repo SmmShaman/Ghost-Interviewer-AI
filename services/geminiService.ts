@@ -34,16 +34,17 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
     const isSimpleMode = context.viewMode === 'SIMPLE';
 
     // Use TF-IDF search to get relevant context from knowledge base
-    const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 3000);
+    // Reduced to 1500 chars to stay within Groq's 12k token limit
+    const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 1500);
 
     return `
       Request: Process the input data and generate a structured response based on the formatting rules.
 
       [DATA CONTEXT]
-      Resume: "${context.resume}"
-      Job: "${context.jobDescription}"
-      Company: "${context.companyDescription}"
-      KB: "${relevantKnowledge || context.knowledgeBase}"
+      Resume: "${context.resume?.slice(0, 2000) || ''}"
+      Job: "${context.jobDescription?.slice(0, 1500) || ''}"
+      Company: "${context.companyDescription?.slice(0, 1000) || ''}"
+      KB: "${relevantKnowledge || ''}"
       
       [SESSION CONFIG]
       Target Language: ${context.targetLanguage}
