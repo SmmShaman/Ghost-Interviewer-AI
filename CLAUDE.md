@@ -41,7 +41,8 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 │   └── Icons.tsx               # SVG icon components
 ├── services/
 │   ├── geminiService.ts        # Cloud LLM integration (Azure/Groq API calls)
-│   └── localTranslator.ts      # Local translation service (Opus/NLLB models)
+│   ├── localTranslator.ts      # Local translation service (Opus/NLLB models)
+│   └── knowledgeSearch.ts      # TF-IDF search for Knowledge Base
 ├── hooks/
 │   └── useProgressiveTranslation.ts  # Hook for progressive translation states
 ├── package.json                # Dependencies and scripts
@@ -147,23 +148,108 @@ Speech is processed in blocks based on:
 - Context stored in `localStorage` with key `ghost_interviewer_context_v2`
 - AI processing queue (`aiQueueRef`) ensures sequential processing
 
+### TF-IDF Knowledge Base Search (services/knowledgeSearch.ts)
+
+The app uses TF-IDF (Term Frequency-Inverse Document Frequency) to efficiently search large Knowledge Bases instead of sending full text to the LLM.
+
+**How it works:**
+1. When user pastes text into Knowledge Base, it's automatically indexed
+2. Text is split into ~500 character chunks with 100 char overlap
+3. Each chunk is tokenized and TF-IDF scores are calculated
+4. When interviewer asks a question, query is matched against chunks using cosine similarity
+5. Top 5 most relevant chunks (max 3000 chars) are sent to LLM instead of full KB
+
+**Key functions:**
+```typescript
+// Index new content (called in App.tsx useEffect)
+knowledgeSearch.index(text: string, source: string): void
+
+// Get relevant context for a query (called in geminiService.ts)
+knowledgeSearch.getRelevantContext(query: string, maxChars: number): string
+
+// Get stats for UI display
+knowledgeSearch.getStats(): { chunks: number; terms: number; isReady: boolean }
+
+// Clear index
+knowledgeSearch.clear(): void
+```
+
+**Configuration (in knowledgeSearch.ts):**
+```typescript
+const CHUNK_SIZE = 500;      // Characters per chunk
+const CHUNK_OVERLAP = 100;   // Overlap between chunks
+const TOP_K = 5;             // Number of top results to return
+const MIN_SCORE = 0.1;       // Minimum similarity score threshold
+```
+
+**Benefits:**
+- Supports large Knowledge Bases (up to 10MB text)
+- Reduces token usage by sending only relevant context
+- No additional ML models required (pure algorithmic approach)
+- Falls back to raw text if no relevant chunks found
+
+### Profile System
+
+The app uses a dual-profile system:
+
+1. **CandidateProfile** (Static - rarely changes):
+   - `resume`: Your CV/resume content
+   - `knowledgeBase`: Technical docs, project details, skills reference
+
+2. **JobProfile** (Dynamic - per job application):
+   - `companyDescription`: Company values, products, culture
+   - `jobDescription`: Job requirements, responsibilities
+   - `applicationLetter`: Cover letter / Søknad for the position
+
+Profiles are stored in `localStorage` and can be saved/loaded via SetupPanel.
+
 ## Key Types (types.ts)
 
 ```typescript
 // View modes control layout and processing depth
 type ViewMode = 'FULL' | 'FOCUS' | 'SIMPLE';
 
+// Candidate profile (static data - your info)
+interface CandidateProfile {
+  id: string;
+  name: string;
+  resume: string;
+  knowledgeBase: string;
+}
+
+// Job profile (dynamic data - per application)
+interface JobProfile {
+  id: string;
+  name: string;
+  companyDescription: string;
+  jobDescription: string;
+  applicationLetter: string;   // Søknad
+}
+
 // Main context object persisted to localStorage
 interface InterviewContext {
+  // Active data (from selected profiles)
   resume: string;
   jobDescription: string;
   companyDescription: string;
   knowledgeBase: string;
+  applicationLetter: string;
+
+  // Language settings
   targetLanguage: string;      // Interview language (e.g., "Norwegian")
   nativeLanguage: string;      // User's language (e.g., "Ukrainian")
+
+  // Profile system
+  savedCandidateProfiles: CandidateProfile[];
+  savedJobProfiles: JobProfile[];
+  activeCandidateProfileId: string;
+  activeJobProfileId: string;
+
+  // UI & Model config
   viewMode: ViewMode;
   ghostModel: 'opus' | 'nllb';
   llmProvider: 'azure' | 'groq';
+  groqApiKey: string;
   // ... more fields
 }
 
