@@ -13,10 +13,11 @@ import { translations } from './translations';
 
 // --- CONFIGURATION CONSTANTS ---
 const BLOCK_CONFIG = {
-    SILENCE_TIMEOUT_MS: 2000,       // Split if silence > 2s
-    MAX_WORDS_PER_BLOCK: 15,        // Split if words > 15 (reduced from 25 for performance)
-    MIN_WORDS_FOR_SENTENCE: 8,      // Only split on "." if words > 8
-    SENTENCE_END_REGEX: /[.!?।。]+$/ // Punctuation detection
+    SILENCE_TIMEOUT_MS: 1500,       // Split if silence > 1.5s (reduced for faster response)
+    MAX_WORDS_PER_BLOCK: 12,        // Split FINAL chunks at 12 words
+    MAX_WORDS_OVERFLOW: 20,         // Force split interim at 20 words (hard limit)
+    MIN_WORDS_FOR_SENTENCE: 5,      // Allow sentence split after just 5 words
+    SENTENCE_END_REGEX: /[.!?।。,;:]+$/ // Punctuation detection (added comma, semicolon, colon)
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -633,12 +634,12 @@ const App: React.FC = () => {
             // Store interim for potential overflow commit
             lastInterimRef.current = currentInterim.trim();
 
-            // SAFETY CHECK: Force commit if total (accumulated + interim) is too long
+            // SAFETY CHECK: Force commit if total (accumulated + interim) exceeds limit
             // This prevents the buffer from growing unbounded during continuous speech
             const totalText = (accumulatedTranscriptRef.current + ' ' + currentInterim).trim();
             const totalWords = totalText.split(/\s+/).length;
-            if (totalWords >= BLOCK_CONFIG.MAX_WORDS_PER_BLOCK * 2) {
-                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Interim overflow (${totalWords} words)`);
+            if (totalWords >= BLOCK_CONFIG.MAX_WORDS_OVERFLOW) {
+                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Overflow at ${totalWords} words (limit: ${BLOCK_CONFIG.MAX_WORDS_OVERFLOW})`);
                 // Pass true to include interim text in the commit
                 commitBufferedSpeech(true);
                 return;
