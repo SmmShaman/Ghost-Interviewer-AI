@@ -421,26 +421,37 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       const files = e.target.files;
       if (!files || files.length === 0) return;
 
+      // Filter valid files first
+      const validFiles = Array.from(files).filter((file) => {
+          if (file.size > MAX_FILE_SIZE) {
+              alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 8MB per file.`);
+              return false;
+          }
+          return true;
+      });
+
+      if (validFiles.length === 0) {
+          e.target.value = '';
+          return;
+      }
+
       let totalNewSize = 0;
       const fileContents: string[] = [];
       let filesProcessed = 0;
 
-      Array.from(files).forEach((file) => {
-          // Check single file size
-          if (file.size > MAX_FILE_SIZE) {
-              alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 8MB per file.`);
-              return;
-          }
-
+      validFiles.forEach((file) => {
           const reader = new FileReader();
+
           reader.onload = (event) => {
               const text = event.target?.result as string;
-              fileContents.push(`\n\n--- FILE: ${file.name} ---\n${text}`);
-              totalNewSize += text.length;
+              if (text) {
+                  fileContents.push(`\n\n--- FILE: ${file.name} ---\n${text}`);
+                  totalNewSize += text.length;
+              }
               filesProcessed++;
 
-              // When all files are read
-              if (filesProcessed === files.length) {
+              // When all valid files are read
+              if (filesProcessed === validFiles.length) {
                   const newContent = context.knowledgeBase + fileContents.join('');
 
                   // Check total size
@@ -450,8 +461,15 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                   }
 
                   handleChange('knowledgeBase', newContent);
+                  console.log(`📁 Uploaded ${validFiles.length} file(s), total: ${(newContent.length / 1024).toFixed(1)} KB`);
               }
           };
+
+          reader.onerror = () => {
+              console.error(`Failed to read file: ${file.name}`);
+              filesProcessed++;
+          };
+
           reader.readAsText(file);
       });
 
