@@ -157,12 +157,15 @@ const App: React.FC = () => {
   const audioHistoryRef = useRef<{left: number, right: number}[]>([]); // Stores recent volume levels
   const streamRef = useRef<MediaStream | null>(null);
 
-  // --- SPEECH BUFFERING REFS ---
-  const accumulatedTranscriptRef = useRef<string>(""); // Stores "final" events that haven't been committed
-  const lastInterimRef = useRef<string>(""); // Stores last interim for overflow commits
-  const lastCommittedTextRef = useRef<string>(""); // Track what we already committed to avoid duplicates
+  // --- SPEECH BUFFERING REFS (Buffer Swapping Pattern) ---
+  // Active buffer: Where new speech events accumulate (always available)
+  const activeBufferRef = useRef<string>("");
+  // Committing buffer: Snapshot of text being processed (isolated from new speech)
+  const committingBufferRef = useRef<string>("");
+  // Last interim: For overflow situations where interim needs to be included
+  const lastInterimRef = useRef<string>("");
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isCommittingRef = useRef<boolean>(false); // Prevent multiple rapid commits
+  const isCommittingRef = useRef<boolean>(false); // Mutex for commit operation
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
@@ -498,67 +501,40 @@ const App: React.FC = () => {
   };
 
   // Helper to force commit speech when timer hits OR max words hit
-  // includeInterim: when true, also include lastInterimRef in the commit (for overflow cases)
+  // BUFFER SWAPPING: Atomically swap buffers so new speech continues uninterrupted
   const commitBufferedSpeech = useCallback((includeInterim = false) => {
-      // Prevent multiple rapid commits
+      // Prevent concurrent commits (but still allow speech to accumulate in activeBuffer)
       if (isCommittingRef.current) return;
 
-      let textToCommit = accumulatedTranscriptRef.current.trim();
+      // === STEP 1: ATOMIC BUFFER SWAP ===
+      // Move active buffer content to committing buffer, clear active for new speech
+      let textToCommit = activeBufferRef.current.trim();
 
       // For overflow situations, include interim text that hasn't been finalized yet
       if (includeInterim && lastInterimRef.current.trim()) {
           const interimText = lastInterimRef.current.trim();
-          if (textToCommit) {
-              textToCommit = textToCommit + ' ' + interimText;
-          } else {
-              textToCommit = interimText;
-          }
+          textToCommit = textToCommit ? (textToCommit + ' ' + interimText) : interimText;
       }
 
       if (!textToCommit) return;
 
-      // DUPLICATE DETECTION: Check if this text is just a prefix of what we already committed
-      // This happens because Web Speech API keeps sending accumulated interim even after we commit
-      const lastCommitted = lastCommittedTextRef.current;
-      if (lastCommitted && textToCommit.startsWith(lastCommitted.substring(0, 20))) {
-          // Extract only the NEW part that wasn't committed before
-          const wordsCommitted = lastCommitted.split(/\s+/);
-          const wordsCurrent = textToCommit.split(/\s+/);
+      // Swap buffers atomically
+      committingBufferRef.current = textToCommit;
+      activeBufferRef.current = ""; // New speech goes here immediately
+      lastInterimRef.current = "";
 
-          // If current has same or fewer words as last committed, skip entirely
-          if (wordsCurrent.length <= wordsCommitted.length + 2) {
-              console.log(`⏭️ Skipping duplicate commit (${wordsCurrent.length} <= ${wordsCommitted.length + 2} words)`);
-              return;
-          }
-
-          // Extract only NEW words (after the last committed portion)
-          const newWords = wordsCurrent.slice(wordsCommitted.length);
-          if (newWords.length < 3) {
-              console.log(`⏭️ Skipping - only ${newWords.length} new words`);
-              return;
-          }
-          textToCommit = newWords.join(' ');
-          console.log(`📝 Extracted ${newWords.length} new words from overflow`);
-      }
-
-      // Lock to prevent rapid re-commits
       isCommittingRef.current = true;
-
-      // Store what we're committing for duplicate detection
-      lastCommittedTextRef.current = textToCommit;
 
       console.log(`📦 Committing Block: "${textToCommit.substring(0, 30)}..." (${textToCommit.split(/\s+/).length} words)`);
 
-      // Reset ALL buffers
-      accumulatedTranscriptRef.current = "";
-      lastInterimRef.current = "";
+      // === STEP 2: RESET UI STATE ===
       setTranscript("");
       setInterimTranscript("");
       setLiveTranslation("");
       if (translationTimeoutRef.current) clearTimeout(translationTimeoutRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-      // Processing Logic
+      // === STEP 3: PROCESS COMMITTING BUFFER ===
       let speaker = 'interviewer';
 
       if (isUserSpeakingRef.current) {
@@ -573,11 +549,11 @@ const App: React.FC = () => {
           finalizeBlock(textToCommit);
       }
 
-      // Unlock after delay - needs to be long enough for speech recognition buffer to clear
-      // Speech events can pile up for 500-1500ms after commit
+      // === STEP 4: UNLOCK (short delay, speech continues in activeBuffer) ===
       setTimeout(() => {
           isCommittingRef.current = false;
-      }, 1500);
+          committingBufferRef.current = "";
+      }, 300); // Short delay - no text loss since activeBuffer continues receiving
   }, []);
 
   // Condition Checker
@@ -622,9 +598,7 @@ const App: React.FC = () => {
       recognition.lang = langMap[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
-        // Early return if we're in the middle of committing - prevents race condition
-        if (isCommittingRef.current) return;
-
+        // NO EARLY RETURN - always accumulate speech in activeBuffer (Buffer Swapping pattern)
         const eventTime = performance.now();
         let currentInterim = '';
         let currentFinalChunk = '';
@@ -637,16 +611,16 @@ const App: React.FC = () => {
           }
         }
 
-        // --- BLOCK SPLITTING LOGIC ---
+        // --- BLOCK SPLITTING LOGIC (Buffer Swapping) ---
 
-        // 1. Accumulate Final Chunks
+        // 1. Accumulate Final Chunks in activeBuffer (always available)
         if (currentFinalChunk.trim().length > 0) {
-            accumulatedTranscriptRef.current += (accumulatedTranscriptRef.current ? ' ' : '') + currentFinalChunk.trim();
-            const wordCount = accumulatedTranscriptRef.current.split(/\s+/).length;
-            console.log(`🎤 [${Math.round(eventTime)}ms] FINAL: "${currentFinalChunk.trim()}" | Total words: ${wordCount}`);
+            activeBufferRef.current += (activeBufferRef.current ? ' ' : '') + currentFinalChunk.trim();
+            const wordCount = activeBufferRef.current.split(/\s+/).length;
+            console.log(`🎤 [${Math.round(eventTime)}ms] FINAL: "${currentFinalChunk.trim()}" | Active buffer: ${wordCount} words`);
 
-            // CHECK SPLIT CONDITIONS on the entire accumulated block
-            const fullText = accumulatedTranscriptRef.current.trim();
+            // CHECK SPLIT CONDITIONS on the active buffer
+            const fullText = activeBufferRef.current.trim();
 
             if (shouldSplitBlock(fullText)) {
                  console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Condition Met (${wordCount} words)`);
@@ -655,7 +629,7 @@ const App: React.FC = () => {
                 // If not splitting yet, reset the Silence Timer
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 silenceTimerRef.current = setTimeout(() => {
-                    console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence timeout (2s)`);
+                    console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence timeout`);
                     commitBufferedSpeech();
                 }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
             }
@@ -668,26 +642,25 @@ const App: React.FC = () => {
             // Store interim for potential overflow commit
             lastInterimRef.current = currentInterim.trim();
 
-            // SAFETY CHECK: Force commit if total (accumulated + interim) exceeds limit
-            // This prevents the buffer from growing unbounded during continuous speech
-            const totalText = (accumulatedTranscriptRef.current + ' ' + currentInterim).trim();
+            // SAFETY CHECK: Force commit if total (activeBuffer + interim) exceeds limit
+            const totalText = (activeBufferRef.current + ' ' + currentInterim).trim();
             const totalWords = totalText.split(/\s+/).length;
             if (totalWords >= BLOCK_CONFIG.MAX_WORDS_OVERFLOW) {
-                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Overflow at ${totalWords} words (limit: ${BLOCK_CONFIG.MAX_WORDS_OVERFLOW})`);
+                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Overflow at ${totalWords} words`);
                 // Pass true to include interim text in the commit
                 commitBufferedSpeech(true);
                 return;
             }
 
-            // Restart the timer to wait for 2s silence after this interim finishes
+            // Restart the timer to wait for silence
              silenceTimerRef.current = setTimeout(() => {
                  console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence after interim`);
                 commitBufferedSpeech();
             }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
         }
 
-        // 3. Update Visuals (Accumulated + Current Interim)
-        const fullDisplay = (accumulatedTranscriptRef.current + ' ' + currentInterim).trim();
+        // 3. Update Visuals (Active buffer + Current Interim)
+        const fullDisplay = (activeBufferRef.current + ' ' + currentInterim).trim();
         setInterimTranscript(fullDisplay);
 
         // STREAM 1: GHOST TRANSLATION (LOCAL MODEL) - Interim Drafts
@@ -893,7 +866,9 @@ const App: React.FC = () => {
       setAppState(AppState.IDLE);
       setInterimTranscript("");
       setLiveTranslation("");
-      accumulatedTranscriptRef.current = "";
+      activeBufferRef.current = "";
+      committingBufferRef.current = "";
+      lastInterimRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       
       if (audioContextRef.current) {
