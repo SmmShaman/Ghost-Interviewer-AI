@@ -24,11 +24,13 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   
   // Prompt Manager State
   const [presetName, setPresetName] = useState("");
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+  // Use context for persistence, with fallback
+  const selectedPresetId = context.activePromptId || "";
 
   // Profile Manager State
   const [profileName, setProfileName] = useState("");
-  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  // Use context for persistence, with fallback
+  const selectedProfileId = context.activeProfileId || "";
 
   // File Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,6 +58,18 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           return () => clearInterval(interval);
       }
   }, [isOpen]);
+
+  // Initialize profile/prompt names from saved context
+  useEffect(() => {
+      if (context.activeProfileId) {
+          const profile = context.savedProfiles.find(p => p.id === context.activeProfileId);
+          if (profile) setProfileName(profile.name);
+      }
+      if (context.activePromptId) {
+          const preset = context.savedPrompts.find(p => p.id === context.activePromptId);
+          if (preset) setPresetName(preset.name);
+      }
+  }, []); // Only on mount
 
   // Fetch audio devices
   useEffect(() => {
@@ -148,7 +162,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
   // Prompt Manager Logic
   const handlePresetSelect = (id: string) => {
-      setSelectedPresetId(id);
+      handleChange('activePromptId', id);
       if (id === "") {
           setPresetName("");
           return;
@@ -162,7 +176,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
   const handleSavePreset = () => {
       if (!presetName.trim()) return;
-      
+
       const newPreset: PromptPreset = {
           id: selectedPresetId || Date.now().toString(),
           name: presetName,
@@ -178,30 +192,27 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           updatedPrompts.push(newPreset);
       }
 
-      handleChange('savedPrompts', updatedPrompts);
-      setSelectedPresetId(newPreset.id);
+      onContextChange({ ...context, savedPrompts: updatedPrompts, activePromptId: newPreset.id });
   };
 
   const handleDeletePreset = () => {
       if (!selectedPresetId) return;
       if (window.confirm(t.prompts.confirmDelete)) {
           const updatedPrompts = context.savedPrompts.filter(p => p.id !== selectedPresetId);
-          handleChange('savedPrompts', updatedPrompts);
-          setSelectedPresetId("");
+          onContextChange({ ...context, savedPrompts: updatedPrompts, activePromptId: "", systemInstruction: "" });
           setPresetName("");
-          handleChange('systemInstruction', "");
       }
   };
 
   const handleNewPreset = () => {
-      setSelectedPresetId("");
+      handleChange('activePromptId', "");
       setPresetName("");
       handleChange('systemInstruction', "");
   };
 
   // Profile Manager Logic
   const handleProfileSelect = (id: string) => {
-      setSelectedProfileId(id);
+      handleChange('activeProfileId', id);
       if (id === "") {
           setProfileName("");
           return;
@@ -211,6 +222,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           setProfileName(profile.name);
           onContextChange({
               ...context,
+              activeProfileId: id,
               resume: profile.resume,
               jobDescription: profile.jobDescription,
               companyDescription: profile.companyDescription,
@@ -240,22 +252,20 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           updatedProfiles.push(newProfile);
       }
 
-      handleChange('savedProfiles', updatedProfiles);
-      setSelectedProfileId(newProfile.id);
+      onContextChange({ ...context, savedProfiles: updatedProfiles, activeProfileId: newProfile.id });
   };
 
   const handleDeleteProfile = () => {
        if (!selectedProfileId) return;
        if (window.confirm(t.profiles.confirmDelete)) {
            const updated = context.savedProfiles.filter(p => p.id !== selectedProfileId);
-           handleChange('savedProfiles', updated);
-           setSelectedProfileId("");
+           onContextChange({ ...context, savedProfiles: updated, activeProfileId: "" });
            setProfileName("");
        }
   }
 
   const handleNewProfile = () => {
-      setSelectedProfileId("");
+      handleChange('activeProfileId', "");
       setProfileName("");
       // Don't clear fields automatically, user might want to clone current state
   };

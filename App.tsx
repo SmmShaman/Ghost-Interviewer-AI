@@ -45,6 +45,8 @@ const DEFAULT_CONTEXT: InterviewContext = {
   systemInstruction: translations.en.defaultPrompt,
   savedPrompts: DEFAULT_PROMPTS,
   savedProfiles: DEFAULT_PROFILES,
+  activeProfileId: "", // Remember selected profile
+  activePromptId: "", // Remember selected prompt
   stereoMode: false,
   viewMode: 'FULL',
   ghostModel: 'opus', // Default to fast model
