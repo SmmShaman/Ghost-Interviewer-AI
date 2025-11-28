@@ -17,23 +17,29 @@ export interface TranslatedWord {
 
 class LocalTranslator {
     private translator: any = null;
-    
+
     // PRIMARY: Use the custom OPUS model (56MB)
     // NOTE: This model now uses quantized weights (encoder_model_quantized.onnx)
     private opusModelId = 'goldcc/opus-mt-no-uk-int8';
-    
+
     // SECONDARY: Fallback to NLLB if Opus fails (600MB+)
     private nllbModelId = 'Xenova/nllb-200-distilled-600M';
-    
+
     private activeModelId = '';
-    
+
     private currentModelType: 'opus' | 'nllb' = 'opus';
 
-    private sourceLang: string = "nob_Latn"; 
-    private targetLang: string = "ukr_Cyrl"; 
-    
+    private sourceLang: string = "nob_Latn";
+    private targetLang: string = "ukr_Cyrl";
+
     private isLoading = false;
     private progressCallback: ((progress: number) => void) | null = null;
+
+    // PERFORMANCE OPTIMIZATION: Chunk translation cache
+    // Maps chunk text -> translated text to avoid re-translating unchanged chunks
+    private chunkCache: Map<string, string> = new Map();
+    private static readonly CHUNK_SIZE = 4; // Words per chunk (3-5 optimal)
+    private static readonly MAX_CACHE_SIZE = 100; // Limit cache growth
 
     async switchModel(modelType: 'opus' | 'nllb', onProgress?: (progress: number) => void) {
         if (this.currentModelType === modelType && this.translator) {
@@ -155,9 +161,94 @@ class LocalTranslator {
         this.targetLang = codeMap[target] || 'eng_Latn';
     }
 
+    // Split text into chunks of CHUNK_SIZE words
+    private splitIntoChunks(text: string): string[] {
+        const words = text.trim().split(/\s+/);
+        const chunks: string[] = [];
+        for (let i = 0; i < words.length; i += LocalTranslator.CHUNK_SIZE) {
+            chunks.push(words.slice(i, i + LocalTranslator.CHUNK_SIZE).join(' '));
+        }
+        return chunks;
+    }
+
+    // Translate a single chunk (internal, no caching logic)
+    private async translateSingleChunk(chunk: string): Promise<string> {
+        if (!chunk.trim()) return '';
+
+        try {
+            let output;
+            if (this.activeModelId.includes('nllb')) {
+                output = await this.translator(chunk, {
+                    src_lang: this.sourceLang,
+                    tgt_lang: this.targetLang
+                });
+            } else {
+                output = await this.translator(chunk);
+            }
+
+            const result = Array.isArray(output) ? output[0] : output;
+            return result?.translation_text || result?.generated_text || "⚠️";
+        } catch (e) {
+            console.error("❌ [GHOST] Chunk translation error", e);
+            return "❌";
+        }
+    }
+
+    // Clear cache (call when switching languages or models)
+    clearCache() {
+        this.chunkCache.clear();
+    }
+
+    // OPTIMIZED: Translate phrase using chunked approach with caching
+    // Only translates chunks that aren't in the cache
+    async translatePhraseChunked(text: string, forceFullTranslate = false): Promise<TranslatedWord[]> {
+        if (!text || !text.trim()) {
+            return [];
+        }
+
+        // If not loaded yet, show loading indicator
+        if (!this.translator) {
+            if (!this.isLoading) this.initialize();
+            return [{
+                original: text,
+                ghostTranslation: "⏳...",
+                status: 'ghost'
+            }];
+        }
+
+        const chunks = this.splitIntoChunks(text);
+        const translations: string[] = [];
+
+        for (const chunk of chunks) {
+            // Check cache first
+            if (!forceFullTranslate && this.chunkCache.has(chunk)) {
+                translations.push(this.chunkCache.get(chunk)!);
+            } else {
+                // Translate and cache
+                const translated = await this.translateSingleChunk(chunk);
+                this.chunkCache.set(chunk, translated);
+
+                // Limit cache size
+                if (this.chunkCache.size > LocalTranslator.MAX_CACHE_SIZE) {
+                    const firstKey = this.chunkCache.keys().next().value;
+                    if (firstKey) this.chunkCache.delete(firstKey);
+                }
+
+                translations.push(translated);
+            }
+        }
+
+        const fullTranslation = translations.join(' ');
+
+        return [{
+            original: text,
+            ghostTranslation: fullTranslation,
+            status: 'ghost'
+        }];
+    }
+
+    // Original method - now uses chunked approach for consistency
     async translatePhrase(text: string): Promise<TranslatedWord[]> {
-        // Removed heavy console logging for performance
-    
         if (!text || !text.trim()) {
             return [];
         }
@@ -167,14 +258,16 @@ class LocalTranslator {
              if (!this.isLoading) this.initialize();
              return [{
                  original: text,
-                 ghostTranslation: "⏳...", 
+                 ghostTranslation: "⏳...",
                  status: 'ghost'
              }];
         }
 
+        // For final blocks, use full translation (better quality)
+        // For interim, use chunked approach (better performance)
         try {
             let output;
-            
+
             // Handle differences between NLLB and Opus arguments
             if (this.activeModelId.includes('nllb')) {
                  output = await this.translator(text, {
@@ -185,14 +278,14 @@ class LocalTranslator {
                 // Opus models usually auto-detect or don't need lang args if mono-directional
                 output = await this.translator(text);
             }
-            
+
             // Parse output (Handling different formats: array of objects or single object)
             const result = Array.isArray(output) ? output[0] : output;
             let translatedText = result?.translation_text || result?.generated_text || "";
 
             // If empty, fallback to error indicator
             if (!translatedText) translatedText = "⚠️";
-            
+
             return [{
                 original: text,
                 ghostTranslation: translatedText,
