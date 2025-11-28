@@ -262,18 +262,19 @@ const App: React.FC = () => {
     // 2. Lock
     isAIProcessingRef.current = true;
     const currentContext = contextRef.current;
-    
+
     // NOTE: We allow SIMPLE mode here to process Input Translations
-    
+
     try {
         // 3. Dequeue
         // We now get the FULL object directly, avoiding React State lookup race conditions
-        const queueItem = aiQueueRef.current.shift(); 
+        const queueItem = aiQueueRef.current.shift();
         if (!queueItem) return;
-        
-        const { id: messageIdToProcess, text: messageText, responseId } = queueItem;
 
-        // console.log(`🤖 [AI PROCESSOR] Starting block: ${messageIdToProcess}`);
+        const { id: messageIdToProcess, text: messageText, responseId } = queueItem;
+        const wordCount = messageText.split(/\s+/).length;
+
+        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, provider: ${currentContext.llmProvider}`);
 
         // 5. Generate
         const startTime = performance.now();
@@ -313,6 +314,9 @@ const App: React.FC = () => {
             }
         );
 
+        const endTime = performance.now();
+        console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total`);
+
     } catch (e) {
         console.error("Queue Processing Error", e);
     } finally {
@@ -330,9 +334,13 @@ const App: React.FC = () => {
   const finalizeBlock = (text: string) => {
     if (!text.trim()) return;
 
+    const finalizeStart = performance.now();
+    const wordCount = text.split(/\s+/).length;
+    console.log(`📦 [${Math.round(finalizeStart)}ms] FINALIZE START: ${wordCount} words`);
+
     // Buffer Update Logic (Kept for reference, but ignored by AI service now)
     const currentBuffer = [...historyBufferRef.current, text];
-    if (currentBuffer.length > 3) currentBuffer.shift(); 
+    if (currentBuffer.length > 3) currentBuffer.shift();
     historyBufferRef.current = currentBuffer;
 
     const questionId = Date.now().toString();
@@ -380,13 +388,18 @@ const App: React.FC = () => {
 
     // STREAM 1: GHOST TRANSLATION (Immediate, Local Model)
     // Runs independently of AI Queue
+    const ghostStart = performance.now();
+    console.log(`👻 [${Math.round(ghostStart)}ms] GHOST FINALIZE START: ${wordCount} words`);
+
     const ghostPromise = new Promise<void>((resolve) => {
         if (currentContext.targetLanguage !== currentContext.nativeLanguage) {
             localTranslator.translatePhrase(text)
                 .then(words => {
                     const ghostText = words.map(w => w.ghostTranslation).join(' ');
+                    const ghostEnd = performance.now();
+                    console.log(`👻 [${Math.round(ghostEnd)}ms] GHOST FINALIZE END: ${Math.round(ghostEnd - ghostStart)}ms`);
                     // Update ghostTranslation field regardless of AI state
-                    setMessages(prev => prev.map(msg => 
+                    setMessages(prev => prev.map(msg =>
                         msg.id === questionId ? { ...msg, ghostTranslation: ghostText } : msg
                     ));
                     resolve();
@@ -396,7 +409,7 @@ const App: React.FC = () => {
                     resolve();
                 });
         } else {
-             setMessages(prev => prev.map(msg => 
+             setMessages(prev => prev.map(msg =>
                 msg.id === questionId ? { ...msg, ghostTranslation: text, translatedText: text } : msg
             ));
             resolve();
@@ -406,6 +419,7 @@ const App: React.FC = () => {
     // STREAM 2: AI ANALYSIS QUEUE
     // Run AI analysis even in SIMPLE mode to get [INPUT_TRANSLATION]
     // PUSH FULL OBJECT to avoid state lookup race condition
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM QUEUE: Adding block to queue (queue size: ${aiQueueRef.current.length + 1})`);
     aiQueueRef.current.push({
         id: questionId,
         text: text,
@@ -514,6 +528,7 @@ const App: React.FC = () => {
       recognition.lang = langMap[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
+        const eventTime = performance.now();
         let currentInterim = '';
         let currentFinalChunk = '';
 
@@ -526,22 +541,24 @@ const App: React.FC = () => {
         }
 
         // --- BLOCK SPLITTING LOGIC ---
-        
+
         // 1. Accumulate Final Chunks
         if (currentFinalChunk.trim().length > 0) {
             accumulatedTranscriptRef.current += (accumulatedTranscriptRef.current ? ' ' : '') + currentFinalChunk.trim();
-            
+            const wordCount = accumulatedTranscriptRef.current.split(/\s+/).length;
+            console.log(`🎤 [${Math.round(eventTime)}ms] FINAL: "${currentFinalChunk.trim()}" | Total words: ${wordCount}`);
+
             // CHECK SPLIT CONDITIONS on the entire accumulated block
             const fullText = accumulatedTranscriptRef.current.trim();
-            
+
             if (shouldSplitBlock(fullText)) {
-                 // console.log("⚡ Split Trigger: Condition Met (Length/Punctuation)");
+                 console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Condition Met (${wordCount} words)`);
                  commitBufferedSpeech();
             } else {
                 // If not splitting yet, reset the Silence Timer
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 silenceTimerRef.current = setTimeout(() => {
-                    // console.log("⚡ Split Trigger: Silence");
+                    console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence timeout (2s)`);
                     commitBufferedSpeech();
                 }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
             }
@@ -552,7 +569,7 @@ const App: React.FC = () => {
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             // Restart the timer to wait for 2s silence after this interim finishes
              silenceTimerRef.current = setTimeout(() => {
-                 // console.log("⚡ Split Trigger: Silence (after interim)");
+                 console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence after interim`);
                 commitBufferedSpeech();
             }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
         }
@@ -562,22 +579,29 @@ const App: React.FC = () => {
         setInterimTranscript(fullDisplay);
 
         // STREAM 1: GHOST TRANSLATION (LOCAL MODEL) - Interim Drafts
-        if (fullDisplay.length >= 1) { 
+        if (fullDisplay.length >= 1) {
              if (translationTimeoutRef.current) clearTimeout(translationTimeoutRef.current);
-             
+
              const currentRequestId = ++translationRequestId.current;
+             const displayWordCount = fullDisplay.split(/\s+/).length;
 
              // OPTIMIZED DEBOUNCE: Increased from 50ms to 250ms to prevent main thread blocking
              translationTimeoutRef.current = setTimeout(async () => {
                  if (contextRef.current.targetLanguage === contextRef.current.nativeLanguage) return;
 
+                 const translateStart = performance.now();
+                 console.log(`👻 [${Math.round(translateStart)}ms] GHOST START: ${displayWordCount} words`);
+
                  const words = await localTranslator.translatePhrase(fullDisplay);
                  const ghostText = words.map(w => w.ghostTranslation).join(' ');
-                 
+
+                 const translateEnd = performance.now();
+                 console.log(`👻 [${Math.round(translateEnd)}ms] GHOST END: ${Math.round(translateEnd - translateStart)}ms for ${displayWordCount} words`);
+
                  if (currentRequestId === translationRequestId.current) {
                      setLiveTranslation(ghostText);
                  }
-             }, 250); 
+             }, 250);
         } else {
              if (fullDisplay.length === 0) {
                  setLiveTranslation("");
