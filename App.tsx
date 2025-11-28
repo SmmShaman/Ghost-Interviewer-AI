@@ -14,7 +14,7 @@ import { translations } from './translations';
 // --- CONFIGURATION CONSTANTS ---
 const BLOCK_CONFIG = {
     SILENCE_TIMEOUT_MS: 2000,       // Split if silence > 2s
-    MAX_WORDS_PER_BLOCK: 25,        // Split if words > 25 (force break)
+    MAX_WORDS_PER_BLOCK: 15,        // Split if words > 15 (reduced from 25 for performance)
     MIN_WORDS_FOR_SENTENCE: 8,      // Only split on "." if words > 8
     SENTENCE_END_REGEX: /[.!?।。]+$/ // Punctuation detection
 };
@@ -198,10 +198,12 @@ const App: React.FC = () => {
       if (context.ghostModel !== localTranslator.getCurrentModelType() || !localTranslator.getStatus().isReady) {
           setIsModelReady(false);
           setModelProgress(0);
+          // Clear translation cache when switching models
+          localTranslator.clearCache();
           localTranslator.switchModel(context.ghostModel, (progress) => {
               const safeProgress = Number.isFinite(progress) ? progress : 0;
               setModelProgress(Math.round(safeProgress));
-              
+
               if (safeProgress >= 100) {
                   setIsModelReady(true);
               }
@@ -212,10 +214,12 @@ const App: React.FC = () => {
       }
   }, [context.ghostModel]);
 
-  // Sync languages with translator
+  // Sync languages with translator and clear cache on language change
   useEffect(() => {
     // Interviewer speaks targetLang -> Translate to nativeLang
     localTranslator.setLanguages(context.targetLanguage, context.nativeLanguage);
+    // Clear translation cache when languages change
+    localTranslator.clearCache();
   }, [context.targetLanguage, context.nativeLanguage]);
 
   // INDEX KNOWLEDGE BASE FOR TF-IDF SEARCH
@@ -567,6 +571,17 @@ const App: React.FC = () => {
         // 2. Handle Interim (User still talking)
         if (currentInterim.trim().length > 0) {
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+            // SAFETY CHECK: Force commit if total (accumulated + interim) is too long
+            // This prevents the buffer from growing unbounded during continuous speech
+            const totalText = (accumulatedTranscriptRef.current + ' ' + currentInterim).trim();
+            const totalWords = totalText.split(/\s+/).length;
+            if (totalWords >= BLOCK_CONFIG.MAX_WORDS_PER_BLOCK * 2) {
+                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Interim overflow (${totalWords} words)`);
+                commitBufferedSpeech();
+                return;
+            }
+
             // Restart the timer to wait for 2s silence after this interim finishes
              silenceTimerRef.current = setTimeout(() => {
                  console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence after interim`);
@@ -585,23 +600,25 @@ const App: React.FC = () => {
              const currentRequestId = ++translationRequestId.current;
              const displayWordCount = fullDisplay.split(/\s+/).length;
 
-             // OPTIMIZED DEBOUNCE: Increased from 50ms to 250ms to prevent main thread blocking
+             // OPTIMIZED: Use chunked translation with caching for interim results
+             // Debounce reduced back to 100ms since chunked approach is much faster
              translationTimeoutRef.current = setTimeout(async () => {
                  if (contextRef.current.targetLanguage === contextRef.current.nativeLanguage) return;
 
                  const translateStart = performance.now();
-                 console.log(`👻 [${Math.round(translateStart)}ms] GHOST START: ${displayWordCount} words`);
+                 console.log(`👻 [${Math.round(translateStart)}ms] GHOST CHUNKED START: ${displayWordCount} words`);
 
-                 const words = await localTranslator.translatePhrase(fullDisplay);
+                 // Use chunked translation for interim (fast, cached)
+                 const words = await localTranslator.translatePhraseChunked(fullDisplay);
                  const ghostText = words.map(w => w.ghostTranslation).join(' ');
 
                  const translateEnd = performance.now();
-                 console.log(`👻 [${Math.round(translateEnd)}ms] GHOST END: ${Math.round(translateEnd - translateStart)}ms for ${displayWordCount} words`);
+                 console.log(`👻 [${Math.round(translateEnd)}ms] GHOST CHUNKED END: ${Math.round(translateEnd - translateStart)}ms for ${displayWordCount} words`);
 
                  if (currentRequestId === translationRequestId.current) {
                      setLiveTranslation(ghostText);
                  }
-             }, 250);
+             }, 100);
         } else {
              if (fullDisplay.length === 0) {
                  setLiveTranslation("");
