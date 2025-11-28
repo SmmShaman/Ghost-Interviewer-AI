@@ -427,12 +427,14 @@ const App: React.FC = () => {
 
     // STREAM 1: GHOST TRANSLATION (Immediate, Local Model)
     // Runs independently of AI Queue
+    // OPTIMIZED: Use chunked translation for O(n) instead of O(n²)
     const ghostStart = performance.now();
     console.log(`👻 [${Math.round(ghostStart)}ms] GHOST FINALIZE START: ${wordCount} words`);
 
     const ghostPromise = new Promise<void>((resolve) => {
         if (currentContext.targetLanguage !== currentContext.nativeLanguage) {
-            localTranslator.translatePhrase(text)
+            // Use chunked translation - much faster for longer texts
+            localTranslator.translatePhraseChunked(text)
                 .then(words => {
                     const ghostText = words.map(w => w.ghostTranslation).join(' ');
                     const ghostEnd = performance.now();
@@ -543,10 +545,11 @@ const App: React.FC = () => {
           finalizeBlock(textToCommit);
       }
 
-      // Unlock after a short delay to allow speech recognition to catch up
+      // Unlock after delay - needs to be long enough for speech recognition buffer to clear
+      // Speech events can pile up for 500-1000ms after commit
       setTimeout(() => {
           isCommittingRef.current = false;
-      }, 100);
+      }, 500);
   }, []);
 
   // Condition Checker
