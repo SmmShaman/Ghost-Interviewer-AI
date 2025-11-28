@@ -160,6 +160,7 @@ const App: React.FC = () => {
   // --- SPEECH BUFFERING REFS ---
   const accumulatedTranscriptRef = useRef<string>(""); // Stores "final" events that haven't been committed
   const lastInterimRef = useRef<string>(""); // Stores last interim for overflow commits
+  const lastCommittedTextRef = useRef<string>(""); // Track what we already committed to avoid duplicates
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCommittingRef = useRef<boolean>(false); // Prevent multiple rapid commits
   
@@ -516,8 +517,35 @@ const App: React.FC = () => {
 
       if (!textToCommit) return;
 
+      // DUPLICATE DETECTION: Check if this text is just a prefix of what we already committed
+      // This happens because Web Speech API keeps sending accumulated interim even after we commit
+      const lastCommitted = lastCommittedTextRef.current;
+      if (lastCommitted && textToCommit.startsWith(lastCommitted.substring(0, 20))) {
+          // Extract only the NEW part that wasn't committed before
+          const wordsCommitted = lastCommitted.split(/\s+/);
+          const wordsCurrent = textToCommit.split(/\s+/);
+
+          // If current has same or fewer words as last committed, skip entirely
+          if (wordsCurrent.length <= wordsCommitted.length + 2) {
+              console.log(`⏭️ Skipping duplicate commit (${wordsCurrent.length} <= ${wordsCommitted.length + 2} words)`);
+              return;
+          }
+
+          // Extract only NEW words (after the last committed portion)
+          const newWords = wordsCurrent.slice(wordsCommitted.length);
+          if (newWords.length < 3) {
+              console.log(`⏭️ Skipping - only ${newWords.length} new words`);
+              return;
+          }
+          textToCommit = newWords.join(' ');
+          console.log(`📝 Extracted ${newWords.length} new words from overflow`);
+      }
+
       // Lock to prevent rapid re-commits
       isCommittingRef.current = true;
+
+      // Store what we're committing for duplicate detection
+      lastCommittedTextRef.current = textToCommit;
 
       console.log(`📦 Committing Block: "${textToCommit.substring(0, 30)}..." (${textToCommit.split(/\s+/).length} words)`);
 
