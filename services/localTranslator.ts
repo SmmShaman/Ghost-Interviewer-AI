@@ -2,9 +2,11 @@
 
 import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
 
-// CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN
+// CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
+env.useBrowserCache = true;  // Cache models in browser (IndexedDB/Cache API)
+env.useCustomCache = false;  // Use default browser caching mechanism
 
 export interface TranslatedWord {
     original: string;
@@ -115,6 +117,13 @@ class LocalTranslator {
     }
 
     private handleProgress(data: any) {
+        // Log cache status
+        if (data.status === 'download') {
+            console.log(`📥 Downloading: ${data.file} (not cached)`);
+        } else if (data.status === 'cached') {
+            console.log(`✅ Loaded from cache: ${data.file}`);
+        }
+
         if (data.status === 'progress' && this.progressCallback) {
             const prog = data.progress || 0;
             this.progressCallback(Math.round(prog));
