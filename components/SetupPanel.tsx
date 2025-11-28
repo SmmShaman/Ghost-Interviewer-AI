@@ -413,24 +413,57 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       setJobProfileName("");
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  // Constants for file upload
+  const MAX_KB_SIZE = 5 * 1024 * 1024; // 5MB limit (localStorage safe)
+  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB per file
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-          const text = event.target?.result as string;
-          handleChange('knowledgeBase', text);
-      };
-      reader.readAsText(file);
-      // Reset input
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      let totalNewSize = 0;
+      const fileContents: string[] = [];
+      let filesProcessed = 0;
+
+      Array.from(files).forEach((file) => {
+          // Check single file size
+          if (file.size > MAX_FILE_SIZE) {
+              alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 2MB per file.`);
+              return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              const text = event.target?.result as string;
+              fileContents.push(`\n\n--- FILE: ${file.name} ---\n${text}`);
+              totalNewSize += text.length;
+              filesProcessed++;
+
+              // When all files are read
+              if (filesProcessed === files.length) {
+                  const newContent = context.knowledgeBase + fileContents.join('');
+
+                  // Check total size
+                  if (newContent.length > MAX_KB_SIZE) {
+                      alert(`Total Knowledge Base would exceed 5MB limit!\nCurrent: ${(context.knowledgeBase.length / 1024 / 1024).toFixed(2)}MB\nAdding: ${(totalNewSize / 1024 / 1024).toFixed(2)}MB`);
+                      return;
+                  }
+
+                  handleChange('knowledgeBase', newContent);
+              }
+          };
+          reader.readAsText(file);
+      });
+
+      // Reset input to allow re-uploading same files
       e.target.value = '';
   };
 
   const getLatencyStatus = (length: number) => {
+      if (length > MAX_KB_SIZE) return { color: 'text-red-400', bg: 'bg-red-500', label: 'LIMIT!' };
       if (length < 20000) return { color: 'text-emerald-400', bg: 'bg-emerald-500', label: t.latency.low };
       if (length < 100000) return { color: 'text-yellow-400', bg: 'bg-yellow-500', label: t.latency.med };
-      return { color: 'text-red-400', bg: 'bg-red-500', label: t.latency.high };
+      return { color: 'text-orange-400', bg: 'bg-orange-500', label: t.latency.high };
   };
 
   const kbLength = context.knowledgeBase.length;
@@ -693,11 +726,18 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             <div className="space-y-2">
               <div className="flex justify-between items-end">
                  <label className="text-xs font-medium text-emerald-400/80 uppercase">{t.knowledgeBase}</label>
-                 <div className={`text-[10px] font-mono px-2 py-0.5 rounded border border-gray-700 flex items-center gap-2 ${status.color}`}>
-                    <span>{kbLength.toLocaleString()} chars</span>
+                 <div className={`text-[10px] font-mono px-2 py-0.5 rounded border ${kbLength > MAX_KB_SIZE ? 'border-red-500 bg-red-900/20' : 'border-gray-700'} flex items-center gap-2 ${status.color}`}>
+                    <span>{(kbLength / 1024).toFixed(1)} KB / 5MB</span>
                     <span className={`w-2 h-2 rounded-full ${status.bg}`}></span>
                     <span>{status.label}</span>
                  </div>
+              </div>
+              {/* Size Progress Bar */}
+              <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all ${kbLength > MAX_KB_SIZE ? 'bg-red-500' : kbLength > MAX_KB_SIZE * 0.8 ? 'bg-orange-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.min(100, (kbLength / MAX_KB_SIZE) * 100)}%` }}
+                />
               </div>
               {/* TF-IDF Search Stats */}
               {searchStats.isReady && (
@@ -708,7 +748,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
               )}
 
               <textarea
-                className="w-full h-28 bg-gray-900 border border-emerald-900/30 rounded-lg p-3 text-sm text-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none font-mono text-xs"
+                className={`w-full h-28 bg-gray-900 border rounded-lg p-3 text-sm text-gray-200 focus:ring-1 outline-none resize-none font-mono text-xs ${kbLength > MAX_KB_SIZE ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-emerald-900/30 focus:border-emerald-500 focus:ring-emerald-500'}`}
                 value={context.knowledgeBase}
                 onChange={(e) => handleChange('knowledgeBase', e.target.value)}
                 placeholder={t.knowledgeBasePlaceholder}
@@ -720,7 +760,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                     ref={fileInputRef}
                     onChange={handleFileUpload}
                     className="hidden"
-                    accept=".txt,.md,.json"
+                    accept=".txt,.md,.json,.csv,.xml,.html"
+                    multiple
                  />
                  <button
                     onClick={() => handleChange('knowledgeBase', '')}
