@@ -222,6 +222,38 @@ const App: React.FC = () => {
     localTranslator.clearCache();
   }, [context.targetLanguage, context.nativeLanguage]);
 
+  // RETRY GHOST TRANSLATIONS when model becomes ready
+  // Re-translates any messages that got "⏳..." while model was loading
+  useEffect(() => {
+    if (!isModelReady || messages.length === 0) return;
+
+    const retryPendingTranslations = async () => {
+      const messagesToRetry = messages.filter(
+        msg => msg.role === 'interviewer' && msg.ghostTranslation === '⏳...'
+      );
+
+      if (messagesToRetry.length === 0) return;
+
+      console.log(`🔄 Retrying ${messagesToRetry.length} pending Ghost translations...`);
+
+      for (const msg of messagesToRetry) {
+        try {
+          const words = await localTranslator.translatePhrase(msg.text);
+          const ghostText = words.map(w => w.ghostTranslation).join(' ');
+
+          setMessages(prev => prev.map(m =>
+            m.id === msg.id ? { ...m, ghostTranslation: ghostText } : m
+          ));
+          console.log(`✅ Retried translation for: "${msg.text.substring(0, 30)}..."`);
+        } catch (e) {
+          console.error(`❌ Failed to retry translation for message ${msg.id}`, e);
+        }
+      }
+    };
+
+    retryPendingTranslations();
+  }, [isModelReady, messages.length]);
+
   // INDEX KNOWLEDGE BASE FOR TF-IDF SEARCH
   useEffect(() => {
     if (context.knowledgeBase && context.knowledgeBase.trim().length > 0) {
@@ -1052,7 +1084,17 @@ const App: React.FC = () => {
 
       <div className={`p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent ${stealthMode ? 'opacity-10 hover:opacity-100 transition-opacity' : ''}`}>
         <div className="max-w-4xl mx-auto flex gap-6 items-end">
-            <button onClick={toggleListening} className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl transition-all transform hover:scale-105 hover:-translate-y-1 ${shouldBeListening.current ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/30' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/30'}`}>
+            <button
+                onClick={toggleListening}
+                disabled={!isModelReady}
+                title={!isModelReady ? "Waiting for translation model to load..." : undefined}
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl transition-all transform ${
+                    !isModelReady
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
+                        : shouldBeListening.current
+                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/30 hover:scale-105 hover:-translate-y-1'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/30 hover:scale-105 hover:-translate-y-1'
+                }`}>
                 {shouldBeListening.current ? <StopIcon className="w-8 h-8" /> : <MicIcon className="w-8 h-8" />}
             </button>
             <form onSubmit={handleManualSubmit} className="flex-1 flex gap-3 relative">
