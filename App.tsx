@@ -5,7 +5,7 @@ import SetupPanel from './components/SetupPanel';
 import BrickRow from './components/BrickRow';
 import CandidateRow from './components/CandidateRow';
 import { MicIcon, StopIcon, SettingsIcon, SendIcon, EyeIcon, EyeOffIcon, DownloadIcon, TrashIcon } from './components/Icons';
-import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile } from './types';
+import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile } from './types';
 import { generateInterviewAssist, translateText } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
 import { translations } from './translations';
@@ -22,6 +22,28 @@ const DEFAULT_PROMPTS: PromptPreset[] = [
     { id: 'default', name: 'Standard Bridge', content: translations.en.defaultPrompt }
 ];
 
+// NEW: Candidate Profiles (Static - Resume + Knowledge Base)
+const DEFAULT_CANDIDATE_PROFILES: CandidateProfile[] = [
+    {
+        id: 'example_candidate',
+        name: 'Example Profile',
+        resume: "Experienced React Developer. 3 years experience with JavaScript, TypeScript, Tailwind CSS. Created 'Elvarika' - a language learning app using AI. Familiar with Node.js.",
+        knowledgeBase: "Project Elvarika uses React 18, Zustand for state management, and OpenAI API. Database is Supabase."
+    }
+];
+
+// NEW: Job Profiles (Dynamic - Company + Job + Application)
+const DEFAULT_JOB_PROFILES: JobProfile[] = [
+    {
+        id: 'example_job',
+        name: 'Example: Java Dev Position',
+        companyDescription: "Innovative tech company focusing on Scandinavian markets. Values honesty, clean code, and fast iteration.",
+        jobDescription: "We are looking for a Java Developer with Spring Boot experience. Knowledge of microservices and SQL databases (PostgreSQL) is required. Must speak Norwegian.",
+        applicationLetter: "" // Søknad - user fills this
+    }
+];
+
+// LEGACY: Keep for backward compatibility
 const DEFAULT_PROFILES: InterviewProfile[] = [
     {
         id: 'example_java',
@@ -34,24 +56,40 @@ const DEFAULT_PROFILES: InterviewProfile[] = [
 ];
 
 const DEFAULT_CONTEXT: InterviewContext = {
-  resume: DEFAULT_PROFILES[0].resume,
-  jobDescription: DEFAULT_PROFILES[0].jobDescription,
-  companyDescription: DEFAULT_PROFILES[0].companyDescription,
-  knowledgeBase: DEFAULT_PROFILES[0].knowledgeBase,
+  // === ACTIVE DATA ===
+  resume: DEFAULT_CANDIDATE_PROFILES[0].resume,
+  knowledgeBase: DEFAULT_CANDIDATE_PROFILES[0].knowledgeBase,
+  companyDescription: DEFAULT_JOB_PROFILES[0].companyDescription,
+  jobDescription: DEFAULT_JOB_PROFILES[0].jobDescription,
+  applicationLetter: DEFAULT_JOB_PROFILES[0].applicationLetter,
+
+  // === LANGUAGE ===
   targetLanguage: "Norwegian",
   nativeLanguage: "Ukrainian",
   proficiencyLevel: "B1",
   tone: "Professional",
+
+  // === AI CONFIG ===
   systemInstruction: translations.en.defaultPrompt,
   savedPrompts: DEFAULT_PROMPTS,
+  activePromptId: "",
+
+  // === NEW PROFILE SYSTEM ===
+  savedCandidateProfiles: DEFAULT_CANDIDATE_PROFILES,
+  savedJobProfiles: DEFAULT_JOB_PROFILES,
+  activeCandidateProfileId: "",
+  activeJobProfileId: "",
+
+  // === LEGACY (for migration) ===
   savedProfiles: DEFAULT_PROFILES,
-  activeProfileId: "", // Remember selected profile
-  activePromptId: "", // Remember selected prompt
+  activeProfileId: "",
+
+  // === UI & HARDWARE ===
   stereoMode: false,
   viewMode: 'FULL',
-  ghostModel: 'opus', // Default to fast model
-  llmProvider: 'azure', // Default Cloud Provider
-  groqApiKey: "" // SECURITY: Key removed for GitHub push. User must enter in UI.
+  ghostModel: 'opus',
+  llmProvider: 'azure',
+  groqApiKey: ""
 };
 
 const STORAGE_KEY = 'ghost_interviewer_context_v2';
