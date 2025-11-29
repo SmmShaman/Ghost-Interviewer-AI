@@ -157,13 +157,11 @@ const App: React.FC = () => {
   const audioHistoryRef = useRef<{left: number, right: number}[]>([]); // Stores recent volume levels
   const streamRef = useRef<MediaStream | null>(null);
 
-  // --- SPEECH BUFFERING REFS (Buffer Swapping Pattern) ---
-  // Active buffer: Where new speech events accumulate (always available)
-  const activeBufferRef = useRef<string>("");
-  // Committing buffer: Snapshot of text being processed (isolated from new speech)
-  const committingBufferRef = useRef<string>("");
-  // Last interim: For overflow situations where interim needs to be included
-  const lastInterimRef = useRef<string>("");
+  // --- SPEECH BUFFERING REFS (Delta Tracking Pattern) ---
+  // Web Speech API gives FULL accumulated text each time, not deltas
+  // We track how many words we've already committed to extract only NEW words
+  const committedWordCountRef = useRef<number>(0); // Words already committed
+  const lastFullTextRef = useRef<string>(""); // Last full text from API for delta calculation
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCommittingRef = useRef<boolean>(false); // Mutex for commit operation
   
@@ -500,60 +498,46 @@ const App: React.FC = () => {
       }
   };
 
-  // Helper to force commit speech when timer hits OR max words hit
-  // BUFFER SWAPPING: Atomically swap buffers so new speech continues uninterrupted
-  const commitBufferedSpeech = useCallback((includeInterim = false) => {
-      // Prevent concurrent commits (but still allow speech to accumulate in activeBuffer)
+  // Helper to commit NEW words only (delta from last commit)
+  // DELTA TRACKING: Web Speech API gives full text, we extract only new words
+  const commitNewWords = useCallback((newWordsText: string, totalWordsSoFar: number) => {
+      if (!newWordsText.trim()) return;
       if (isCommittingRef.current) return;
-
-      // === STEP 1: ATOMIC BUFFER SWAP ===
-      // Move active buffer content to committing buffer, clear active for new speech
-      let textToCommit = activeBufferRef.current.trim();
-
-      // For overflow situations, include interim text that hasn't been finalized yet
-      if (includeInterim && lastInterimRef.current.trim()) {
-          const interimText = lastInterimRef.current.trim();
-          textToCommit = textToCommit ? (textToCommit + ' ' + interimText) : interimText;
-      }
-
-      if (!textToCommit) return;
-
-      // Swap buffers atomically
-      committingBufferRef.current = textToCommit;
-      activeBufferRef.current = ""; // New speech goes here immediately
-      lastInterimRef.current = "";
 
       isCommittingRef.current = true;
 
-      console.log(`📦 Committing Block: "${textToCommit.substring(0, 30)}..." (${textToCommit.split(/\s+/).length} words)`);
+      // Update committed word count to current position
+      committedWordCountRef.current = totalWordsSoFar;
 
-      // === STEP 2: RESET UI STATE ===
+      const wordCount = newWordsText.split(/\s+/).length;
+      console.log(`📦 Committing Block: "${newWordsText.substring(0, 40)}..." (${wordCount} new words, total: ${totalWordsSoFar})`);
+
+      // Reset UI state
       setTranscript("");
       setInterimTranscript("");
       setLiveTranslation("");
       if (translationTimeoutRef.current) clearTimeout(translationTimeoutRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-      // === STEP 3: PROCESS COMMITTING BUFFER ===
+      // Determine speaker
       let speaker = 'interviewer';
-
       if (isUserSpeakingRef.current) {
           speaker = 'candidate';
       } else if (contextRef.current.stereoMode) {
           speaker = determineSpeaker();
       }
 
+      // Process the new words
       if (speaker === 'candidate') {
-          handleCandidateMessage(textToCommit);
+          handleCandidateMessage(newWordsText);
       } else {
-          finalizeBlock(textToCommit);
+          finalizeBlock(newWordsText);
       }
 
-      // === STEP 4: UNLOCK (short delay, speech continues in activeBuffer) ===
+      // Short unlock delay
       setTimeout(() => {
           isCommittingRef.current = false;
-          committingBufferRef.current = "";
-      }, 300); // Short delay - no text loss since activeBuffer continues receiving
+      }, 100);
   }, []);
 
   // Condition Checker
@@ -598,101 +582,87 @@ const App: React.FC = () => {
       recognition.lang = langMap[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
-        // NO EARLY RETURN - always accumulate speech in activeBuffer (Buffer Swapping pattern)
+        // DELTA TRACKING: Web Speech API gives FULL accumulated text
+        // We extract only NEW words by tracking committedWordCountRef
         const eventTime = performance.now();
-        let currentInterim = '';
-        let currentFinalChunk = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        // Build FULL text from all results (final + interim)
+        let fullFinalText = '';
+        let currentInterim = '';
+
+        for (let i = 0; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
-            currentFinalChunk += event.results[i][0].transcript;
+            fullFinalText += event.results[i][0].transcript + ' ';
           } else {
             currentInterim += event.results[i][0].transcript;
           }
         }
 
-        // --- BLOCK SPLITTING LOGIC (Buffer Swapping) ---
+        // Combine final + interim for complete current state
+        const fullText = (fullFinalText + currentInterim).trim();
+        const allWords = fullText.split(/\s+/).filter(w => w.length > 0);
+        const totalWordCount = allWords.length;
 
-        // 1. Accumulate Final Chunks in activeBuffer (always available)
-        if (currentFinalChunk.trim().length > 0) {
-            activeBufferRef.current += (activeBufferRef.current ? ' ' : '') + currentFinalChunk.trim();
-            const wordCount = activeBufferRef.current.split(/\s+/).length;
-            console.log(`🎤 [${Math.round(eventTime)}ms] FINAL: "${currentFinalChunk.trim()}" | Active buffer: ${wordCount} words`);
+        // Extract only NEW words (after what we've already committed)
+        const newWords = allWords.slice(committedWordCountRef.current);
+        const newWordCount = newWords.length;
+        const newText = newWords.join(' ');
 
-            // CHECK SPLIT CONDITIONS on the active buffer
-            const fullText = activeBufferRef.current.trim();
+        // Skip if no new words
+        if (newWordCount === 0) return;
 
-            if (shouldSplitBlock(fullText)) {
-                 console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Condition Met (${wordCount} words)`);
-                 commitBufferedSpeech();
-            } else {
-                // If not splitting yet, reset the Silence Timer
-                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-                silenceTimerRef.current = setTimeout(() => {
-                    console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence timeout`);
-                    commitBufferedSpeech();
-                }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
-            }
-        }
+        // Store for reference
+        lastFullTextRef.current = fullText;
 
-        // 2. Handle Interim (User still talking)
-        if (currentInterim.trim().length > 0) {
+        // --- BLOCK SPLITTING LOGIC (Delta Tracking) ---
+        const hasFinalContent = fullFinalText.trim().length > 0;
+
+        // Check if we should commit
+        if (hasFinalContent && shouldSplitBlock(newText)) {
+            console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT: Condition Met (${newWordCount} new words)`);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-
-            // Store interim for potential overflow commit
-            lastInterimRef.current = currentInterim.trim();
-
-            // SAFETY CHECK: Force commit if total (activeBuffer + interim) exceeds limit
-            const totalText = (activeBufferRef.current + ' ' + currentInterim).trim();
-            const totalWords = totalText.split(/\s+/).length;
-            if (totalWords >= BLOCK_CONFIG.MAX_WORDS_OVERFLOW) {
-                console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Overflow at ${totalWords} words`);
-                // Pass true to include interim text in the commit
-                commitBufferedSpeech(true);
-                return;
-            }
-
-            // Restart the timer to wait for silence
-             silenceTimerRef.current = setTimeout(() => {
-                 console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT TRIGGER: Silence after interim`);
-                commitBufferedSpeech();
+            commitNewWords(newText, totalWordCount);
+        } else if (newWordCount >= BLOCK_CONFIG.MAX_WORDS_OVERFLOW) {
+            // Overflow: too many new words accumulated
+            console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT: Overflow (${newWordCount} new words)`);
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            commitNewWords(newText, totalWordCount);
+        } else {
+            // Reset silence timer
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+                // On silence, commit whatever new words we have
+                const currentNewWords = lastFullTextRef.current.split(/\s+/).slice(committedWordCountRef.current);
+                if (currentNewWords.length > 0) {
+                    console.log(`⚡ [${Math.round(performance.now())}ms] SPLIT: Silence (${currentNewWords.length} new words)`);
+                    commitNewWords(currentNewWords.join(' '), lastFullTextRef.current.split(/\s+/).length);
+                }
             }, BLOCK_CONFIG.SILENCE_TIMEOUT_MS);
         }
 
-        // 3. Update Visuals (Active buffer + Current Interim)
-        const fullDisplay = (activeBufferRef.current + ' ' + currentInterim).trim();
-        setInterimTranscript(fullDisplay);
+        // Update visuals with NEW words only
+        setInterimTranscript(newText);
 
         // STREAM 1: GHOST TRANSLATION (LOCAL MODEL) - Interim Drafts
-        if (fullDisplay.length >= 1) {
+        if (newText.length >= 1) {
              if (translationTimeoutRef.current) clearTimeout(translationTimeoutRef.current);
 
              const currentRequestId = ++translationRequestId.current;
-             const displayWordCount = fullDisplay.split(/\s+/).length;
 
              // OPTIMIZED: Use chunked translation with caching for interim results
-             // Debounce reduced back to 100ms since chunked approach is much faster
              translationTimeoutRef.current = setTimeout(async () => {
                  if (contextRef.current.targetLanguage === contextRef.current.nativeLanguage) return;
 
-                 const translateStart = performance.now();
-                 console.log(`👻 [${Math.round(translateStart)}ms] GHOST CHUNKED START: ${displayWordCount} words`);
-
                  // Use chunked translation for interim (fast, cached)
-                 const words = await localTranslator.translatePhraseChunked(fullDisplay);
+                 const words = await localTranslator.translatePhraseChunked(newText);
                  const ghostText = words.map(w => w.ghostTranslation).join(' ');
-
-                 const translateEnd = performance.now();
-                 console.log(`👻 [${Math.round(translateEnd)}ms] GHOST CHUNKED END: ${Math.round(translateEnd - translateStart)}ms for ${displayWordCount} words`);
 
                  if (currentRequestId === translationRequestId.current) {
                      setLiveTranslation(ghostText);
                  }
              }, 100);
         } else {
-             if (fullDisplay.length === 0) {
-                 setLiveTranslation("");
-             }
+             setLiveTranslation("");
         }
       };
 
@@ -716,7 +686,7 @@ const App: React.FC = () => {
 
       recognitionRef.current = recognition;
     }
-  }, [commitBufferedSpeech]); 
+  }, [commitNewWords]); 
 
   // Setup Audio Analysis for Stereo Split AND Visualizer
   const setupAudioAnalysis = async () => {
@@ -866,9 +836,9 @@ const App: React.FC = () => {
       setAppState(AppState.IDLE);
       setInterimTranscript("");
       setLiveTranslation("");
-      activeBufferRef.current = "";
-      committingBufferRef.current = "";
-      lastInterimRef.current = "";
+      // Reset delta tracking refs
+      committedWordCountRef.current = 0;
+      lastFullTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       
       if (audioContextRef.current) {

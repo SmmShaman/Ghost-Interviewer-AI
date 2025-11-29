@@ -15,31 +15,136 @@ export interface TranslatedWord {
     status: 'ghost' | 'final';
 }
 
+// Chrome Translator API types (Chrome 138+)
+interface ChromeTranslator {
+    translate(text: string): Promise<string>;
+    translateStreaming?(text: string): ReadableStream<string>;
+}
+
+interface ChromeTranslatorOptions {
+    sourceLanguage: string;
+    targetLanguage: string;
+    monitor?: (m: any) => void;
+}
+
+declare global {
+    interface Window {
+        Translator?: {
+            create(options: ChromeTranslatorOptions): Promise<ChromeTranslator>;
+            canTranslate?(options: { sourceLanguage: string; targetLanguage: string }): Promise<string>;
+        };
+    }
+}
+
 class LocalTranslator {
     private translator: any = null;
 
+    // Chrome Native Translator (Chrome 138+)
+    private chromeTranslator: ChromeTranslator | null = null;
+    private chromeTranslatorAvailable: boolean | null = null; // null = not checked yet
+
     // PRIMARY: Use the custom OPUS model (56MB)
-    // NOTE: This model now uses quantized weights (encoder_model_quantized.onnx)
     private opusModelId = 'goldcc/opus-mt-no-uk-int8';
 
     // SECONDARY: Fallback to NLLB if Opus fails (600MB+)
     private nllbModelId = 'Xenova/nllb-200-distilled-600M';
 
     private activeModelId = '';
-
     private currentModelType: 'opus' | 'nllb' = 'opus';
 
     private sourceLang: string = "nob_Latn";
     private targetLang: string = "ukr_Cyrl";
 
+    // UI language names for Chrome API
+    private sourceLanguageName: string = "no"; // BCP-47 codes for Chrome
+    private targetLanguageName: string = "uk";
+
     private isLoading = false;
     private progressCallback: ((progress: number) => void) | null = null;
 
     // PERFORMANCE OPTIMIZATION: Chunk translation cache
-    // Maps chunk text -> translated text to avoid re-translating unchanged chunks
     private chunkCache: Map<string, string> = new Map();
-    private static readonly CHUNK_SIZE = 4; // Words per chunk (3-5 optimal)
-    private static readonly MAX_CACHE_SIZE = 100; // Limit cache growth
+    private static readonly CHUNK_SIZE = 4;
+    private static readonly MAX_CACHE_SIZE = 100;
+
+    // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
+
+    async checkChromeTranslator(): Promise<boolean> {
+        if (this.chromeTranslatorAvailable !== null) {
+            return this.chromeTranslatorAvailable;
+        }
+
+        try {
+            if (!('Translator' in window) || !window.Translator) {
+                console.log('🌐 Chrome Translator API: Not available');
+                this.chromeTranslatorAvailable = false;
+                return false;
+            }
+
+            // Check if translation is supported for our language pair
+            if (window.Translator.canTranslate) {
+                const support = await window.Translator.canTranslate({
+                    sourceLanguage: this.sourceLanguageName,
+                    targetLanguage: this.targetLanguageName
+                });
+
+                if (support === 'no') {
+                    console.log(`🌐 Chrome Translator: Language pair ${this.sourceLanguageName}→${this.targetLanguageName} not supported`);
+                    this.chromeTranslatorAvailable = false;
+                    return false;
+                }
+            }
+
+            console.log('🌐 Chrome Translator API: Available! Using native translation.');
+            this.chromeTranslatorAvailable = true;
+            return true;
+        } catch (e) {
+            console.log('🌐 Chrome Translator API: Check failed', e);
+            this.chromeTranslatorAvailable = false;
+            return false;
+        }
+    }
+
+    async initChromeTranslator(): Promise<boolean> {
+        if (this.chromeTranslator) return true;
+
+        if (!await this.checkChromeTranslator()) return false;
+
+        try {
+            this.chromeTranslator = await window.Translator!.create({
+                sourceLanguage: this.sourceLanguageName,
+                targetLanguage: this.targetLanguageName,
+                monitor: (m: any) => {
+                    m.addEventListener?.('downloadprogress', (e: any) => {
+                        const progress = e.loaded ? Math.round(e.loaded * 100) : 0;
+                        console.log(`🌐 Chrome Translator downloading: ${progress}%`);
+                        if (this.progressCallback) this.progressCallback(progress);
+                    });
+                }
+            });
+            console.log('🌐 Chrome Translator: Ready!');
+            return true;
+        } catch (e) {
+            console.error('🌐 Chrome Translator: Init failed', e);
+            this.chromeTranslatorAvailable = false;
+            return false;
+        }
+    }
+
+    async translateWithChrome(text: string): Promise<string | null> {
+        if (!this.chromeTranslator) {
+            const ok = await this.initChromeTranslator();
+            if (!ok) return null;
+        }
+
+        try {
+            const result = await this.chromeTranslator!.translate(text);
+            return result;
+        } catch (e) {
+            console.error('🌐 Chrome Translator: Translation failed', e);
+            return null;
+        }
+    }
 
     async switchModel(modelType: 'opus' | 'nllb', onProgress?: (progress: number) => void) {
         if (this.currentModelType === modelType && this.translator) {
@@ -71,23 +176,26 @@ class LocalTranslator {
 
         this.isLoading = true;
         this.progressCallback = onProgress || null;
-        
+
         const targetModelId = this.currentModelType === 'opus' ? this.opusModelId : this.nllbModelId;
-        const isQuantized = this.currentModelType === 'opus'; // Only Opus is int8 quantized in this setup
+        const isQuantized = this.currentModelType === 'opus';
+
+        // WebGPU detection: Use GPU if available for 4-5x speedup
+        const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+        const device = hasWebGPU ? 'webgpu' : 'wasm';
 
         try {
             if (this.progressCallback) this.progressCallback(0);
-            console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}'...`);
-            
+            console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
+
             this.activeModelId = targetModelId;
-            
+
             let model, tokenizer;
 
             if (isQuantized) {
-                // EXPLICIT LOADING: Force the library to use standard filenames (e.g. encoder_model_quantized.onnx)
-                // even though the model is int8. Setting quantized: true enables the "_quantized" suffix lookup.
                 model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
-                    quantized: true, 
+                    quantized: true,
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 } as any);
 
@@ -96,18 +204,17 @@ class LocalTranslator {
                 });
             }
 
-            // Init pipeline
-            // If model/tokenizer are created manually (for quantized), pass them.
-            // If not (for NLLB standard), pass just model ID.
             if (isQuantized && model && tokenizer) {
                  this.translator = await pipeline('translation', targetModelId, {
                     model: model,
                     tokenizer: tokenizer,
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 } as any);
             } else {
-                // Standard loading (NLLB or non-quantized fallback)
+                // Standard loading (NLLB)
                 this.translator = await pipeline('translation', targetModelId, {
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 });
             }
@@ -145,7 +252,6 @@ class LocalTranslator {
     // Convert UI language names to Model Codes
     setLanguages(source: string, target: string) {
         // Map common names to NLLB codes (Flores-200 format)
-        // Opus models handle this implicitly usually, but we keep state for NLLB fallback
         const codeMap: Record<string, string> = {
             'Norwegian': 'nob_Latn',
             'Ukrainian': 'ukr_Cyrl',
@@ -157,8 +263,33 @@ class LocalTranslator {
             'Polish': 'pol_Latn'
         };
 
+        // BCP-47 codes for Chrome Translator API
+        const bcp47Map: Record<string, string> = {
+            'Norwegian': 'no',
+            'Ukrainian': 'uk',
+            'English': 'en',
+            'German': 'de',
+            'Spanish': 'es',
+            'French': 'fr',
+            'Russian': 'ru',
+            'Polish': 'pl'
+        };
+
         this.sourceLang = codeMap[source] || 'eng_Latn';
         this.targetLang = codeMap[target] || 'eng_Latn';
+
+        // Set BCP-47 codes for Chrome API
+        const newSourceLang = bcp47Map[source] || 'en';
+        const newTargetLang = bcp47Map[target] || 'en';
+
+        // Reset Chrome translator if languages changed
+        if (this.sourceLanguageName !== newSourceLang || this.targetLanguageName !== newTargetLang) {
+            this.chromeTranslator = null;
+            this.chromeTranslatorAvailable = null; // Re-check availability
+        }
+
+        this.sourceLanguageName = newSourceLang;
+        this.targetLanguageName = newTargetLang;
     }
 
     // Split text into chunks of CHUNK_SIZE words
@@ -200,13 +331,23 @@ class LocalTranslator {
     }
 
     // OPTIMIZED: Translate phrase using chunked approach with caching
-    // Only translates chunks that aren't in the cache
+    // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
     async translatePhraseChunked(text: string, forceFullTranslate = false): Promise<TranslatedWord[]> {
         if (!text || !text.trim()) {
             return [];
         }
 
-        // If not loaded yet, show loading indicator
+        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
+        const chromeResult = await this.translateWithChrome(text);
+        if (chromeResult !== null) {
+            return [{
+                original: text,
+                ghostTranslation: chromeResult,
+                status: 'ghost'
+            }];
+        }
+
+        // === PRIORITY 2: Fallback to Transformers.js ===
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{
@@ -247,13 +388,24 @@ class LocalTranslator {
         }];
     }
 
-    // Original method - now uses chunked approach for consistency
+    // Full phrase translation (used for finalized blocks)
+    // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
     async translatePhrase(text: string): Promise<TranslatedWord[]> {
         if (!text || !text.trim()) {
             return [];
         }
 
-        // If not loaded yet, show loading indicator
+        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
+        const chromeResult = await this.translateWithChrome(text);
+        if (chromeResult !== null) {
+            return [{
+                original: text,
+                ghostTranslation: chromeResult,
+                status: 'ghost'
+            }];
+        }
+
+        // === PRIORITY 2: Fallback to Transformers.js ===
         if (!this.translator) {
              if (!this.isLoading) this.initialize();
              return [{
@@ -263,27 +415,21 @@ class LocalTranslator {
              }];
         }
 
-        // For final blocks, use full translation (better quality)
-        // For interim, use chunked approach (better performance)
         try {
             let output;
 
-            // Handle differences between NLLB and Opus arguments
             if (this.activeModelId.includes('nllb')) {
                  output = await this.translator(text, {
                     src_lang: this.sourceLang,
                     tgt_lang: this.targetLang
                 });
             } else {
-                // Opus models usually auto-detect or don't need lang args if mono-directional
                 output = await this.translator(text);
             }
 
-            // Parse output (Handling different formats: array of objects or single object)
             const result = Array.isArray(output) ? output[0] : output;
             let translatedText = result?.translation_text || result?.generated_text || "";
 
-            // If empty, fallback to error indicator
             if (!translatedText) translatedText = "⚠️";
 
             return [{
@@ -299,7 +445,17 @@ class LocalTranslator {
     }
 
     public getStatus() {
-        return { isLoading: this.isLoading, isReady: !!this.translator };
+        return {
+            isLoading: this.isLoading,
+            isReady: !!this.translator || !!this.chromeTranslator,
+            useChromeAPI: this.chromeTranslatorAvailable === true,
+            chromeChecked: this.chromeTranslatorAvailable !== null
+        };
+    }
+
+    // Check if using native Chrome API (for UI display)
+    public isUsingChromeAPI(): boolean {
+        return this.chromeTranslatorAvailable === true;
     }
 }
 
