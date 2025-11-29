@@ -181,6 +181,7 @@ const App: React.FC = () => {
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
   const aiQueueRef = useRef<AIQueueItem[]>([]);
   const isAIProcessingRef = useRef(false); // Mutex for AI processing
+  const llmAbortControllerRef = useRef<AbortController | null>(null); // For cancelling LLM requests
 
   // LLM ACCUMULATOR: Buffer for collecting larger text blocks before sending to LLM
   const llmAccumulatorRef = useRef<{
@@ -336,6 +337,10 @@ const App: React.FC = () => {
 
     // NOTE: We allow SIMPLE mode here to process Input Translations
 
+    // Create AbortController for this request
+    llmAbortControllerRef.current = new AbortController();
+    const signal = llmAbortControllerRef.current.signal;
+
     try {
         // 3. Dequeue
         // We now get the FULL object directly, avoiding React State lookup race conditions
@@ -349,27 +354,30 @@ const App: React.FC = () => {
 
         // 5. Generate
         const startTime = performance.now();
-        
+
         await generateInterviewAssist(
             messageText,
             [], // Send empty array to process ONLY current block (Atomic Architecture)
             currentContext,
             (partial) => {
+                // Check if aborted before updating
+                if (signal.aborted) return;
+
                 const currentTime = performance.now();
                 setMessages(prev => prev.map(msg => {
                     // Update Assistant Message (Right/Middle Columns)
                     if (msg.id === responseId) {
-                        return { 
-                            ...msg, 
-                            text: partial.answer, 
-                            analysis: partial.analysis, 
-                            strategy: partial.strategy, 
+                        return {
+                            ...msg,
+                            text: partial.answer,
+                            analysis: partial.analysis,
+                            strategy: partial.strategy,
                             answerTranslation: partial.answerTranslation,
                             rationale: partial.rationale,
                             latency: Math.round(currentTime - startTime)
                         };
                     }
-                    
+
                     // LLM TRANSLATION: Update FIRST message of session (accumulative display)
                     // This creates a single growing translation block instead of multiple small blocks
                     if (msg.id === firstSessionMessageIdRef.current && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
@@ -383,18 +391,25 @@ const App: React.FC = () => {
 
                     return msg;
                 }));
-            }
+            },
+            signal // Pass abort signal to LLM service
         );
 
         const endTime = performance.now();
         console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total`);
 
-    } catch (e) {
-        console.error("Queue Processing Error", e);
+    } catch (e: any) {
+        if (e.name === 'AbortError') {
+            console.log(`🛑 [${Math.round(performance.now())}ms] LLM ABORTED`);
+        } else {
+            console.error("Queue Processing Error", e);
+        }
     } finally {
         // 6. Unlock and Process Next
+        llmAbortControllerRef.current = null;
         isAIProcessingRef.current = false;
-        if (aiQueueRef.current.length > 0) {
+        // Only process next if not stopped
+        if (aiQueueRef.current.length > 0 && shouldBeListening.current) {
             processAIQueue();
         }
     }
@@ -1016,15 +1031,32 @@ const App: React.FC = () => {
       lastFullTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-      // Flush LLM accumulator - send any remaining text
+      // ABORT all pending LLM requests immediately
+      if (llmAbortControllerRef.current) {
+          console.log(`🛑 [${Math.round(performance.now())}ms] ABORTING LLM request`);
+          llmAbortControllerRef.current.abort();
+          llmAbortControllerRef.current = null;
+      }
+
+      // CLEAR LLM queue - don't send any more requests
+      const queueLength = aiQueueRef.current.length;
+      if (queueLength > 0) {
+          console.log(`🛑 [${Math.round(performance.now())}ms] CLEARING LLM queue (${queueLength} items)`);
+          aiQueueRef.current = [];
+      }
+
+      // CLEAR LLM accumulator without sending
       if (llmAccumulatorRef.current.text.trim()) {
-          console.log(`🛑 [${Math.round(performance.now())}ms] STOP: Flushing LLM accumulator (${llmAccumulatorRef.current.wordCount} words)`);
-          sendLLMAccumulator(true);
+          console.log(`🛑 [${Math.round(performance.now())}ms] DISCARDING LLM accumulator (${llmAccumulatorRef.current.wordCount} words)`);
+          llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
       }
       if (llmSilenceTimerRef.current) {
           clearTimeout(llmSilenceTimerRef.current);
           llmSilenceTimerRef.current = null;
       }
+
+      // Reset processing flag
+      isAIProcessingRef.current = false;
 
       // CLEAR SESSION IDs and refs
       sessionQuestionIdRef.current = null;
@@ -1411,38 +1443,41 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* COLUMN 2: Current Block (AI) - Latest portion of LLM translation */}
+                 {/* COLUMN 2: Original text being sent to LLM (25-30 words) */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
                              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
-                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Current Block (AI)</span>
+                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Оригінал → LLM</span>
                          </div>
                          <div className="p-6 flex flex-col justify-center min-h-[150px]">
                              {(() => {
-                                 // Find the first session message that contains LLM translation
-                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const llmTranslation = firstMsg?.aiTranslation || '';
+                                 // Collect ORIGINAL text from first 4-6 interviewer messages (25-30 words)
+                                 const interviewerMsgs = messages.filter(m => m.role === 'interviewer');
+                                 let wordCount = 0;
+                                 let blocksToShow: string[] = [];
 
-                                 // Show last ~50 words as "current block"
-                                 const words = llmTranslation.split(/\s+/).filter(w => w);
-                                 const currentBlock = words.slice(-50).join(' ');
+                                 for (const msg of interviewerMsgs) {
+                                     if (wordCount >= 30) break;
+                                     const msgWords = msg.text.split(/\s+/).filter(w => w);
+                                     blocksToShow.push(msg.text);
+                                     wordCount += msgWords.length;
+                                 }
 
-                                 return currentBlock && currentBlock !== '...' ? (
+                                 const originalText = blocksToShow.join(' ');
+
+                                 return originalText ? (
                                      <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
-                                         {currentBlock}
+                                         {originalText}
                                      </div>
                                  ) : (
                                      <div className="space-y-3 opacity-50 select-none">
                                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
                                              <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                             ОЧІКУВАННЯ LLM...
+                                             ОЧІКУВАННЯ...
                                          </div>
                                          <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
                                          <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
-                                         <div className="text-[10px] text-orange-400/50 mt-4">
-                                             Переклад з'явиться після обробки блоків
-                                         </div>
                                      </div>
                                  );
                              })()}
@@ -1450,26 +1485,26 @@ const App: React.FC = () => {
                      </div>
                  </div>
 
-                 {/* COLUMN 3: Full Text (AI) - Complete accumulated LLM translation */}
+                 {/* COLUMN 3: LLM Translation result */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Full Text (AI)</span>
+                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">LLM Переклад</span>
                          </div>
                          <div className="p-4">
                              {(() => {
-                                 // Get full accumulated LLM translation from first session message
+                                 // Get LLM translation from first session message
                                  const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const fullText = firstMsg?.aiTranslation || '';
+                                 const llmTranslation = firstMsg?.aiTranslation || '';
 
-                                 return fullText && fullText !== '...' ? (
-                                     <div className="text-[10px] md:text-xs text-emerald-200 leading-relaxed font-normal">
-                                         {fullText}
+                                 return llmTranslation && llmTranslation !== '...' ? (
+                                     <div className="text-sm md:text-base text-emerald-200 leading-relaxed font-medium">
+                                         {llmTranslation}
                                      </div>
                                  ) : (
                                      <div className="text-[10px] text-emerald-500/50 italic">
-                                         Повний переклад з'явиться тут...
+                                         Переклад з'явиться тут після обробки...
                                      </div>
                                  );
                              })()}

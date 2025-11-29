@@ -33,6 +33,18 @@ function sanitizeForAzure(text: string): string {
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
 
+    // ========== SIMPLE MODE: Minimal prompt - just translation, no context ==========
+    if (isSimpleMode) {
+        return `Переклади наступний текст на розмовну ${context.nativeLanguage} мову.
+
+Вхідний текст (${context.targetLanguage}): "${currentInput}"
+
+Формат відповіді:
+[INPUT_TRANSLATION]
+твій переклад тут`;
+    }
+
+    // ========== FOCUS/FULL MODE: Full context with Resume, Job, Company, KB ==========
     // Use TF-IDF search to get relevant context from knowledge base
     // Reduced to 1500 chars to stay within Groq's 12k token limit
     const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 1500);
@@ -45,7 +57,7 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
       Job: "${context.jobDescription?.slice(0, 1500) || ''}"
       Company: "${context.companyDescription?.slice(0, 1000) || ''}"
       KB: "${relevantKnowledge || ''}"
-      
+
       [SESSION CONFIG]
       Target Language: ${context.targetLanguage}
       Native Language: ${context.nativeLanguage}
@@ -57,8 +69,6 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
       ${safeInstruction}
 
       CRITICAL: You MUST ALWAYS generate [INPUT_TRANSLATION] first to provide a better translation of the input.
-      
-      ${isSimpleMode ? "CONSTRAINT: Mode is SIMPLE. Output ONLY the [INPUT_TRANSLATION] tag. Do not generate Analysis or Answer." : ""}
 
       [CONVERSATION LOG]
       History: "${historyText}"
@@ -67,10 +77,10 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
 }
 
 // AZURE IMPLEMENTATION
-async function generateViaAzure(prompt: string, onUpdate: (data: any) => void) {
+async function generateViaAzure(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
      // Use key from constant (if set) or fallback to environment/UI injection in future
      // For now, if empty, it will likely fail unless user has configured backend proxy or local overrides
-     
+
      if (!AZURE_API_KEY) {
          throw new Error("Azure API Key is missing. Set VITE_AZURE_API_KEY in .env or use Groq in Settings.");
      }
@@ -86,19 +96,20 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void) {
                 { role: "user", content: prompt }
             ],
             stream: true
-        })
+        }),
+        signal // Pass abort signal to fetch
     });
 
     if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Azure API Error: ${response.status} ${errText}`);
     }
-    
-    await processStream(response, onUpdate);
+
+    await processStream(response, onUpdate, signal);
 }
 
 // GROQ IMPLEMENTATION
-async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: any) => void) {
+async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
     const key = apiKey || GROQ_API_KEY_DEFAULT;
     if (!key) throw new Error("Groq API Key is missing. Set VITE_GROQ_API_KEY in .env or enter in Settings.");
 
@@ -116,7 +127,8 @@ async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: 
             stream: true,
             temperature: 0.6,
             max_tokens: 1024
-        })
+        }),
+        signal // Pass abort signal to fetch
     });
 
     if (!response.ok) {
@@ -124,40 +136,51 @@ async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: 
         throw new Error(`Groq API Error: ${response.status} ${errText}`);
     }
 
-    await processStream(response, onUpdate);
+    await processStream(response, onUpdate, signal);
 }
 
 // GENERIC STREAM PROCESSOR (Works for both Azure and Groq as they are OpenAI compatible)
-async function processStream(response: Response, onUpdate: (data: any) => void) {
+async function processStream(response: Response, onUpdate: (data: any) => void, signal?: AbortSignal) {
     if (!response.body) throw new Error("No response body");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let fullText = "";
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
-        
-        for (const line of lines) {
-            if (line.startsWith("data: ")) {
-                const dataStr = line.slice(6);
-                if (dataStr === "[DONE]") continue;
-                try {
-                    const data = JSON.parse(dataStr);
-                    const content = data.choices?.[0]?.delta?.content || "";
-                    if (content) {
-                        fullText += content;
-                        parseAndEmit(fullText, onUpdate);
+    try {
+        while (true) {
+            // Check if aborted before reading
+            if (signal?.aborted) {
+                await reader.cancel();
+                throw new DOMException('Aborted', 'AbortError');
+            }
+
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value);
+            const lines = chunk.split("\n");
+
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    const dataStr = line.slice(6);
+                    if (dataStr === "[DONE]") continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const content = data.choices?.[0]?.delta?.content || "";
+                        if (content) {
+                            fullText += content;
+                            parseAndEmit(fullText, onUpdate);
+                        }
+                    } catch (e) {
+                        // ignore parse errors for partial chunks
                     }
-                } catch (e) {
-                    // ignore parse errors for partial chunks
                 }
             }
         }
+    } finally {
+        // Ensure reader is released
+        reader.releaseLock();
     }
 }
 
@@ -165,11 +188,12 @@ export const generateInterviewAssist = async (
   currentInput: string,
   historyBuffer: string[],
   context: InterviewContext,
-  onUpdate: (data: { answer: string; analysis: string; strategy: string; answerTranslation: string; inputTranslation: string; rationale: string }) => void
+  onUpdate: (data: { answer: string; analysis: string; strategy: string; answerTranslation: string; inputTranslation: string; rationale: string }) => void,
+  signal?: AbortSignal // Optional abort signal for cancellation
 ): Promise<void> => {
   try {
     const historyText = historyBuffer.join(" ");
-    
+
     // Sanitize prompt for Azure jailbreak detection (Good practice for Groq too)
     const safeInstruction = sanitizeForAzure(context.systemInstruction);
     const combinedPrompt = constructPrompt(currentInput, historyText, context, safeInstruction);
@@ -177,13 +201,17 @@ export const generateInterviewAssist = async (
     // Switch Provider
     if (context.llmProvider === 'groq') {
         // console.log("🚀 Sending to Groq...");
-        await generateViaGroq(combinedPrompt, context.groqApiKey, onUpdate);
+        await generateViaGroq(combinedPrompt, context.groqApiKey, onUpdate, signal);
     } else {
         // console.log("☁️ Sending to Azure...");
-        await generateViaAzure(combinedPrompt, onUpdate);
+        await generateViaAzure(combinedPrompt, onUpdate, signal);
     }
 
   } catch (error: any) {
+    // Don't log abort errors as they are expected
+    if (error.name === 'AbortError') {
+        throw error; // Re-throw to be handled by caller
+    }
     console.error("LLM Service Error:", error);
     onUpdate({
         answer: "Error connecting to AI.",
