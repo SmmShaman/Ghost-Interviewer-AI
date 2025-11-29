@@ -1411,7 +1411,7 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* COLUMN 2: Current forming LLM block (max 30 words) */}
+                 {/* COLUMN 2: Current Block (AI) - Latest portion of LLM translation */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
@@ -1420,14 +1420,15 @@ const App: React.FC = () => {
                          </div>
                          <div className="p-6 flex flex-col justify-center min-h-[150px]">
                              {(() => {
+                                 // Find the first session message that contains LLM translation
                                  const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const currentText = firstMsg?.aiTranslation || '';
+                                 const llmTranslation = firstMsg?.aiTranslation || '';
 
-                                 // Get last ~30 words as "current block"
-                                 const words = currentText.split(/\s+/).filter(w => w);
-                                 const currentBlock = words.slice(-30).join(' ');
+                                 // Show last ~50 words as "current block"
+                                 const words = llmTranslation.split(/\s+/).filter(w => w);
+                                 const currentBlock = words.slice(-50).join(' ');
 
-                                 return currentBlock ? (
+                                 return currentBlock && currentBlock !== '...' ? (
                                      <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
                                          {currentBlock}
                                      </div>
@@ -1435,10 +1436,13 @@ const App: React.FC = () => {
                                      <div className="space-y-3 opacity-50 select-none">
                                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
                                              <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                             WAITING...
+                                             ОЧІКУВАННЯ LLM...
                                          </div>
                                          <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
                                          <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
+                                         <div className="text-[10px] text-orange-400/50 mt-4">
+                                             Переклад з'явиться після обробки блоків
+                                         </div>
                                      </div>
                                  );
                              })()}
@@ -1446,7 +1450,7 @@ const App: React.FC = () => {
                      </div>
                  </div>
 
-                 {/* COLUMN 3: Full accumulated LLM text (small font, always visible) */}
+                 {/* COLUMN 3: Full Text (AI) - Complete accumulated LLM translation */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
@@ -1455,16 +1459,17 @@ const App: React.FC = () => {
                          </div>
                          <div className="p-4">
                              {(() => {
+                                 // Get full accumulated LLM translation from first session message
                                  const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
                                  const fullText = firstMsg?.aiTranslation || '';
 
-                                 return fullText ? (
+                                 return fullText && fullText !== '...' ? (
                                      <div className="text-[10px] md:text-xs text-emerald-200 leading-relaxed font-normal">
                                          {fullText}
                                      </div>
                                  ) : (
                                      <div className="text-[10px] text-emerald-500/50 italic">
-                                         Full translated text will appear here...
+                                         Повний переклад з'явиться тут...
                                      </div>
                                  );
                              })()}
