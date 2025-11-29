@@ -69,33 +69,33 @@ const BrickRow: React.FC<BrickRowProps> = ({
       
       {/* SIMPLE MODE: TRANSLATION COLUMN */}
       {isSimple && (
-         <div className="flex flex-col border-l-4 md:border-l border-t-4 md:border-t-0 border-amber-500 md:border-amber-500/30 bg-amber-900/10 min-h-[160px]">
-              <div className="px-4 py-2 bg-amber-950/30 border-b border-amber-500/10 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  <span className="text-[10px] font-black text-amber-300 uppercase tracking-widest">Translation (AI)</span>
+         <div className="flex flex-col border-l-4 md:border-l border-t-4 md:border-t-0 border-orange-500 md:border-orange-500/30 bg-orange-900/10 min-h-[160px]">
+              <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                  <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Translation (AI)</span>
               </div>
               <div className="p-6 flex-1 flex flex-col justify-center h-full">
                   {showAiTranslation ? (
-                      <div className="text-xl md:text-2xl text-amber-400 font-bold leading-relaxed animate-fade-in-up">
+                      <div className="text-xl md:text-2xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
                           {interviewerMessage.aiTranslation}
                       </div>
                   ) : (
                       <div className="space-y-3 opacity-50 select-none">
-                          <div className="flex items-center gap-2 text-amber-500/50 text-xs font-mono mb-2">
+                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
                              {isLive ? (
                                  <>
-                                    <div className="w-2 h-2 border border-amber-500/50 rounded-full"></div>
+                                    <div className="w-2 h-2 border border-orange-500/50 rounded-full"></div>
                                     LISTENING...
                                  </>
                              ) : (
                                  <>
-                                    <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping"></div>
+                                    <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
                                     AI PROCESSING...
                                  </>
                              )}
                           </div>
-                          <Skeleton className="h-4 w-3/4 bg-amber-900/20" />
-                          <Skeleton className="h-4 w-1/2 bg-amber-900/20" />
+                          <Skeleton className="h-4 w-3/4 bg-orange-900/20" />
+                          <Skeleton className="h-4 w-1/2 bg-orange-900/20" />
                       </div>
                   )}
               </div>
