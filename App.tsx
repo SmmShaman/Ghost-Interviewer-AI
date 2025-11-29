@@ -601,7 +601,7 @@ const App: React.FC = () => {
                 (partialTranslation) => {
                     // Update UI progressively as each chunk completes
                     setMessages(prev => prev.map(msg =>
-                        msg.id === questionId ? { ...msg, ghostTranslation: partialTranslation } : msg
+                        msg.id === blockId ? { ...msg, ghostTranslation: partialTranslation } : msg
                     ));
                 }
             )
@@ -611,7 +611,7 @@ const App: React.FC = () => {
                     console.log(`👻 [${Math.round(ghostEnd)}ms] GHOST FINALIZE END: ${Math.round(ghostEnd - ghostStart)}ms`);
                     // Final update (in case callback missed it)
                     setMessages(prev => prev.map(msg =>
-                        msg.id === questionId ? { ...msg, ghostTranslation: ghostText } : msg
+                        msg.id === blockId ? { ...msg, ghostTranslation: ghostText } : msg
                     ));
                     resolve();
                 })
@@ -621,7 +621,7 @@ const App: React.FC = () => {
                 });
         } else {
              setMessages(prev => prev.map(msg =>
-                msg.id === questionId ? { ...msg, ghostTranslation: text, translatedText: text } : msg
+                msg.id === blockId ? { ...msg, ghostTranslation: text, translatedText: text } : msg
             ));
             resolve();
         }
