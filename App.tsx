@@ -1264,26 +1264,85 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex-1 overflow-y-auto px-4 md:px-8 py-8 ${stealthMode ? 'opacity-90' : ''}`}>
-         <div className="max-w-[1600px] mx-auto">
-             {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
-             
-             {renderMessages()}
-             
-             {interimTranscript && !isUserSpeaking && (
-                 <BrickRow 
-                     isLive={true}
-                     interviewerMessage={{ id: 'live', role: 'interviewer', text: interimTranscript, timestamp: Date.now() }}
-                     liveTranslation={liveTranslation}
-                     viewMode={context.viewMode}
-                 />
-             )}
+         {/* SIMPLE MODE: Two-column layout with sticky LLM translation */}
+         {context.viewMode === 'SIMPLE' ? (
+             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                 {/* LEFT COLUMN: Scrollable Ghost blocks */}
+                 <div className="space-y-6">
+                     {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
 
-             {interimTranscript && isUserSpeaking && (
-                 <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
-             )}
-             
-             <div ref={messagesEndRef} />
-         </div>
+                     {renderMessages()}
+
+                     {interimTranscript && !isUserSpeaking && (
+                         <BrickRow
+                             isLive={true}
+                             interviewerMessage={{ id: 'live', role: 'interviewer', text: interimTranscript, timestamp: Date.now() }}
+                             liveTranslation={liveTranslation}
+                             viewMode={context.viewMode}
+                         />
+                     )}
+
+                     {interimTranscript && isUserSpeaking && (
+                         <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
+                     )}
+
+                     <div ref={messagesEndRef} />
+                 </div>
+
+                 {/* RIGHT COLUMN: Sticky LLM translation */}
+                 <div className="sticky top-8 h-fit">
+                     <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[300px] rounded-lg shadow-xl">
+                         <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
+                             <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Translation (AI)</span>
+                         </div>
+                         <div className="p-6 flex flex-col justify-center min-h-[250px]">
+                             {(() => {
+                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
+                                 const hasTranslation = firstMsg?.isAiTranslated && firstMsg?.aiTranslation;
+
+                                 return hasTranslation ? (
+                                     <div className="text-xl md:text-2xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
+                                         {firstMsg.aiTranslation}
+                                     </div>
+                                 ) : (
+                                     <div className="space-y-3 opacity-50 select-none">
+                                         <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
+                                             <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
+                                             AI PROCESSING...
+                                         </div>
+                                         <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
+                                         <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
+                                     </div>
+                                 );
+                             })()}
+                         </div>
+                     </div>
+                 </div>
+             </div>
+         ) : (
+             /* OTHER MODES: Single column layout */
+             <div className="max-w-[1600px] mx-auto">
+                 {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
+
+                 {renderMessages()}
+
+                 {interimTranscript && !isUserSpeaking && (
+                     <BrickRow
+                         isLive={true}
+                         interviewerMessage={{ id: 'live', role: 'interviewer', text: interimTranscript, timestamp: Date.now() }}
+                         liveTranslation={liveTranslation}
+                         viewMode={context.viewMode}
+                     />
+                 )}
+
+                 {interimTranscript && isUserSpeaking && (
+                     <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
+                 )}
+
+                 <div ref={messagesEndRef} />
+             </div>
+         )}
       </div>
 
       <div className={`p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent ${stealthMode ? 'opacity-10 hover:opacity-100 transition-opacity' : ''}`}>

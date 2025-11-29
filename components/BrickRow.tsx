@@ -37,9 +37,9 @@ const BrickRow: React.FC<BrickRowProps> = ({
   // Grid CSS classes based on mode
   let gridClass = 'grid-cols-1 md:grid-cols-3'; // Default FULL
   if (isFocus) gridClass = 'grid-cols-1 md:grid-cols-2';
-  // SIMPLE mode: Only show 2 columns for FIRST session message, 1 column for others
+  // SIMPLE mode: Always 1 column (LLM translation is now separate sticky column in App.tsx)
   if (isSimple) {
-    gridClass = isFirstSessionMessage ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1';
+    gridClass = 'grid-cols-1';
   }
 
   // Determine if we have a valid AI translation for the right column
@@ -71,41 +71,7 @@ const BrickRow: React.FC<BrickRowProps> = ({
       </div>
 
       {/* COLUMN 2 (Logic varies by mode) */}
-
-      {/* SIMPLE MODE: TRANSLATION COLUMN - ONLY for first session message */}
-      {isSimple && isFirstSessionMessage && (
-         <div className="flex flex-col border-l-4 md:border-l border-t-4 md:border-t-0 border-orange-500 md:border-orange-500/30 bg-orange-900/10 min-h-[160px]">
-              <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
-                  <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Translation (AI)</span>
-              </div>
-              <div className="p-6 flex-1 flex flex-col justify-center h-full">
-                  {showAiTranslation ? (
-                      <div className="text-xl md:text-2xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
-                          {interviewerMessage.aiTranslation}
-                      </div>
-                  ) : (
-                      <div className="space-y-3 opacity-50 select-none">
-                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
-                             {isLive ? (
-                                 <>
-                                    <div className="w-2 h-2 border border-orange-500/50 rounded-full"></div>
-                                    LISTENING...
-                                 </>
-                             ) : (
-                                 <>
-                                    <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                    AI PROCESSING...
-                                 </>
-                             )}
-                          </div>
-                          <Skeleton className="h-4 w-3/4 bg-orange-900/20" />
-                          <Skeleton className="h-4 w-1/2 bg-orange-900/20" />
-                      </div>
-                  )}
-              </div>
-         </div>
-      )}
+      {/* NOTE: SIMPLE mode no longer renders Translation column here - it's now a sticky sidebar in App.tsx */}
 
       {/* FULL MODE: STRATEGY COLUMN */}
       {isFull && (
