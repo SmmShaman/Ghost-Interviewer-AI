@@ -42,6 +42,7 @@ class LocalTranslator {
     // Chrome Native Translator (Chrome 138+)
     private chromeTranslator: ChromeTranslator | null = null;
     private chromeTranslatorAvailable: boolean | null = null; // null = not checked yet
+    private chromeInitPromise: Promise<boolean> | null = null; // Lock for init
 
     // PRIMARY: Use the custom OPUS model (56MB)
     private opusModelId = 'goldcc/opus-mt-no-uk-int8';
@@ -107,11 +108,28 @@ class LocalTranslator {
     }
 
     async initChromeTranslator(): Promise<boolean> {
+        // Already initialized
         if (this.chromeTranslator) return true;
 
+        // Already initializing - wait for existing promise (prevents race condition)
+        if (this.chromeInitPromise) {
+            console.log('🌐 Chrome Translator: Waiting for ongoing init...');
+            return this.chromeInitPromise;
+        }
+
+        // Start new initialization with lock
+        this.chromeInitPromise = this.doInitChromeTranslator();
+        const result = await this.chromeInitPromise;
+        this.chromeInitPromise = null; // Clear lock after completion
+        return result;
+    }
+
+    // Internal init method (called only once due to lock)
+    private async doInitChromeTranslator(): Promise<boolean> {
         if (!await this.checkChromeTranslator()) return false;
 
         try {
+            console.log('🌐 Chrome Translator: Initializing...');
             this.chromeTranslator = await window.Translator!.create({
                 sourceLanguage: this.sourceLanguageName,
                 targetLanguage: this.targetLanguageName,
@@ -130,6 +148,12 @@ class LocalTranslator {
             this.chromeTranslatorAvailable = false;
             return false;
         }
+    }
+
+    // Pre-initialize Chrome Translator at app startup (call this early!)
+    async preInitChrome(): Promise<void> {
+        console.log('🌐 Chrome Translator: Pre-initializing...');
+        await this.initChromeTranslator();
     }
 
     async translateWithChrome(text: string): Promise<string | null> {
@@ -371,6 +395,7 @@ class LocalTranslator {
         if (this.sourceLanguageName !== newSourceLang || this.targetLanguageName !== newTargetLang) {
             this.chromeTranslator = null;
             this.chromeTranslatorAvailable = null; // Re-check availability
+            this.chromeInitPromise = null; // Reset init lock
         }
 
         this.sourceLanguageName = newSourceLang;
