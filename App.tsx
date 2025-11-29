@@ -665,6 +665,8 @@ const App: React.FC = () => {
   const commitNewWords = useCallback((newWordsText: string, totalWordsSoFar: number) => {
       if (!newWordsText.trim()) return;
       if (isCommittingRef.current) return;
+      // CRITICAL: Don't commit if session has ended (user pressed STOP)
+      if (!shouldBeListening.current) return;
 
       isCommittingRef.current = true;
 
