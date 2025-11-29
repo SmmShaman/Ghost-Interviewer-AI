@@ -61,6 +61,7 @@ class LocalTranslator {
 
     private isLoading = false;
     private progressCallback: ((progress: number) => void) | null = null;
+    private activeDevice: 'webgpu' | 'wasm' | null = null;
 
     // PERFORMANCE OPTIMIZATION: Chunk translation cache
     private chunkCache: Map<string, string> = new Map();
@@ -168,7 +169,7 @@ class LocalTranslator {
              if (onProgress) onProgress(100);
              return;
         }
-        
+
         if (this.isLoading) {
              this.progressCallback = onProgress || null;
              return;
@@ -182,50 +183,114 @@ class LocalTranslator {
 
         // WebGPU detection: Use GPU if available for 4-5x speedup
         const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-        const device = hasWebGPU ? 'webgpu' : 'wasm';
 
+        // Try WebGPU first, then fallback to WASM
+        const devicesToTry: ('webgpu' | 'wasm')[] = hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+
+        for (const device of devicesToTry) {
+            try {
+                if (this.progressCallback) this.progressCallback(0);
+                console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
+
+                this.activeModelId = targetModelId;
+
+                let model, tokenizer;
+
+                if (isQuantized) {
+                    model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
+                        quantized: true,
+                        device: device,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    } as any);
+
+                    tokenizer = await AutoTokenizer.from_pretrained(targetModelId, {
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    });
+                }
+
+                if (isQuantized && model && tokenizer) {
+                     this.translator = await pipeline('translation', targetModelId, {
+                        model: model,
+                        tokenizer: tokenizer,
+                        device: device,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    } as any);
+                } else {
+                    // Standard loading (NLLB)
+                    this.translator = await pipeline('translation', targetModelId, {
+                        device: device,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    });
+                }
+
+                this.activeDevice = device;
+                this.finishInit();
+                return;
+
+            } catch (e: any) {
+                const errorMsg = e?.message || String(e);
+                const isWebGPUError = errorMsg.includes('webgpu') ||
+                                      errorMsg.includes('GPU') ||
+                                      errorMsg.includes('adapter') ||
+                                      errorMsg.includes('backend');
+
+                const isCacheCorruption = errorMsg.includes('Corruption') ||
+                                          errorMsg.includes('checksum') ||
+                                          errorMsg.includes('corrupted');
+
+                // If cache corruption detected, try clearing cache and retry once
+                if (isCacheCorruption) {
+                    console.warn(`⚠️ Cache corruption detected, clearing cache...`);
+                    await this.clearModelCache();
+                    // Don't retry automatically - let user trigger reload
+                    this.isLoading = false;
+                    throw new Error(`Cache corruption detected. Please refresh the page to re-download the model.`);
+                }
+
+                // If WebGPU failed and we have WASM fallback, try it
+                if (device === 'webgpu' && devicesToTry.includes('wasm') && isWebGPUError) {
+                    console.warn(`⚠️ WebGPU failed, falling back to WASM...`, errorMsg);
+                    continue; // Try WASM
+                }
+
+                // If WASM also failed or it's a different error, throw
+                console.error(`❌ FAILED to load ${this.currentModelType} Model with ${device}.`, e);
+                this.isLoading = false;
+                throw new Error(`Failed to load ${this.currentModelType} model.`);
+            }
+        }
+
+        // Should not reach here, but just in case
+        this.isLoading = false;
+        throw new Error(`Failed to load ${this.currentModelType} model - no backends available.`);
+    }
+
+    // Clear model cache (IndexedDB for transformers.js)
+    private async clearModelCache(): Promise<void> {
         try {
-            if (this.progressCallback) this.progressCallback(0);
-            console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
-
-            this.activeModelId = targetModelId;
-
-            let model, tokenizer;
-
-            if (isQuantized) {
-                model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
-                    quantized: true,
-                    device: device, // WebGPU or WASM
-                    progress_callback: (data: any) => this.handleProgress(data),
-                } as any);
-
-                tokenizer = await AutoTokenizer.from_pretrained(targetModelId, {
-                    progress_callback: (data: any) => this.handleProgress(data),
-                });
+            // Clear Cache API
+            if ('caches' in window) {
+                const keys = await caches.keys();
+                for (const key of keys) {
+                    if (key.includes('transformers') || key.includes('onnx')) {
+                        await caches.delete(key);
+                        console.log(`🗑️ Cleared cache: ${key}`);
+                    }
+                }
             }
 
-            if (isQuantized && model && tokenizer) {
-                 this.translator = await pipeline('translation', targetModelId, {
-                    model: model,
-                    tokenizer: tokenizer,
-                    device: device, // WebGPU or WASM
-                    progress_callback: (data: any) => this.handleProgress(data),
-                } as any);
-            } else {
-                // Standard loading (NLLB)
-                this.translator = await pipeline('translation', targetModelId, {
-                    device: device, // WebGPU or WASM
-                    progress_callback: (data: any) => this.handleProgress(data),
-                });
+            // Clear IndexedDB for transformers
+            const databases = await indexedDB.databases?.() || [];
+            for (const db of databases) {
+                if (db.name && (db.name.includes('transformers') || db.name.includes('onnx'))) {
+                    indexedDB.deleteDatabase(db.name);
+                    console.log(`🗑️ Cleared IndexedDB: ${db.name}`);
+                }
             }
-            
-            this.finishInit();
-            return;
 
-        } catch (e: any) {
-            console.error(`❌ FAILED to load ${this.currentModelType} Model.`, e);
-            this.isLoading = false;
-            throw new Error(`Failed to load ${this.currentModelType} model.`);
+            console.log('✅ Model cache cleared');
+        } catch (e) {
+            console.error('Failed to clear cache:', e);
         }
     }
 
@@ -246,7 +311,7 @@ class LocalTranslator {
     private finishInit() {
         this.isLoading = false;
         if (this.progressCallback) this.progressCallback(100);
-        console.log(`👻 Ghost Translator: Ready using ${this.activeModelId}`);
+        console.log(`👻 Ghost Translator: Ready using ${this.activeModelId} (${this.activeDevice?.toUpperCase() || 'unknown'})`);
     }
 
     // Convert UI language names to Model Codes
@@ -449,7 +514,9 @@ class LocalTranslator {
             isLoading: this.isLoading,
             isReady: !!this.translator || !!this.chromeTranslator,
             useChromeAPI: this.chromeTranslatorAvailable === true,
-            chromeChecked: this.chromeTranslatorAvailable !== null
+            chromeChecked: this.chromeTranslatorAvailable !== null,
+            device: this.activeDevice, // 'webgpu' | 'wasm' | null
+            modelType: this.currentModelType
         };
     }
 
