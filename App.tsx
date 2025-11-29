@@ -1443,38 +1443,28 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* COLUMN 2: Original text being sent to LLM (25-30 words) */}
+                 {/* COLUMN 2: LLM Translation - Current Block */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
                              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
-                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Оригінал → LLM</span>
+                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">LLM Переклад (Поточний)</span>
                          </div>
                          <div className="p-6 flex flex-col justify-center min-h-[150px]">
                              {(() => {
-                                 // Collect ORIGINAL text from first 4-6 interviewer messages (25-30 words)
-                                 const interviewerMsgs = messages.filter(m => m.role === 'interviewer');
-                                 let wordCount = 0;
-                                 let blocksToShow: string[] = [];
+                                 // Get LLM translation from first session message
+                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
+                                 const llmTranslation = firstMsg?.aiTranslation || '';
 
-                                 for (const msg of interviewerMsgs) {
-                                     if (wordCount >= 30) break;
-                                     const msgWords = msg.text.split(/\s+/).filter(w => w);
-                                     blocksToShow.push(msg.text);
-                                     wordCount += msgWords.length;
-                                 }
-
-                                 const originalText = blocksToShow.join(' ');
-
-                                 return originalText ? (
+                                 return llmTranslation && llmTranslation !== '...' ? (
                                      <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
-                                         {originalText}
+                                         {llmTranslation}
                                      </div>
                                  ) : (
                                      <div className="space-y-3 opacity-50 select-none">
                                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
                                              <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                             ОЧІКУВАННЯ...
+                                             ОЧІКУВАННЯ LLM...
                                          </div>
                                          <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
                                          <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
@@ -1485,7 +1475,7 @@ const App: React.FC = () => {
                      </div>
                  </div>
 
-                 {/* COLUMN 3: LLM Translation result */}
+                 {/* COLUMN 3: LLM Translation - Full Copy */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
