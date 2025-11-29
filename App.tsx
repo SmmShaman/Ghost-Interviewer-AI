@@ -24,7 +24,11 @@ const BLOCK_CONFIG = {
 const LLM_CONFIG = {
     MIN_WORDS_FOR_LLM: 30,          // Minimum words before sending to LLM
     MAX_WORDS_FOR_LLM: 50,          // Force send if exceeds this limit
-    SILENCE_TIMEOUT_MS: 5000        // Send accumulated text after 5s of silence (increased from 3s)
+    SILENCE_TIMEOUT_MS: 5000,       // Send accumulated text after 5s of silence (increased from 3s)
+    PAUSE_THRESHOLD_MS: 2000,       // 2 seconds pause = complete LLM block
+    MIN_WORDS_FOR_SENTENCE: 5,      // Minimum words needed to consider sentence complete
+    SENTENCE_MARKERS: /[.!?।。]+$/,  // Sentence-ending punctuation
+    FALLBACK_MAX_WORDS: 100         // Absolute max if no sentence end detected
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -185,6 +189,13 @@ const App: React.FC = () => {
     responseId: string | null;  // Response ID for the accumulated block
   }>({ text: '', wordCount: 0, questionId: null, responseId: null });
   const llmSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // SESSION-LEVEL IDs: One questionId per recording session (Start to Stop)
+  // This ensures all blocks in a session are treated as ONE question for LLM
+  const sessionQuestionIdRef = useRef<string | null>(null);
+  const sessionResponseIdRef = useRef<string | null>(null);
+  const llmLastActivityRef = useRef<number>(Date.now()); // Track pause duration
+  const firstSessionMessageIdRef = useRef<string | null>(null); // ID of FIRST message in session (for LLM updates)
 
   const contextRef = useRef(context);
   
@@ -358,13 +369,14 @@ const App: React.FC = () => {
                         };
                     }
                     
-                    // DOUBLE STREAM FIX: Update Interviewer Message (Left Column)
-                    // If Stream 2 provides a better translation for the input, overwrite the Ghost translation.
-                    if (msg.id === messageIdToProcess && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
+                    // LLM TRANSLATION: Update FIRST message of session (accumulative display)
+                    // This creates a single growing translation block instead of multiple small blocks
+                    if (msg.id === firstSessionMessageIdRef.current && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
+                        console.log(`🔄 [${Math.round(performance.now())}ms] Updating LLM translation in FIRST message: ${msg.id}`);
                         return {
                             ...msg,
-                            aiTranslation: partial.inputTranslation, // Store in aiTranslation
-                            isAiTranslated: true // MARK AS AI TRANSLATED
+                            aiTranslation: partial.inputTranslation,  // Replace with latest accumulated translation
+                            isAiTranslated: true  // Mark as AI translated
                         };
                     }
 
@@ -437,19 +449,48 @@ const App: React.FC = () => {
 
   const addToLLMAccumulator = useCallback((text: string, questionId: string, responseId: string) => {
     const acc = llmAccumulatorRef.current;
+    const now = Date.now();
+    const pauseDuration = now - llmLastActivityRef.current;
+    llmLastActivityRef.current = now;
+
     const newWordCount = text.split(/\s+/).length;
+    console.log(`📥 [${Math.round(performance.now())}ms] addToLLMAccumulator | Adding ${newWordCount} words | Pause: ${pauseDuration}ms | Current total: ${acc.wordCount}`);
 
-    console.log(`📥 [${Math.round(performance.now())}ms] addToLLMAccumulator | Adding ${newWordCount} words | Current total: ${acc.wordCount} | New text: "${text.substring(0, 30)}..."`);
+    // SMART SENTENCE DETECTION: Check if we should complete the current LLM block
+    const shouldCompleteLLMBlock = (accText: string, pause: number): boolean => {
+      const wordCount = accText.split(/\s+/).length;
 
-    // If this is a new question (different ID), flush previous accumulator first
-    if (acc.questionId && acc.questionId !== questionId) {
-      console.log(`🔄 [${Math.round(performance.now())}ms] NEW QUESTION detected! Flushing previous accumulator for question ${acc.questionId}`);
-      sendLLMAccumulator(true); // Force send previous
+      // Condition 1: Pause > 2 seconds
+      if (pause >= LLM_CONFIG.PAUSE_THRESHOLD_MS) {
+        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Pause ${pause}ms >= ${LLM_CONFIG.PAUSE_THRESHOLD_MS}ms`);
+        return true;
+      }
+
+      // Condition 2: Complete sentence (punctuation + min words)
+      if (wordCount >= LLM_CONFIG.MIN_WORDS_FOR_SENTENCE &&
+          LLM_CONFIG.SENTENCE_MARKERS.test(accText.trim())) {
+        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Sentence end detected`);
+        return true;
+      }
+
+      // Condition 3: Fallback - too many words without sentence end
+      if (wordCount >= LLM_CONFIG.FALLBACK_MAX_WORDS) {
+        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Fallback max words (${wordCount} >= ${LLM_CONFIG.FALLBACK_MAX_WORDS})`);
+        return true;
+      }
+
+      return false;
+    };
+
+    // Check if previous block should be completed before adding new text
+    if (acc.text && shouldCompleteLLMBlock(acc.text, pauseDuration)) {
+      console.log(`📤 [${Math.round(performance.now())}ms] Completing previous LLM block (${acc.wordCount} words)`);
+      sendLLMAccumulator(true);
     }
 
     // Add to accumulator
     const newText = acc.text ? `${acc.text} ${text}` : text;
-    const totalWordCount = acc.wordCount + newWordCount;
+    const totalWordCount = newText.split(/\s+/).length;
     llmAccumulatorRef.current = {
       text: newText,
       wordCount: totalWordCount,
@@ -457,32 +498,22 @@ const App: React.FC = () => {
       responseId
     };
 
-    console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | MIN=${LLM_CONFIG.MIN_WORDS_FOR_LLM} | MAX=${LLM_CONFIG.MAX_WORDS_FOR_LLM}`);
+    console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Text: "${newText.substring(0, 50)}..."`);
 
-    // Clear previous silence timer
+    // Clear previous pause timer
     if (llmSilenceTimerRef.current) {
-      console.log(`⏱️ [${Math.round(performance.now())}ms] Clearing previous silence timer`);
       clearTimeout(llmSilenceTimerRef.current);
       llmSilenceTimerRef.current = null;
     }
 
-    // Check if we should send immediately (max limit reached)
-    if (totalWordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
-      console.log(`🚨 [${Math.round(performance.now())}ms] MAX LIMIT REACHED (${totalWordCount} >= ${LLM_CONFIG.MAX_WORDS_FOR_LLM}) - Sending immediately!`);
-      sendLLMAccumulator(true);
-      return;
-    }
-
-    // Set silence timer - send after X seconds of no new text (only if MIN reached)
-    if (totalWordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM) {
-      console.log(`⏰ [${Math.round(performance.now())}ms] MIN threshold reached (${totalWordCount} >= ${LLM_CONFIG.MIN_WORDS_FOR_LLM}) - Starting ${LLM_CONFIG.SILENCE_TIMEOUT_MS}ms silence timer`);
-      llmSilenceTimerRef.current = setTimeout(() => {
-        console.log(`⏰ [${Math.round(performance.now())}ms] SILENCE TIMER FIRED - Sending accumulator after ${LLM_CONFIG.SILENCE_TIMEOUT_MS}ms silence`);
+    // Set pause detection timer (2 seconds)
+    llmSilenceTimerRef.current = setTimeout(() => {
+      if (llmAccumulatorRef.current.text) {
+        console.log(`⏱️ [${Math.round(performance.now())}ms] PAUSE TIMER FIRED (${LLM_CONFIG.PAUSE_THRESHOLD_MS}ms) - Completing LLM block`);
         sendLLMAccumulator(true);
-      }, LLM_CONFIG.SILENCE_TIMEOUT_MS);
-    } else {
-      console.log(`⏳ [${Math.round(performance.now())}ms] Below MIN threshold (${totalWordCount} < ${LLM_CONFIG.MIN_WORDS_FOR_LLM}) - Waiting for more words...`);
-    }
+      }
+    }, LLM_CONFIG.PAUSE_THRESHOLD_MS);
+
   }, [sendLLMAccumulator]);
 
   // ----------------------------------------------------------------------
@@ -500,41 +531,53 @@ const App: React.FC = () => {
     if (currentBuffer.length > 3) currentBuffer.shift();
     historyBufferRef.current = currentBuffer;
 
-    const questionId = Date.now().toString();
-    const responseId = (Date.now() + 1).toString();
+    // USE SESSION-LEVEL IDs (same ID for entire recording session)
+    const questionId = sessionQuestionIdRef.current || Date.now().toString();
+    const responseId = sessionResponseIdRef.current || (Date.now() + 1).toString();
     const currentContext = contextRef.current;
+
+    console.log(`📌 [${Math.round(finalizeStart)}ms] Using sessionId=${questionId}`);
 
     // Set Processing State (Visual only)
     setAppState(AppState.PROCESSING);
 
-    // 1. UPDATE UI IMMEDIATELY (Create the blocks)
+    // 1. CREATE NEW MESSAGE for Ghost block (each block is separate row)
+    const blockId = `${questionId}_${Date.now()}`;  // Unique ID for each Ghost block
+
+    // Track FIRST message of session for LLM updates
+    if (!firstSessionMessageIdRef.current) {
+      firstSessionMessageIdRef.current = blockId;
+      console.log(`✨ [${Math.round(finalizeStart)}ms] Creating FIRST Ghost block (LLM target): ${blockId}`);
+    } else {
+      console.log(`✨ [${Math.round(finalizeStart)}ms] Creating Ghost block: ${blockId}`);
+    }
+
     const initialMessages: Message[] = [
-        {
-            id: questionId,
-            role: 'interviewer',
-            text: text,
-            translatedText: "...", // Legacy init
-            ghostTranslation: "...", // Stream 1 init
-            aiTranslation: "...", // Stream 2 init
-            isAiTranslated: false,
-            timestamp: Date.now()
-        }
+      {
+        id: blockId,
+        role: 'interviewer',
+        text: text,
+        translatedText: "...",
+        ghostTranslation: "...",
+        aiTranslation: "...",  // LLM translation will accumulate in FIRST message only
+        isAiTranslated: false,
+        timestamp: Date.now()
+      }
     ];
 
     // Create Assistant Placeholder (Unless SIMPLE mode)
-    // In SIMPLE mode, we don't need the answer row, but we DO need AI processing for translation.
     if (currentContext.viewMode !== 'SIMPLE') {
-        initialMessages.push({
-            id: responseId,
-            role: 'assistant',
-            text: '', // Start empty
-            analysis: '',
-            strategy: '',
-            answerTranslation: '',
-            rationale: '',
-            timestamp: Date.now(),
-            latency: 0
-        });
+      initialMessages.push({
+        id: `${responseId}_${Date.now()}`,
+        role: 'assistant',
+        text: '',
+        analysis: '',
+        strategy: '',
+        answerTranslation: '',
+        rationale: '',
+        timestamp: Date.now(),
+        latency: 0
+      });
     }
 
     setMessages(prev => [...prev, ...initialMessages]);
@@ -937,6 +980,14 @@ const App: React.FC = () => {
 
   const startListening = () => {
       if (!recognitionRef.current) return;
+
+      // CREATE SESSION-LEVEL IDs (one per recording session)
+      sessionQuestionIdRef.current = Date.now().toString();
+      sessionResponseIdRef.current = (Date.now() + 1).toString();
+      llmLastActivityRef.current = Date.now();
+
+      console.log(`🎙️ [${Math.round(performance.now())}ms] SESSION START: questionId=${sessionQuestionIdRef.current}`);
+
       try {
           recognitionRef.current.start();
           shouldBeListening.current = true;
@@ -950,6 +1001,8 @@ const App: React.FC = () => {
   };
 
   const stopListening = () => {
+      console.log(`🛑 [${Math.round(performance.now())}ms] SESSION END: questionId=${sessionQuestionIdRef.current}`);
+
       shouldBeListening.current = false;
       try { recognitionRef.current?.stop(); } catch (e) {}
       setAppState(AppState.IDLE);
@@ -969,6 +1022,11 @@ const App: React.FC = () => {
           clearTimeout(llmSilenceTimerRef.current);
           llmSilenceTimerRef.current = null;
       }
+
+      // CLEAR SESSION IDs and refs
+      sessionQuestionIdRef.current = null;
+      sessionResponseIdRef.current = null;
+      firstSessionMessageIdRef.current = null;  // Clear first message ref
 
       if (audioContextRef.current) {
           audioContextRef.current.close();
