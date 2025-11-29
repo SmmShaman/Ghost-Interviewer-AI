@@ -762,6 +762,10 @@ const App: React.FC = () => {
       recognition.lang = langMap[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
+        // CRITICAL: Ignore trailing events after session ended
+        // Web Speech API's stop() is async - it may fire events after shouldBeListening is false
+        if (!shouldBeListening.current) return;
+
         // DELTA TRACKING: Web Speech API gives FULL accumulated text
         // We extract only NEW words by tracking committedWordCountRef
         const eventTime = performance.now();
