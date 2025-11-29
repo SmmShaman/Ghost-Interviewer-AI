@@ -24,7 +24,7 @@ const BLOCK_CONFIG = {
 const LLM_CONFIG = {
     MIN_WORDS_FOR_LLM: 30,          // Minimum words before sending to LLM
     MAX_WORDS_FOR_LLM: 50,          // Force send if exceeds this limit
-    SILENCE_TIMEOUT_MS: 3000        // Send accumulated text after 3s of silence
+    SILENCE_TIMEOUT_MS: 5000        // Send accumulated text after 5s of silence (increased from 3s)
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -393,17 +393,27 @@ const App: React.FC = () => {
   const sendLLMAccumulator = useCallback((force = false) => {
     const acc = llmAccumulatorRef.current;
 
+    console.log(`🔍 [${Math.round(performance.now())}ms] sendLLMAccumulator called | force=${force} | wordCount=${acc.wordCount} | hasText=${!!acc.text.trim()}`);
+
     // Don't send if empty
-    if (!acc.text.trim() || !acc.questionId || !acc.responseId) return;
+    if (!acc.text.trim() || !acc.questionId || !acc.responseId) {
+      console.log(`⏭️ [${Math.round(performance.now())}ms] SKIP: Empty accumulator or missing IDs`);
+      return;
+    }
 
     // Only send if:
     // 1. Force flag is true (Stop button, new question, etc.)
     // 2. OR reached max words limit (safety)
     const shouldSend = force || acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM;
 
-    if (!shouldSend) return;
+    console.log(`🎯 [${Math.round(performance.now())}ms] shouldSend=${shouldSend} | force=${force} | wordCount=${acc.wordCount} | MAX=${LLM_CONFIG.MAX_WORDS_FOR_LLM}`);
 
-    console.log(`🤖 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue`);
+    if (!shouldSend) {
+      console.log(`⏭️ [${Math.round(performance.now())}ms] SKIP: Not ready to send (need force or ${LLM_CONFIG.MAX_WORDS_FOR_LLM}+ words)`);
+      return;
+    }
+
+    console.log(`🚀 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue | Text: "${acc.text.substring(0, 50)}..."`);
 
     // Add to AI queue
     aiQueueRef.current.push({
@@ -415,11 +425,13 @@ const App: React.FC = () => {
 
     // Reset accumulator
     llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+    console.log(`🧹 [${Math.round(performance.now())}ms] Accumulator reset`);
 
     // Clear silence timer
     if (llmSilenceTimerRef.current) {
       clearTimeout(llmSilenceTimerRef.current);
       llmSilenceTimerRef.current = null;
+      console.log(`⏱️ [${Math.round(performance.now())}ms] Silence timer cleared`);
     }
   }, []);
 
@@ -427,38 +439,49 @@ const App: React.FC = () => {
     const acc = llmAccumulatorRef.current;
     const newWordCount = text.split(/\s+/).length;
 
+    console.log(`📥 [${Math.round(performance.now())}ms] addToLLMAccumulator | Adding ${newWordCount} words | Current total: ${acc.wordCount} | New text: "${text.substring(0, 30)}..."`);
+
     // If this is a new question (different ID), flush previous accumulator first
     if (acc.questionId && acc.questionId !== questionId) {
+      console.log(`🔄 [${Math.round(performance.now())}ms] NEW QUESTION detected! Flushing previous accumulator for question ${acc.questionId}`);
       sendLLMAccumulator(true); // Force send previous
     }
 
     // Add to accumulator
     const newText = acc.text ? `${acc.text} ${text}` : text;
+    const totalWordCount = acc.wordCount + newWordCount;
     llmAccumulatorRef.current = {
       text: newText,
-      wordCount: acc.wordCount + newWordCount,
+      wordCount: totalWordCount,
       questionId,
       responseId
     };
 
-    console.log(`📊 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: ${llmAccumulatorRef.current.wordCount} words accumulated`);
+    console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | MIN=${LLM_CONFIG.MIN_WORDS_FOR_LLM} | MAX=${LLM_CONFIG.MAX_WORDS_FOR_LLM}`);
 
     // Clear previous silence timer
     if (llmSilenceTimerRef.current) {
+      console.log(`⏱️ [${Math.round(performance.now())}ms] Clearing previous silence timer`);
       clearTimeout(llmSilenceTimerRef.current);
+      llmSilenceTimerRef.current = null;
     }
 
     // Check if we should send immediately (max limit reached)
-    if (llmAccumulatorRef.current.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
+    if (totalWordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
+      console.log(`🚨 [${Math.round(performance.now())}ms] MAX LIMIT REACHED (${totalWordCount} >= ${LLM_CONFIG.MAX_WORDS_FOR_LLM}) - Sending immediately!`);
       sendLLMAccumulator(true);
       return;
     }
 
     // Set silence timer - send after X seconds of no new text (only if MIN reached)
-    if (llmAccumulatorRef.current.wordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM) {
+    if (totalWordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM) {
+      console.log(`⏰ [${Math.round(performance.now())}ms] MIN threshold reached (${totalWordCount} >= ${LLM_CONFIG.MIN_WORDS_FOR_LLM}) - Starting ${LLM_CONFIG.SILENCE_TIMEOUT_MS}ms silence timer`);
       llmSilenceTimerRef.current = setTimeout(() => {
+        console.log(`⏰ [${Math.round(performance.now())}ms] SILENCE TIMER FIRED - Sending accumulator after ${LLM_CONFIG.SILENCE_TIMEOUT_MS}ms silence`);
         sendLLMAccumulator(true);
       }, LLM_CONFIG.SILENCE_TIMEOUT_MS);
+    } else {
+      console.log(`⏳ [${Math.round(performance.now())}ms] Below MIN threshold (${totalWordCount} < ${LLM_CONFIG.MIN_WORDS_FOR_LLM}) - Waiting for more words...`);
     }
   }, [sendLLMAccumulator]);
 
