@@ -176,23 +176,26 @@ class LocalTranslator {
 
         this.isLoading = true;
         this.progressCallback = onProgress || null;
-        
+
         const targetModelId = this.currentModelType === 'opus' ? this.opusModelId : this.nllbModelId;
-        const isQuantized = this.currentModelType === 'opus'; // Only Opus is int8 quantized in this setup
+        const isQuantized = this.currentModelType === 'opus';
+
+        // WebGPU detection: Use GPU if available for 4-5x speedup
+        const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+        const device = hasWebGPU ? 'webgpu' : 'wasm';
 
         try {
             if (this.progressCallback) this.progressCallback(0);
-            console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}'...`);
-            
+            console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
+
             this.activeModelId = targetModelId;
-            
+
             let model, tokenizer;
 
             if (isQuantized) {
-                // EXPLICIT LOADING: Force the library to use standard filenames (e.g. encoder_model_quantized.onnx)
-                // even though the model is int8. Setting quantized: true enables the "_quantized" suffix lookup.
                 model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
-                    quantized: true, 
+                    quantized: true,
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 } as any);
 
@@ -201,18 +204,17 @@ class LocalTranslator {
                 });
             }
 
-            // Init pipeline
-            // If model/tokenizer are created manually (for quantized), pass them.
-            // If not (for NLLB standard), pass just model ID.
             if (isQuantized && model && tokenizer) {
                  this.translator = await pipeline('translation', targetModelId, {
                     model: model,
                     tokenizer: tokenizer,
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 } as any);
             } else {
-                // Standard loading (NLLB or non-quantized fallback)
+                // Standard loading (NLLB)
                 this.translator = await pipeline('translation', targetModelId, {
+                    device: device, // WebGPU or WASM
                     progress_callback: (data: any) => this.handleProgress(data),
                 });
             }
