@@ -502,74 +502,66 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
       <div className="space-y-6">
 
-        {/* --- MODEL CONFIGURATION SECTION --- */}
-        <div className="space-y-4 border-b border-gray-800 pb-6">
-            
-            {/* STREAM 1: LOCAL MODEL */}
-            <div className="space-y-2">
-                <label className="text-xs font-medium text-blue-400 uppercase">{t.ghostModel.label}</label>
-                <div className="relative">
-                    <select
-                        className="w-full bg-gray-900 border border-blue-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500"
-                        value={context.ghostModel}
-                        onChange={(e) => handleChange('ghostModel', e.target.value)}
-                        disabled={!localModelReady && !context.ghostModel}
-                    >
-                        <option value="opus" className="bg-gray-900 text-gray-200">{t.ghostModel.opus}</option>
-                        <option value="nllb" className="bg-gray-900 text-gray-200">{t.ghostModel.nllb}</option>
-                    </select>
-                    <div className="absolute right-3 top-2.5 flex items-center gap-2 pointer-events-none">
-                        <span className={`w-2 h-2 rounded-full ${localModelReady ? 'bg-emerald-500' : 'bg-yellow-500 animate-pulse'}`}></span>
-                    </div>
+        {/* AI CONFIGURATION */}
+        <div className="bg-gradient-to-br from-purple-950/30 to-blue-950/30 border border-purple-500/20 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+                    <span className="text-sm">🤖</span>
                 </div>
-                {!localModelReady && <div className="text-[10px] text-yellow-500 text-right animate-pulse">{t.ghostModel.switching}</div>}
+                <div>
+                    <h3 className="text-sm font-bold text-purple-300">{t.llmModel?.label || "AI PROVIDER"}</h3>
+                    <p className="text-[9px] text-gray-500">Cloud LLM for strategic responses</p>
+                </div>
             </div>
 
-            {/* STREAM 2: CLOUD LLM */}
-            <div className="space-y-2">
-                <label className="text-xs font-medium text-purple-400 uppercase">{t.llmModel.label}</label>
-                <select
-                    className="w-full bg-gray-900 border border-purple-800 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-purple-500"
-                    value={context.llmProvider}
-                    onChange={(e) => handleChange('llmProvider', e.target.value)}
-                >
-                    <option value="azure" className="bg-gray-900 text-gray-200">{t.llmModel.azure}</option>
-                    <option value="groq" className="bg-gray-900 text-gray-200">{t.llmModel.groq}</option>
-                </select>
+            <select
+                className="w-full bg-gray-900/80 backdrop-blur border border-purple-700/50 rounded-lg px-3 py-2.5 text-sm text-purple-200 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                value={context.llmProvider}
+                onChange={(e) => handleChange('llmProvider', e.target.value)}
+            >
+                <option value="azure" className="bg-gray-900 text-gray-200">Azure OpenAI GPT-4</option>
+                <option value="groq" className="bg-gray-900 text-gray-200">Groq Llama 3.3 70B</option>
+            </select>
 
-                {/* GROQ API KEY INPUT */}
-                {context.llmProvider === 'groq' && (
-                    <div className="animate-fade-in-up mt-2">
-                         <label className="text-[10px] text-gray-500 uppercase block mb-1">{t.llmModel.apiKeyLabel}</label>
-                         <input 
-                            type="password"
-                            className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-300 font-mono focus:border-orange-500 outline-none"
-                            value={context.groqApiKey}
-                            onChange={(e) => handleChange('groqApiKey', e.target.value)}
-                            placeholder="gsk_..."
-                         />
-                    </div>
-                )}
-            </div>
+            {context.llmProvider === 'groq' && (
+                <div className="animate-fade-in-up space-y-1.5 pt-2">
+                    <label className="text-[10px] text-purple-300/70 uppercase tracking-wide font-medium">API Key</label>
+                    <input
+                        type="password"
+                        className="w-full bg-gray-900/80 border border-purple-800/40 rounded-lg px-3 py-2 text-xs text-purple-200 font-mono focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none placeholder-gray-600"
+                        value={context.groqApiKey}
+                        onChange={(e) => handleChange('groqApiKey', e.target.value)}
+                        placeholder="gsk_..."
+                    />
+                </div>
+            )}
         </div>
 
         {/* VIEW MODE SELECTOR */}
-        <div className="space-y-2">
-            <label className="text-xs font-medium text-emerald-400 uppercase">{t.viewMode.label}</label>
+        <div className="space-y-3">
+            <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <label className="text-xs font-bold text-emerald-400 uppercase tracking-wide">{t.viewMode?.label || "VIEW MODE"}</label>
+            </div>
             <div className="grid grid-cols-3 gap-2">
                 {(['FULL', 'FOCUS', 'SIMPLE'] as ViewMode[]).map((mode) => (
                     <button
                         key={mode}
                         onClick={() => handleChange('viewMode', mode)}
-                        className={`text-[10px] py-2 rounded border transition-all font-bold ${
-                            context.viewMode === mode 
-                            ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg' 
-                            : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-800'
+                        className={`relative overflow-hidden text-[10px] py-3 rounded-lg border-2 transition-all font-bold tracking-wide ${
+                            context.viewMode === mode
+                            ? 'bg-gradient-to-br from-emerald-600 to-emerald-700 border-emerald-400 text-white shadow-lg shadow-emerald-500/20 scale-105'
+                            : 'bg-gray-900/50 border-gray-700/50 text-gray-400 hover:bg-gray-800/50 hover:border-gray-600'
                         }`}
                     >
-                        {mode === 'FULL' && t.viewMode.full}
-                        {mode === 'FOCUS' && t.viewMode.focus}
-                        {mode === 'SIMPLE' && t.viewMode.simple}
+                        {context.viewMode === mode && (
+                            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+                        )}
+                        <span className="relative">
+                            {mode === 'FULL' && t.viewMode.full}
+                            {mode === 'FOCUS' && t.viewMode.focus}
+                            {mode === 'SIMPLE' && t.viewMode.simple}
+                        </span>
                     </button>
                 ))}
             </div>

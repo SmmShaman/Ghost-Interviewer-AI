@@ -189,6 +189,17 @@ class LocalTranslator {
     }
 
     async initialize(onProgress?: (progress: number) => void) {
+        // OPTIMIZATION: Skip model loading if Chrome Translator API is available
+        const chromeAvailable = await this.checkChromeTranslator();
+        if (chromeAvailable) {
+            console.log('✅ Chrome Translator API available - skipping model download');
+            if (onProgress) onProgress(100);
+            this.finishInit();
+            return;
+        }
+
+        console.log('⚠️ Chrome Translator API not available - loading fallback model');
+
         if (this.translator) {
              if (onProgress) onProgress(100);
              return;
