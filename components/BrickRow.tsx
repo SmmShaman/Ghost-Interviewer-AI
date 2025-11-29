@@ -7,20 +7,22 @@ import LayeredPhrase from './LayeredPhrase';
 
 interface BrickRowProps {
   interviewerMessage: Message;
-  assistantMessage?: Message; 
-  isLive?: boolean; 
-  liveTranslation?: string; 
+  assistantMessage?: Message;
+  isLive?: boolean;
+  liveTranslation?: string;
   onRegenerate?: () => void;
   viewMode?: ViewMode;
+  isFirstSessionMessage?: boolean;  // Only first message shows LLM translation column
 }
 
-const BrickRow: React.FC<BrickRowProps> = ({ 
-  interviewerMessage, 
-  assistantMessage, 
-  isLive = false, 
+const BrickRow: React.FC<BrickRowProps> = ({
+  interviewerMessage,
+  assistantMessage,
+  isLive = false,
   liveTranslation,
   onRegenerate,
-  viewMode = 'FULL'
+  viewMode = 'FULL',
+  isFirstSessionMessage = false
 }) => {
   
   const Skeleton = ({ className }: { className?: string }) => (
@@ -35,7 +37,10 @@ const BrickRow: React.FC<BrickRowProps> = ({
   // Grid CSS classes based on mode
   let gridClass = 'grid-cols-1 md:grid-cols-3'; // Default FULL
   if (isFocus) gridClass = 'grid-cols-1 md:grid-cols-2';
-  if (isSimple) gridClass = 'grid-cols-1 md:grid-cols-2';
+  // SIMPLE mode: Only show 2 columns for FIRST session message, 1 column for others
+  if (isSimple) {
+    gridClass = isFirstSessionMessage ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1';
+  }
 
   // Determine if we have a valid AI translation for the right column
   // It must NOT be live, and isAiTranslated must be true.
@@ -66,9 +71,9 @@ const BrickRow: React.FC<BrickRowProps> = ({
       </div>
 
       {/* COLUMN 2 (Logic varies by mode) */}
-      
-      {/* SIMPLE MODE: TRANSLATION COLUMN */}
-      {isSimple && (
+
+      {/* SIMPLE MODE: TRANSLATION COLUMN - ONLY for first session message */}
+      {isSimple && isFirstSessionMessage && (
          <div className="flex flex-col border-l-4 md:border-l border-t-4 md:border-t-0 border-orange-500 md:border-orange-500/30 bg-orange-900/10 min-h-[160px]">
               <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>

@@ -1127,14 +1127,19 @@ const App: React.FC = () => {
               let assistantMsg: Message | undefined = undefined;
               if (i + 1 < messages.length && messages[i+1].role === 'assistant') {
                   assistantMsg = messages[i+1];
-                  i++; 
+                  i++;
               }
+
+              // Check if this is the FIRST session message (where LLM translation accumulates)
+              const isFirstSessionMessage = msg.id === firstSessionMessageIdRef.current;
+
               bricks.push(
-                  <BrickRow 
-                     key={msg.id} 
-                     interviewerMessage={msg} 
-                     assistantMessage={assistantMsg} 
+                  <BrickRow
+                     key={msg.id}
+                     interviewerMessage={msg}
+                     assistantMessage={assistantMsg}
                      viewMode={context.viewMode}
+                     isFirstSessionMessage={isFirstSessionMessage}
                   />
               );
           } else if (msg.role === 'candidate') {
