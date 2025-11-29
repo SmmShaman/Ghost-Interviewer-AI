@@ -181,11 +181,22 @@ class LocalTranslator {
         const targetModelId = this.currentModelType === 'opus' ? this.opusModelId : this.nllbModelId;
         const isQuantized = this.currentModelType === 'opus';
 
-        // WebGPU detection: Use GPU if available for 4-5x speedup
-        const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+        // Proper WebGPU detection: Actually check if adapter is available
+        let webgpuAvailable = false;
+        if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+            try {
+                const adapter = await (navigator as any).gpu.requestAdapter();
+                webgpuAvailable = adapter !== null;
+                if (!webgpuAvailable) {
+                    console.log('🔍 WebGPU API present but no adapter available, using WASM');
+                }
+            } catch {
+                console.log('🔍 WebGPU check failed, using WASM');
+            }
+        }
 
-        // Try WebGPU first, then fallback to WASM
-        const devicesToTry: ('webgpu' | 'wasm')[] = hasWebGPU ? ['webgpu', 'wasm'] : ['wasm'];
+        // Only try WebGPU if adapter is actually available
+        const devicesToTry: ('webgpu' | 'wasm')[] = webgpuAvailable ? ['webgpu', 'wasm'] : ['wasm'];
 
         for (const device of devicesToTry) {
             try {
@@ -194,12 +205,19 @@ class LocalTranslator {
 
                 this.activeModelId = targetModelId;
 
+                // Configure ONNX session options based on device
+                // This ensures onnxruntime-web doesn't try WebGPU when we want WASM
+                const sessionOptions = device === 'wasm' ? {
+                    executionProviders: ['wasm'],
+                } : undefined;
+
                 let model, tokenizer;
 
                 if (isQuantized) {
                     model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
                         quantized: true,
                         device: device,
+                        session_options: sessionOptions,
                         progress_callback: (data: any) => this.handleProgress(data),
                     } as any);
 
@@ -213,12 +231,14 @@ class LocalTranslator {
                         model: model,
                         tokenizer: tokenizer,
                         device: device,
+                        session_options: sessionOptions,
                         progress_callback: (data: any) => this.handleProgress(data),
                     } as any);
                 } else {
                     // Standard loading (NLLB)
                     this.translator = await pipeline('translation', targetModelId, {
                         device: device,
+                        session_options: sessionOptions,
                         progress_callback: (data: any) => this.handleProgress(data),
                     });
                 }
