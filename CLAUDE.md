@@ -476,3 +476,154 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 - **WebGPU**: Requires GPU, 4-5x faster than WASM
 - **Chunk caching**: Repeated phrases are cached, only new chunks translated
 - **Delta tracking**: Only NEW words processed, prevents duplicate commits
+
+## Landing Page & Session Management
+
+The app now has a dedicated landing page for mode selection before starting a session.
+
+### Session State
+```typescript
+const [hasSessionStarted, setHasSessionStarted] = useState(false); // Landing vs Working view
+```
+
+### Landing Page Flow
+1. App loads → Shows `renderLandingPage()` with mode selection cards
+2. User clicks mode (SIMPLE/FOCUS/FULL) → `startSessionWithMode(mode)` is called
+3. Mode is set, `hasSessionStarted = true`, microphone auto-starts
+4. Working view is displayed with selected mode
+
+### Back to Landing
+- Home button in header returns to landing page
+- Calls `stopListening()`, `setHasSessionStarted(false)`, `setMessages([])`
+
+```typescript
+const startSessionWithMode = (mode: 'SIMPLE' | 'FOCUS' | 'FULL') => {
+  setContext({...context, viewMode: mode});
+  setHasSessionStarted(true);
+  setTimeout(() => {
+    if (recognitionRef.current && isModelReady) {
+      startListening();
+    }
+  }, 100);
+};
+```
+
+## LLM Request Cancellation (AbortController)
+
+The STOP button now properly cancels all pending LLM requests using AbortController.
+
+### Implementation
+```typescript
+// Ref for abort controller
+const llmAbortControllerRef = useRef<AbortController | null>(null);
+
+// In processAIQueue - create controller before request
+llmAbortControllerRef.current = new AbortController();
+const signal = llmAbortControllerRef.current.signal;
+
+// Pass signal to LLM service
+await generateInterviewAssist(messageText, [], context, onUpdate, signal);
+
+// In stopListening - abort everything
+if (llmAbortControllerRef.current) {
+    llmAbortControllerRef.current.abort();
+    llmAbortControllerRef.current = null;
+}
+aiQueueRef.current = [];  // Clear queue
+llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+```
+
+### geminiService.ts Changes
+- `generateInterviewAssist()` accepts optional `signal?: AbortSignal`
+- `generateViaAzure()` and `generateViaGroq()` pass signal to fetch
+- `processStream()` checks `signal.aborted` before each chunk read
+- AbortError is re-thrown and handled gracefully
+
+### What STOP Does
+1. Aborts current in-flight LLM request
+2. Clears LLM queue (no more pending requests)
+3. Discards LLM accumulator (doesn't flush remaining text)
+4. Resets processing flag
+
+## SIMPLE Mode Three-Column Layout
+
+SIMPLE mode displays a three-column layout for translation-focused use:
+
+### Column Structure
+```
+┌─────────────────┬─────────────────────┬─────────────────────┐
+│  COLUMN 1       │  COLUMN 2           │  COLUMN 3           │
+│  Ghost Blocks   │  LLM Переклад       │  LLM Переклад       │
+│  (Scrollable)   │  (Поточний)         │  (Full Copy)        │
+├─────────────────┼─────────────────────┼─────────────────────┤
+│  Original +     │  Current LLM        │  Same as Column 2   │
+│  Ghost          │  translation from   │  (larger view)      │
+│  translation    │  firstSessionMsg    │                     │
+└─────────────────┴─────────────────────┴─────────────────────┘
+```
+
+### Column Details
+- **Column 1 (Left)**: Scrollable list of interviewer blocks with Ghost translation
+- **Column 2 (Center)**: LLM translation from `firstSessionMessageIdRef` - orange border
+- **Column 3 (Right)**: Same LLM translation, larger view - emerald border
+
+### Session Message Tracking
+```typescript
+const firstSessionMessageIdRef = useRef<string | null>(null);
+
+// Set on first block of session
+if (!firstSessionMessageIdRef.current) {
+    firstSessionMessageIdRef.current = newMessageId;
+}
+
+// LLM translation updates this message
+if (msg.id === firstSessionMessageIdRef.current) {
+    return { ...msg, aiTranslation: partial.inputTranslation };
+}
+```
+
+## LLM Accumulator Pattern
+
+The app accumulates text before sending to LLM for more coherent translations.
+
+### Accumulator Structure
+```typescript
+const llmAccumulatorRef = useRef<{
+  text: string;           // Accumulated text
+  wordCount: number;      // Total words accumulated
+  questionId: string | null;
+  responseId: string | null;
+}>({ text: '', wordCount: 0, questionId: null, responseId: null });
+```
+
+### Configuration
+```typescript
+const LLM_ACCUMULATOR_CONFIG = {
+  MAX_WORDS: 50,           // Send when accumulated 50 words
+  PAUSE_TIMEOUT_MS: 2000,  // Or after 2s silence
+};
+```
+
+### Flow
+1. Speech block finalized → `addToLLMAccumulator(text, questionId, responseId)`
+2. Accumulator collects words until MAX_WORDS or PAUSE_TIMEOUT
+3. `sendLLMAccumulator()` → Enqueues accumulated text to AI queue
+4. Queue processes → Updates `firstSessionMessageIdRef` message with translation
+
+## SIMPLE Mode Prompt (geminiService.ts)
+
+SIMPLE mode uses a minimal translation-only prompt:
+
+```typescript
+if (isSimpleMode) {
+    return `Переклади наступний текст на розмовну ${context.nativeLanguage} мову.
+
+Вхідний текст (${context.targetLanguage}): "${currentInput}"
+
+Формат відповіді:
+[INPUT_TRANSLATION]
+твій переклад тут`;
+}
+```
+
+This skips all context (Resume, Job, KB) and only requests translation.
