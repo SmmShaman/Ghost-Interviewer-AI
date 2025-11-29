@@ -225,6 +225,8 @@ const App: React.FC = () => {
     localTranslator.setLanguages(context.targetLanguage, context.nativeLanguage);
     // Clear translation cache when languages change
     localTranslator.clearCache();
+    // Pre-initialize Chrome Translator API (prevents race condition)
+    localTranslator.preInitChrome();
   }, [context.targetLanguage, context.nativeLanguage]);
 
   // RETRY GHOST TRANSLATIONS when model becomes ready
