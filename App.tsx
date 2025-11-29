@@ -139,8 +139,9 @@ const App: React.FC = () => {
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSetupOpen, setIsSetupOpen] = useState(false);
-  const [stealthMode, setStealthMode] = useState(false); 
+  const [stealthMode, setStealthMode] = useState(false);
   const [uiLang, setUiLang] = useState<'en' | 'uk'>('en');
+  const [hasSessionStarted, setHasSessionStarted] = useState(false); // Landing vs Working view
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [inputLevel, setInputLevel] = useState(0); // For candidate visualizer
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
@@ -1152,32 +1153,137 @@ const App: React.FC = () => {
       return bricks;
   };
 
-  const renderStartScreen = () => (
-    <div className="h-[60vh] flex flex-col items-center justify-center space-y-8 animate-fade-in-up">
-        <div className="text-center space-y-2">
-            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-blue-500">
-                {t.title}
+  // Start session with selected mode
+  const startSessionWithMode = (mode: 'SIMPLE' | 'FOCUS' | 'FULL') => {
+    setContext({...context, viewMode: mode});
+    setHasSessionStarted(true);
+    // Auto-start listening after mode selection
+    setTimeout(() => {
+      if (recognitionRef.current && isModelReady) {
+        startListening();
+      }
+    }, 100);
+  };
+
+  // Full-screen Landing Page (shown before session starts)
+  const renderLandingPage = () => (
+    <div className="h-screen w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up">
+        {/* Model loading indicator */}
+        {!isModelReady && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
+            <div className={`flex items-center gap-3 px-4 py-2 rounded-full ${modelError ? 'bg-red-900/80 border-red-500' : 'bg-blue-900/80 border-blue-500/30'} border backdrop-blur-md`}>
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${modelError ? 'text-white' : 'text-blue-200 animate-pulse'}`}>
+                {modelError ? "MODEL ERROR" : `${t.modelDownload} ${modelProgress}%`}
+              </span>
+              {!modelError && (
+                <div className="w-20 h-1.5 bg-blue-950 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-400 transition-all duration-300" style={{ width: `${modelProgress}%` }} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Title */}
+        <div className="text-center space-y-3 mb-12">
+            <h1 className="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
+                Ghost Interviewer
             </h1>
-            <p className="text-gray-400 font-mono text-sm tracking-wider">{t.selectMode}</p>
+            <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl px-6">
-            <button onClick={() => setContext({...context, viewMode: 'SIMPLE'})} className={`p-6 rounded-xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 hover:border-amber-500/50 transition-all group text-left relative overflow-hidden ${context.viewMode === 'SIMPLE' ? 'ring-2 ring-amber-500' : ''}`}>
-                <div className="text-amber-400 font-bold mb-2 tracking-widest text-xs uppercase">{t.modes.simple}</div>
-                <div className="text-gray-300 text-sm leading-relaxed mb-4">{t.modes.simpleDesc}</div>
+
+        {/* Mode Selection Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-6 mb-12">
+            {/* SIMPLE Mode */}
+            <button
+              onClick={() => startSessionWithMode('SIMPLE')}
+              disabled={!isModelReady}
+              className={`group p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
+                hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
+                transition-all duration-300 text-left relative overflow-hidden
+                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all"></div>
+                <div className="relative">
+                    <div className="text-amber-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
+                        {t.modes.simple}
+                    </div>
+                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.simpleDesc}</div>
+                    <div className="mt-6 flex items-center gap-2 text-amber-500/70 text-xs font-mono">
+                        <MicIcon className="w-4 h-4" />
+                        <span>Click to start</span>
+                    </div>
+                </div>
             </button>
-            <button onClick={() => setContext({...context, viewMode: 'FOCUS'})} className={`p-6 rounded-xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 hover:border-blue-500/50 transition-all group text-left relative overflow-hidden ${context.viewMode === 'FOCUS' ? 'ring-2 ring-blue-500' : ''}`}>
-                <div className="text-blue-400 font-bold mb-2 tracking-widest text-xs uppercase">{t.modes.focus}</div>
-                <div className="text-gray-300 text-sm leading-relaxed mb-4">{t.modes.focusDesc}</div>
+
+            {/* FOCUS Mode */}
+            <button
+              onClick={() => startSessionWithMode('FOCUS')}
+              disabled={!isModelReady}
+              className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
+                hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
+                transition-all duration-300 text-left relative overflow-hidden
+                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
+                <div className="relative">
+                    <div className="text-blue-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
+                        {t.modes.focus}
+                    </div>
+                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.focusDesc}</div>
+                    <div className="mt-6 flex items-center gap-2 text-blue-500/70 text-xs font-mono">
+                        <MicIcon className="w-4 h-4" />
+                        <span>Click to start</span>
+                    </div>
+                </div>
             </button>
-             <button onClick={() => setContext({...context, viewMode: 'FULL'})} className={`p-6 rounded-xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 hover:border-emerald-500/50 transition-all group text-left relative overflow-hidden ${context.viewMode === 'FULL' ? 'ring-2 ring-emerald-500' : ''}`}>
-                <div className="text-emerald-400 font-bold mb-2 tracking-widest text-xs uppercase">{t.modes.full}</div>
-                <div className="text-gray-300 text-sm leading-relaxed mb-4">{t.modes.fullDesc}</div>
+
+            {/* FULL Mode */}
+            <button
+              onClick={() => startSessionWithMode('FULL')}
+              disabled={!isModelReady}
+              className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
+                hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
+                transition-all duration-300 text-left relative overflow-hidden
+                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all"></div>
+                <div className="relative">
+                    <div className="text-emerald-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+                        {t.modes.full}
+                    </div>
+                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.fullDesc}</div>
+                    <div className="mt-6 flex items-center gap-2 text-emerald-500/70 text-xs font-mono">
+                        <MicIcon className="w-4 h-4" />
+                        <span>Click to start</span>
+                    </div>
+                </div>
             </button>
         </div>
-        <div className="text-xs text-gray-500 font-mono">{t.pressMic}</div>
+
+        {/* Footer hint */}
+        <div className="text-center space-y-2">
+            <p className="text-xs text-gray-500 font-mono">{t.pressMic}</p>
+            <button onClick={() => setIsSetupOpen(true)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-2 mx-auto">
+                <SettingsIcon className="w-3 h-3" />
+                <span>Settings</span>
+            </button>
+        </div>
+
+        {/* Settings Panel (available from landing) */}
+        <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} />
     </div>
   );
 
+  // LANDING PAGE: Show mode selection before session starts
+  if (!hasSessionStarted) {
+    return renderLandingPage();
+  }
+
+  // WORKING VIEW: Show after mode is selected
   return (
     <div className={`relative h-screen w-screen flex flex-col transition-opacity duration-300 ${stealthMode ? 'bg-transparent' : 'bg-gray-950'}`}>
       {!isModelReady && (
@@ -1221,6 +1327,24 @@ const App: React.FC = () => {
 
       <div className={`flex justify-between items-center p-4 z-40 ${stealthMode ? 'opacity-20 hover:opacity-100 transition-opacity' : 'bg-gray-900/50 backdrop-blur border-b border-gray-800'} ${!isModelReady ? 'mt-10' : ''}`}>
         <div className="flex items-center gap-4">
+            {/* Back to Home */}
+            <button
+              onClick={() => { stopListening(); setHasSessionStarted(false); setMessages([]); }}
+              className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700"
+              title="Back to mode selection"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+            </button>
+            {/* Current Mode Indicator */}
+            <div className={`px-3 py-1.5 rounded-lg border text-xs font-black uppercase tracking-widest ${
+              context.viewMode === 'SIMPLE' ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' :
+              context.viewMode === 'FOCUS' ? 'border-blue-500/50 bg-blue-500/10 text-blue-400' :
+              'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
+            }`}>
+                {context.viewMode}
+            </div>
             <button onClick={() => setIsSetupOpen(true)} className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700">
                 <SettingsIcon />
             </button>
@@ -1269,8 +1393,6 @@ const App: React.FC = () => {
              <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                  {/* COLUMN 1: Scrollable Ghost blocks */}
                  <div className="space-y-6">
-                     {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
-
                      {renderMessages()}
 
                      {interimTranscript && !isUserSpeaking && (
@@ -1353,8 +1475,6 @@ const App: React.FC = () => {
          ) : (
              /* OTHER MODES: Single column layout */
              <div className="max-w-[1600px] mx-auto">
-                 {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
-
                  {renderMessages()}
 
                  {interimTranscript && !isUserSpeaking && (
