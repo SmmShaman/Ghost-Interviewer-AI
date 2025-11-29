@@ -16,7 +16,8 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 - **Framework**: React 19 with TypeScript
 - **Build Tool**: Vite 6
 - **Styling**: Tailwind CSS (CDN with custom config in index.html)
-- **Local AI**: Hugging Face Transformers (`@huggingface/transformers`)
+- **Local AI**: Hugging Face Transformers (`@huggingface/transformers`) with WebGPU/WASM
+- **Native Translation**: Chrome Translator API (Chrome 138+) - instant, no models
 - **Cloud AI**: Azure OpenAI or Groq (Llama 3)
 - **Speech Recognition**: Web Speech API (browser-native)
 - **Hosting**: Netlify (auto-deploy from main branch)
@@ -135,12 +136,27 @@ The app uses a parallel processing approach:
    - Provides structured output: `[INPUT_TRANSLATION]`, `[ANALYSIS]`, `[STRATEGY]`, `[ANSWER]`
    - Providers: Azure OpenAI or Groq (Llama 3.3 70B)
 
-### Speech Block Processing
+### Speech Block Processing (Delta Tracking)
 
-Speech is processed in blocks based on:
-- **Silence timeout**: 2 seconds of silence triggers commit
-- **Max words**: 25 words force a block split
-- **Sentence detection**: Punctuation with 8+ words triggers split
+Web Speech API gives **full accumulated text** each time, not deltas. The app uses Delta Tracking to extract only NEW words:
+
+```typescript
+// Track how many words already committed
+const committedWordCountRef = useRef<number>(0);
+
+// On each speech event:
+const allWords = fullText.split(/\s+/);
+const newWords = allWords.slice(committedWordCountRef.current);  // Only NEW
+
+// On commit:
+committedWordCountRef.current = totalWordCount;  // Update position
+```
+
+**Block splitting triggers:**
+- **Silence timeout**: 1.5 seconds of silence
+- **Max words per block**: 12 words (final chunks)
+- **Overflow limit**: 20 words (force split interim)
+- **Sentence detection**: Punctuation with 5+ words
 
 ### State Management
 
@@ -269,9 +285,11 @@ interface Message {
 
 ```typescript
 const BLOCK_CONFIG = {
-  SILENCE_TIMEOUT_MS: 2000,    // Split if silence > 2s
-  MAX_WORDS_PER_BLOCK: 25,     // Force split at 25 words
-  MIN_WORDS_FOR_SENTENCE: 8,   // Only split on punctuation if > 8 words
+  SILENCE_TIMEOUT_MS: 1500,       // Split if silence > 1.5s
+  MAX_WORDS_PER_BLOCK: 12,        // Split FINAL chunks at 12 words
+  MAX_WORDS_OVERFLOW: 20,         // Force split interim at 20 words
+  MIN_WORDS_FOR_SENTENCE: 5,      // Allow sentence split after 5 words
+  SENTENCE_END_REGEX: /[.!?।।,;:]+$/  // Punctuation detection
 };
 ```
 
@@ -287,10 +305,47 @@ const BLOCK_CONFIG = {
 - API key entered via UI and stored in context
 - OpenAI-compatible API format
 
-### Local Models (services/localTranslator.ts)
+### Translation Service (services/localTranslator.ts)
+
+Translation uses a priority-based fallback system:
+
+```
+1. Chrome Translator API (Chrome 138+) → Instant, native, no download
+2. Transformers.js + WebGPU → 4-5x faster than WASM
+3. Transformers.js + WASM → Universal fallback
+```
+
+**Models:**
 - **Opus**: `goldcc/opus-mt-no-uk-int8` - Fast, quantized, 56MB
 - **NLLB**: `Xenova/nllb-200-distilled-600M` - Higher quality, 600MB
-- Loaded from Hugging Face CDN on first use
+
+**Chrome Translator API (Chrome 138+):**
+```typescript
+// Check availability
+if ('Translator' in window) {
+    const translator = await Translator.create({
+        sourceLanguage: 'no',
+        targetLanguage: 'uk'
+    });
+    const result = await translator.translate(text);  // Instant!
+}
+```
+
+**WebGPU Acceleration:**
+```typescript
+const hasWebGPU = 'gpu' in navigator;
+const device = hasWebGPU ? 'webgpu' : 'wasm';  // Auto-detect
+
+await pipeline('translation', modelId, { device });
+```
+
+**Key methods:**
+```typescript
+localTranslator.translatePhraseChunked(text)  // For interim (cached chunks)
+localTranslator.translatePhrase(text)          // For finalized blocks
+localTranslator.isUsingChromeAPI()             // Check if using native API
+localTranslator.getStatus()                    // { isReady, useChromeAPI, ... }
+```
 
 ## Styling Conventions
 
@@ -401,6 +456,23 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 
 ## Browser Compatibility
 
-- **Required**: Chrome, Edge, or other Chromium-based browsers
-- **Reason**: Web Speech API support
-- Firefox and Safari have limited or no Web Speech API support
+| Feature | Chrome 138+ | Chrome 113+ | Edge | Firefox | Safari |
+|---------|-------------|-------------|------|---------|--------|
+| Web Speech API | ✅ | ✅ | ✅ | ❌ (flag) | ⚠️ Limited |
+| Chrome Translator API | ✅ Native | ❌ | ❌ | ❌ | ❌ |
+| WebGPU | ✅ | ✅ | ✅ | ⚠️ Flag | ⚠️ Limited |
+| WASM SIMD | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+**Recommended**: Chrome 138+ for best experience (native translation + WebGPU + Speech API)
+
+**Fallback chain:**
+1. Chrome 138+: Native Translator API (instant)
+2. Chrome 113+: WebGPU acceleration (4-5x faster)
+3. Any modern browser: WASM (works everywhere)
+
+## Performance Tips
+
+- **Chrome Translator API**: No model download, instant translation
+- **WebGPU**: Requires GPU, 4-5x faster than WASM
+- **Chunk caching**: Repeated phrases are cached, only new chunks translated
+- **Delta tracking**: Only NEW words processed, prevents duplicate commits
