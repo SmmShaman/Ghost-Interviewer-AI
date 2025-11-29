@@ -14,10 +14,17 @@ import { translations } from './translations';
 // --- CONFIGURATION CONSTANTS ---
 const BLOCK_CONFIG = {
     SILENCE_TIMEOUT_MS: 1500,       // Split if silence > 1.5s (reduced for faster response)
-    MAX_WORDS_PER_BLOCK: 12,        // Split FINAL chunks at 12 words
+    MAX_WORDS_PER_BLOCK: 12,        // Split FINAL chunks at 12 words (Ghost translation)
     MAX_WORDS_OVERFLOW: 20,         // Force split interim at 20 words (hard limit)
     MIN_WORDS_FOR_SENTENCE: 5,      // Allow sentence split after just 5 words
     SENTENCE_END_REGEX: /[.!?।。,;:]+$/ // Punctuation detection (added comma, semicolon, colon)
+};
+
+// LLM ACCUMULATION CONFIG: Larger blocks for better context
+const LLM_CONFIG = {
+    MIN_WORDS_FOR_LLM: 30,          // Minimum words before sending to LLM
+    MAX_WORDS_FOR_LLM: 50,          // Force send if exceeds this limit
+    SILENCE_TIMEOUT_MS: 3000        // Send accumulated text after 3s of silence
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -167,8 +174,17 @@ const App: React.FC = () => {
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
-  const aiQueueRef = useRef<AIQueueItem[]>([]); 
+  const aiQueueRef = useRef<AIQueueItem[]>([]);
   const isAIProcessingRef = useRef(false); // Mutex for AI processing
+
+  // LLM ACCUMULATOR: Buffer for collecting larger text blocks before sending to LLM
+  const llmAccumulatorRef = useRef<{
+    text: string;           // Accumulated text
+    wordCount: number;      // Total words accumulated
+    questionId: string | null;  // Question ID for the accumulated block
+    responseId: string | null;  // Response ID for the accumulated block
+  }>({ text: '', wordCount: 0, questionId: null, responseId: null });
+  const llmSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const contextRef = useRef(context);
   
@@ -372,6 +388,81 @@ const App: React.FC = () => {
   };
 
   // ----------------------------------------------------------------------
+  // LLM ACCUMULATOR FUNCTIONS
+  // ----------------------------------------------------------------------
+  const sendLLMAccumulator = useCallback((force = false) => {
+    const acc = llmAccumulatorRef.current;
+
+    // Don't send if empty
+    if (!acc.text.trim() || !acc.questionId || !acc.responseId) return;
+
+    const shouldSend = force ||
+                      acc.wordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM ||
+                      acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM;
+
+    if (!shouldSend) return;
+
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue`);
+
+    // Add to AI queue
+    aiQueueRef.current.push({
+      id: acc.questionId,
+      text: acc.text,
+      responseId: acc.responseId
+    });
+    processAIQueue();
+
+    // Reset accumulator
+    llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+
+    // Clear silence timer
+    if (llmSilenceTimerRef.current) {
+      clearTimeout(llmSilenceTimerRef.current);
+      llmSilenceTimerRef.current = null;
+    }
+  }, []);
+
+  const addToLLMAccumulator = useCallback((text: string, questionId: string, responseId: string) => {
+    const acc = llmAccumulatorRef.current;
+    const newWordCount = text.split(/\s+/).length;
+
+    // If this is a new question (different ID), flush previous accumulator first
+    if (acc.questionId && acc.questionId !== questionId) {
+      sendLLMAccumulator(true); // Force send previous
+    }
+
+    // Add to accumulator
+    const newText = acc.text ? `${acc.text} ${text}` : text;
+    llmAccumulatorRef.current = {
+      text: newText,
+      wordCount: acc.wordCount + newWordCount,
+      questionId,
+      responseId
+    };
+
+    console.log(`📊 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: ${llmAccumulatorRef.current.wordCount} words accumulated`);
+
+    // Clear previous silence timer
+    if (llmSilenceTimerRef.current) {
+      clearTimeout(llmSilenceTimerRef.current);
+    }
+
+    // Check if we should send immediately (max limit reached)
+    if (llmAccumulatorRef.current.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
+      sendLLMAccumulator(true);
+      return;
+    }
+
+    // Set silence timer - send after X seconds of no new text
+    llmSilenceTimerRef.current = setTimeout(() => {
+      sendLLMAccumulator(true);
+    }, LLM_CONFIG.SILENCE_TIMEOUT_MS);
+
+    // Try to send if minimum reached
+    sendLLMAccumulator(false);
+  }, [sendLLMAccumulator]);
+
+  // ----------------------------------------------------------------------
   // BLOCK FINALIZATION & PARALLEL STREAMS
   // ----------------------------------------------------------------------
   const finalizeBlock = (text: string) => {
@@ -470,16 +561,10 @@ const App: React.FC = () => {
         }
     });
 
-    // STREAM 2: AI ANALYSIS QUEUE
+    // STREAM 2: LLM ACCUMULATOR (collect larger blocks for better context)
     // Run AI analysis even in SIMPLE mode to get [INPUT_TRANSLATION]
-    // PUSH FULL OBJECT to avoid state lookup race condition
-    console.log(`🤖 [${Math.round(performance.now())}ms] LLM QUEUE: Adding block to queue (queue size: ${aiQueueRef.current.length + 1})`);
-    aiQueueRef.current.push({
-        id: questionId,
-        text: text,
-        responseId: responseId
-    });
-    processAIQueue(); // Trigger processor
+    // Instead of sending immediately, accumulate text for better LLM context
+    addToLLMAccumulator(text, questionId, responseId);
 
     // Reset visual state when Ghost is done (AI might still be chugging in background)
     ghostPromise.finally(() => {
@@ -851,7 +936,17 @@ const App: React.FC = () => {
       committedWordCountRef.current = 0;
       lastFullTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      
+
+      // Flush LLM accumulator - send any remaining text
+      if (llmAccumulatorRef.current.text.trim()) {
+          console.log(`🛑 [${Math.round(performance.now())}ms] STOP: Flushing LLM accumulator (${llmAccumulatorRef.current.wordCount} words)`);
+          sendLLMAccumulator(true);
+      }
+      if (llmSilenceTimerRef.current) {
+          clearTimeout(llmSilenceTimerRef.current);
+          llmSilenceTimerRef.current = null;
+      }
+
       if (audioContextRef.current) {
           audioContextRef.current.close();
           audioContextRef.current = null;
