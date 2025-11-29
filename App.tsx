@@ -113,6 +113,17 @@ interface AIQueueItem {
     text: string;       // The Question Text
     responseId: string; // The ID of the Assistant Message to update
     targetMessageId: string; // The ID of the Interviewer Message to receive LLM translation
+    pendingBlockId?: string; // The ID of the visual pending block in center column
+}
+
+// Pending LLM Block for visual queue in center column
+interface PendingLLMBlock {
+    id: string;
+    text: string;           // Original text being collected/translated
+    wordCount: number;
+    status: 'collecting' | 'processing' | 'completed';
+    translation?: string;   // LLM translation when completed
+    timestamp: number;
 }
 
 const App: React.FC = () => {
@@ -146,7 +157,13 @@ const App: React.FC = () => {
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [inputLevel, setInputLevel] = useState(0); // For candidate visualizer
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  
+
+  // PENDING LLM BLOCKS: Visual queue for center column
+  // Shows blocks at different stages: collecting → processing → completed
+  const [pendingBlocks, setPendingBlocks] = useState<PendingLLMBlock[]>([]);
+  const [completedBlocks, setCompletedBlocks] = useState<PendingLLMBlock[]>([]);
+  const [currentCollectingText, setCurrentCollectingText] = useState<string>(''); // Live text being collected
+
   // Model Download State
   const [modelProgress, setModelProgress] = useState(0);
   const [isModelReady, setIsModelReady] = useState(false);
@@ -352,13 +369,14 @@ const App: React.FC = () => {
         const queueItem = aiQueueRef.current.shift();
         if (!queueItem) return;
 
-        const { id: messageIdToProcess, text: messageText, responseId, targetMessageId } = queueItem;
+        const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
         const wordCount = messageText.split(/\s+/).length;
 
-        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, provider: ${currentContext.llmProvider}`);
+        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, block: ${pendingBlockId}, provider: ${currentContext.llmProvider}`);
 
         // 5. Generate
         const startTime = performance.now();
+        let finalTranslation = '';
 
         await generateInterviewAssist(
             messageText,
@@ -369,6 +387,12 @@ const App: React.FC = () => {
                 if (signal.aborted) return;
 
                 const currentTime = performance.now();
+
+                // Track final translation for pending block
+                if (partial.inputTranslation) {
+                    finalTranslation = partial.inputTranslation;
+                }
+
                 setMessages(prev => prev.map(msg => {
                     // Update Assistant Message (Right/Middle Columns)
                     if (msg.id === responseId) {
@@ -401,6 +425,20 @@ const App: React.FC = () => {
 
         const endTime = performance.now();
         console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total`);
+
+        // Move pending block to completed with translation
+        if (pendingBlockId && finalTranslation) {
+            setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
+            setCompletedBlocks(prev => [...prev, {
+                id: pendingBlockId,
+                text: messageText,
+                wordCount,
+                status: 'completed' as const,
+                translation: finalTranslation,
+                timestamp: Date.now()
+            }]);
+            console.log(`✅ [${Math.round(performance.now())}ms] Block ${pendingBlockId} completed and moved to Column 3`);
+        }
 
     } catch (e: any) {
         if (e.name === 'AbortError') {
@@ -447,12 +485,29 @@ const App: React.FC = () => {
 
     console.log(`🚀 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue | Target: ${acc.targetMessageId} | Text: "${acc.text.substring(0, 50)}..."`);
 
-    // Add to AI queue with target message ID
+    // Create a pending block for visual display
+    const blockId = `block_${Date.now()}`;
+    const newBlock: PendingLLMBlock = {
+      id: blockId,
+      text: acc.text,
+      wordCount: acc.wordCount,
+      status: 'processing',
+      timestamp: Date.now()
+    };
+
+    // Add to pending blocks (visual queue)
+    setPendingBlocks(prev => [...prev, newBlock]);
+
+    // Clear the collecting text display
+    setCurrentCollectingText('');
+
+    // Add to AI queue with target message ID AND block ID
     aiQueueRef.current.push({
       id: acc.questionId,
       text: acc.text,
       responseId: acc.responseId,
-      targetMessageId: acc.targetMessageId
+      targetMessageId: acc.targetMessageId,
+      pendingBlockId: blockId  // Track which visual block this corresponds to
     });
     processAIQueue();
 
@@ -519,6 +574,9 @@ const App: React.FC = () => {
       responseId,
       targetMessageId: acc.targetMessageId || targetMessageId // Keep first target if accumulating
     };
+
+    // Update visual collecting text for center column
+    setCurrentCollectingText(newText);
 
     console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Target: ${llmAccumulatorRef.current.targetMessageId} | Text: "${newText.substring(0, 50)}..."`);
 
@@ -1165,7 +1223,7 @@ const App: React.FC = () => {
       sessionResponseIdRef.current = null;
 
       // Clear LLM accumulator
-      llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+      llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null, targetMessageId: null };
       if (llmSilenceTimerRef.current) {
           clearTimeout(llmSilenceTimerRef.current);
           llmSilenceTimerRef.current = null;
@@ -1185,6 +1243,11 @@ const App: React.FC = () => {
       setTranscript("");
       setInterimTranscript("");
       setLiveTranslation("");
+
+      // Clear pending/completed blocks for center column
+      setPendingBlocks([]);
+      setCompletedBlocks([]);
+      setCurrentCollectingText('');
 
       setIsClearModalOpen(false);
   };
@@ -1484,70 +1547,109 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* COLUMN 2: LLM Translation - Current/Latest Block */}
-                 <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
-                             <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
-                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">LLM Переклад (Поточний)</span>
+                 {/* COLUMN 2: Visual Queue - Collecting + Processing Blocks */}
+                 <div className="sticky top-8 h-fit space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
+                     {/* COLLECTING BLOCK - Currently accumulating words */}
+                     {currentCollectingText && (
+                         <div className="border-l-4 border-yellow-500 bg-yellow-900/10 rounded-lg shadow-xl animate-fade-in-up">
+                             <div className="px-4 py-2 bg-yellow-950/30 border-b border-yellow-500/10 flex items-center justify-between">
+                                 <div className="flex items-center gap-2">
+                                     <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></span>
+                                     <span className="text-[10px] font-black text-yellow-300 uppercase tracking-widest">Збір слів...</span>
+                                 </div>
+                                 <div className="flex items-center gap-2">
+                                     <span className="text-[10px] font-mono text-yellow-400">
+                                         {currentCollectingText.split(/\s+/).length} / {LLM_CONFIG.MAX_WORDS_FOR_LLM}
+                                     </span>
+                                     <div className="w-16 h-1.5 bg-yellow-900/50 rounded-full overflow-hidden">
+                                         <div
+                                             className="h-full bg-yellow-400 transition-all duration-300"
+                                             style={{ width: `${Math.min(100, (currentCollectingText.split(/\s+/).length / LLM_CONFIG.MAX_WORDS_FOR_LLM) * 100)}%` }}
+                                         />
+                                     </div>
+                                 </div>
+                             </div>
+                             <div className="p-4">
+                                 <div className="text-sm text-yellow-200/80 leading-relaxed">
+                                     {currentCollectingText}
+                                 </div>
+                             </div>
                          </div>
-                         <div className="p-6 flex flex-col justify-center min-h-[150px]">
-                             {(() => {
-                                 // Get LATEST message with LLM translation
-                                 const messagesWithTranslation = messages.filter(m =>
-                                     m.role === 'interviewer' && m.aiTranslation && m.aiTranslation !== '...'
-                                 );
-                                 const latestMsg = messagesWithTranslation[messagesWithTranslation.length - 1];
-                                 const llmTranslation = latestMsg?.aiTranslation || '';
+                     )}
 
-                                 return llmTranslation ? (
-                                     <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
-                                         {llmTranslation}
-                                     </div>
-                                 ) : (
-                                     <div className="space-y-3 opacity-50 select-none">
-                                         <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
-                                             <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                             ОЧІКУВАННЯ LLM...
-                                         </div>
-                                         <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
-                                         <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
-                                     </div>
-                                 );
-                             })()}
+                     {/* PROCESSING BLOCKS - Waiting for LLM */}
+                     {pendingBlocks.map((block, idx) => (
+                         <div key={block.id} className="border-l-4 border-orange-500 bg-orange-900/10 rounded-lg shadow-xl animate-fade-in-up">
+                             <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center justify-between">
+                                 <div className="flex items-center gap-2">
+                                     <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
+                                     <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">
+                                         Переклад... {block.wordCount} слів
+                                     </span>
+                                 </div>
+                                 <div className="flex gap-1">
+                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
+                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '150ms'}}></div>
+                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '300ms'}}></div>
+                                 </div>
+                             </div>
+                             <div className="p-4">
+                                 <div className="text-sm text-orange-200/60 leading-relaxed italic">
+                                     {block.text}
+                                 </div>
+                             </div>
                          </div>
-                     </div>
+                     ))}
+
+                     {/* Empty state */}
+                     {!currentCollectingText && pendingBlocks.length === 0 && (
+                         <div className="border-l-4 border-gray-600 bg-gray-900/10 rounded-lg shadow-xl">
+                             <div className="px-4 py-2 bg-gray-950/30 border-b border-gray-600/10 flex items-center gap-2">
+                                 <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Черга LLM</span>
+                             </div>
+                             <div className="p-6 flex flex-col items-center justify-center min-h-[100px] text-center">
+                                 <div className="text-gray-500 text-xs">
+                                     Слова з'являться тут під час запису...
+                                 </div>
+                             </div>
+                         </div>
+                     )}
                  </div>
 
-                 {/* COLUMN 3: LLM Translation - All Blocks */}
+                 {/* COLUMN 3: Completed Translations */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
-                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">LLM Переклад (Всі блоки)</span>
+                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between sticky top-0 bg-emerald-950/80 backdrop-blur">
+                             <div className="flex items-center gap-2">
+                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                 <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Готові переклади</span>
+                             </div>
+                             {completedBlocks.length > 0 && (
+                                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded">
+                                     {completedBlocks.length} блоків
+                                 </span>
+                             )}
                          </div>
                          <div className="p-4 space-y-4">
-                             {(() => {
-                                 // Get ALL messages with LLM translations
-                                 const messagesWithTranslation = messages.filter(m =>
-                                     m.role === 'interviewer' && m.aiTranslation && m.aiTranslation !== '...'
-                                 );
-
-                                 return messagesWithTranslation.length > 0 ? (
-                                     messagesWithTranslation.map((msg, idx) => (
-                                         <div key={msg.id} className="pb-3 border-b border-emerald-500/10 last:border-b-0">
-                                             <div className="text-[10px] text-emerald-500/50 mb-1">Блок {idx + 1}</div>
-                                             <div className="text-sm md:text-base text-emerald-200 leading-relaxed font-medium">
-                                                 {msg.aiTranslation}
-                                             </div>
+                             {completedBlocks.length > 0 ? (
+                                 completedBlocks.map((block, idx) => (
+                                     <div key={block.id} className="pb-3 border-b border-emerald-500/10 last:border-b-0 animate-fade-in-up">
+                                         <div className="text-[10px] text-emerald-500/50 mb-1 flex items-center gap-2">
+                                             <span>Блок {idx + 1}</span>
+                                             <span className="text-emerald-600">•</span>
+                                             <span>{block.wordCount} слів</span>
                                          </div>
-                                     ))
-                                 ) : (
-                                     <div className="text-[10px] text-emerald-500/50 italic">
-                                         Переклад з'явиться тут після обробки...
+                                         <div className="text-base md:text-lg text-emerald-200 leading-relaxed font-medium">
+                                             {block.translation}
+                                         </div>
                                      </div>
-                                 );
-                             })()}
+                                 ))
+                             ) : (
+                                 <div className="text-[10px] text-emerald-500/50 italic text-center py-8">
+                                     Готові переклади з'являться тут...
+                                 </div>
+                             )}
                          </div>
                      </div>
                  </div>
