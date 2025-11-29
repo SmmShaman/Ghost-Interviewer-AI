@@ -1264,10 +1264,10 @@ const App: React.FC = () => {
       )}
 
       <div className={`flex-1 overflow-y-auto px-4 md:px-8 py-8 ${stealthMode ? 'opacity-90' : ''}`}>
-         {/* SIMPLE MODE: Two-column layout with sticky LLM translation */}
+         {/* SIMPLE MODE: Three-column layout */}
          {context.viewMode === 'SIMPLE' ? (
-             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                 {/* LEFT COLUMN: Scrollable Ghost blocks */}
+             <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                 {/* COLUMN 1: Scrollable Ghost blocks */}
                  <div className="space-y-6">
                      {messages.length === 0 && !isUserSpeaking && !interimTranscript && renderStartScreen()}
 
@@ -1289,30 +1289,60 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* RIGHT COLUMN: Sticky LLM translation */}
+                 {/* COLUMN 2: Current forming LLM block (max 30 words) */}
                  <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[300px] rounded-lg shadow-xl">
+                     <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
-                             <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
-                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Translation (AI)</span>
+                             <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+                             <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">Current Block (AI)</span>
                          </div>
-                         <div className="p-6 flex flex-col justify-center min-h-[250px]">
+                         <div className="p-6 flex flex-col justify-center min-h-[150px]">
                              {(() => {
                                  const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const hasTranslation = firstMsg?.isAiTranslated && firstMsg?.aiTranslation;
+                                 const currentText = firstMsg?.aiTranslation || '';
 
-                                 return hasTranslation ? (
-                                     <div className="text-xl md:text-2xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
-                                         {firstMsg.aiTranslation}
+                                 // Get last ~30 words as "current block"
+                                 const words = currentText.split(/\s+/).filter(w => w);
+                                 const currentBlock = words.slice(-30).join(' ');
+
+                                 return currentBlock ? (
+                                     <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
+                                         {currentBlock}
                                      </div>
                                  ) : (
                                      <div className="space-y-3 opacity-50 select-none">
                                          <div className="flex items-center gap-2 text-orange-500/50 text-xs font-mono mb-2">
                                              <div className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></div>
-                                             AI PROCESSING...
+                                             WAITING...
                                          </div>
                                          <div className="h-4 w-3/4 bg-orange-900/20 rounded animate-pulse"></div>
                                          <div className="h-4 w-1/2 bg-orange-900/20 rounded animate-pulse"></div>
+                                     </div>
+                                 );
+                             })()}
+                         </div>
+                     </div>
+                 </div>
+
+                 {/* COLUMN 3: Full accumulated LLM text (small font, always visible) */}
+                 <div className="sticky top-8 h-fit">
+                     <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
+                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
+                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Full Text (AI)</span>
+                         </div>
+                         <div className="p-4">
+                             {(() => {
+                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
+                                 const fullText = firstMsg?.aiTranslation || '';
+
+                                 return fullText ? (
+                                     <div className="text-[10px] md:text-xs text-emerald-200 leading-relaxed font-normal">
+                                         {fullText}
+                                     </div>
+                                 ) : (
+                                     <div className="text-[10px] text-emerald-500/50 italic">
+                                         Full translated text will appear here...
                                      </div>
                                  );
                              })()}
