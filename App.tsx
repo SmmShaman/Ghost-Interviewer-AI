@@ -437,13 +437,22 @@ const App: React.FC = () => {
 
     const ghostPromise = new Promise<void>((resolve) => {
         if (currentContext.targetLanguage !== currentContext.nativeLanguage) {
-            // Use chunked translation - much faster for longer texts
-            localTranslator.translatePhraseChunked(text)
+            // PROGRESSIVE TRANSLATION: Update UI after each chunk
+            localTranslator.translatePhraseChunked(
+                text,
+                false,
+                (partialTranslation) => {
+                    // Update UI progressively as each chunk completes
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === questionId ? { ...msg, ghostTranslation: partialTranslation } : msg
+                    ));
+                }
+            )
                 .then(words => {
                     const ghostText = words.map(w => w.ghostTranslation).join(' ');
                     const ghostEnd = performance.now();
                     console.log(`👻 [${Math.round(ghostEnd)}ms] GHOST FINALIZE END: ${Math.round(ghostEnd - ghostStart)}ms`);
-                    // Update ghostTranslation field regardless of AI state
+                    // Final update (in case callback missed it)
                     setMessages(prev => prev.map(msg =>
                         msg.id === questionId ? { ...msg, ghostTranslation: ghostText } : msg
                     ));

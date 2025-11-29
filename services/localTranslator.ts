@@ -66,7 +66,7 @@ class LocalTranslator {
 
     // PERFORMANCE OPTIMIZATION: Chunk translation cache
     private chunkCache: Map<string, string> = new Map();
-    private static readonly CHUNK_SIZE = 4;
+    private static readonly CHUNK_SIZE = 2; // Reduced from 4 to 2 for faster progressive updates
     private static readonly MAX_CACHE_SIZE = 100;
 
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
@@ -273,10 +273,13 @@ class LocalTranslator {
 
             } catch (e: any) {
                 const errorMsg = e?.message || String(e);
+                const errorCode = String(e?.code || e);
+
                 const isWebGPUError = errorMsg.includes('webgpu') ||
                                       errorMsg.includes('GPU') ||
                                       errorMsg.includes('adapter') ||
-                                      errorMsg.includes('backend');
+                                      errorMsg.includes('backend') ||
+                                      errorCode.includes('3762476112'); // Known ONNX WebGPU error
 
                 const isCacheCorruption = errorMsg.includes('Corruption') ||
                                           errorMsg.includes('checksum') ||
@@ -442,7 +445,12 @@ class LocalTranslator {
 
     // OPTIMIZED: Translate phrase using chunked approach with caching
     // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
-    async translatePhraseChunked(text: string, forceFullTranslate = false): Promise<TranslatedWord[]> {
+    // onProgress callback: Called after each chunk with partial translation
+    async translatePhraseChunked(
+        text: string,
+        forceFullTranslate = false,
+        onProgress?: (partialTranslation: string) => void
+    ): Promise<TranslatedWord[]> {
         if (!text || !text.trim()) {
             return [];
         }
@@ -450,6 +458,7 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
+            if (onProgress) onProgress(chromeResult);
             return [{
                 original: text,
                 ghostTranslation: chromeResult,
@@ -470,10 +479,18 @@ class LocalTranslator {
         const chunks = this.splitIntoChunks(text);
         const translations: string[] = [];
 
-        for (const chunk of chunks) {
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+
             // Check cache first
             if (!forceFullTranslate && this.chunkCache.has(chunk)) {
                 translations.push(this.chunkCache.get(chunk)!);
+
+                // PROGRESSIVE UPDATE: Show cached chunks immediately
+                if (onProgress) {
+                    const partialTranslation = translations.join(' ');
+                    onProgress(partialTranslation);
+                }
             } else {
                 // Translate and cache
                 const translated = await this.translateSingleChunk(chunk);
@@ -486,6 +503,12 @@ class LocalTranslator {
                 }
 
                 translations.push(translated);
+
+                // PROGRESSIVE UPDATE: Call onProgress after EACH translated chunk
+                if (onProgress) {
+                    const partialTranslation = translations.join(' ');
+                    onProgress(partialTranslation);
+                }
             }
         }
 
