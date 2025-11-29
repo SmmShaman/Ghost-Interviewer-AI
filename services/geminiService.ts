@@ -35,11 +35,19 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
 
     // ========== SIMPLE MODE: Minimal prompt - just translation, no context ==========
     if (isSimpleMode) {
-        return `Переклади наступний текст на розмовну ${context.nativeLanguage} мову.
+        return `Ти професійний перекладач з ${context.targetLanguage} на ${context.nativeLanguage}.
+
+ВАЖЛИВО: Тобі надходять фрагменти тексту (15-25 слів), які можуть бути неповними реченнями або обірваними фразами. Це нормально - це частини живого мовлення.
+
+ТВОЄ ЗАВДАННЯ:
+- Переклади текст природною, розмовною ${context.nativeLanguage} мовою
+- Навіть якщо речення обірване - переклади його так, ніби воно має сенс
+- НЕ додавай нічого від себе, НЕ пояснюй, НЕ коментуй
+- Просто дай чистий переклад
 
 Вхідний текст (${context.targetLanguage}): "${currentInput}"
 
-Формат відповіді:
+Формат відповіді (ТІЛЬКИ переклад, нічого більше):
 [INPUT_TRANSLATION]
 твій переклад тут`;
     }
@@ -85,20 +93,33 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void, s
          throw new Error("Azure API Key is missing. Set VITE_AZURE_API_KEY in .env or use Groq in Settings.");
      }
 
-     const response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-key': AZURE_API_KEY
-        },
-        body: JSON.stringify({
-            messages: [
-                { role: "user", content: prompt }
-            ],
-            stream: true
-        }),
-        signal // Pass abort signal to fetch
-    });
+     // Check if already aborted
+     if (signal?.aborted) {
+         throw new DOMException('Aborted', 'AbortError');
+     }
+
+     let response;
+     try {
+         response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'api-key': AZURE_API_KEY
+            },
+            body: JSON.stringify({
+                messages: [
+                    { role: "user", content: prompt }
+                ],
+                stream: true
+            }),
+            signal // Pass abort signal to fetch
+        });
+     } catch (fetchError: any) {
+         if (fetchError.name === 'AbortError') {
+             throw new DOMException('Aborted', 'AbortError');
+         }
+         throw fetchError;
+     }
 
     if (!response.ok) {
         const errText = await response.text();
@@ -113,23 +134,36 @@ async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: 
     const key = apiKey || GROQ_API_KEY_DEFAULT;
     if (!key) throw new Error("Groq API Key is missing. Set VITE_GROQ_API_KEY in .env or enter in Settings.");
 
-    const response = await fetch(GROQ_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify({
-            model: GROQ_MODEL,
-            messages: [
-                { role: "user", content: prompt }
-            ],
-            stream: true,
-            temperature: 0.6,
-            max_tokens: 1024
-        }),
-        signal // Pass abort signal to fetch
-    });
+    // Check if already aborted
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+
+    let response;
+    try {
+        response = await fetch(GROQ_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`
+            },
+            body: JSON.stringify({
+                model: GROQ_MODEL,
+                messages: [
+                    { role: "user", content: prompt }
+                ],
+                stream: true,
+                temperature: 0.6,
+                max_tokens: 1024
+            }),
+            signal // Pass abort signal to fetch
+        });
+    } catch (fetchError: any) {
+        if (fetchError.name === 'AbortError') {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        throw fetchError;
+    }
 
     if (!response.ok) {
         const errText = await response.text();
@@ -151,11 +185,22 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
         while (true) {
             // Check if aborted before reading
             if (signal?.aborted) {
-                await reader.cancel();
+                reader.cancel().catch(() => {}); // Ignore cancel errors
                 throw new DOMException('Aborted', 'AbortError');
             }
 
-            const { done, value } = await reader.read();
+            let readResult;
+            try {
+                readResult = await reader.read();
+            } catch (readError: any) {
+                // Handle abort during read
+                if (readError.name === 'AbortError' || signal?.aborted) {
+                    throw new DOMException('Aborted', 'AbortError');
+                }
+                throw readError;
+            }
+
+            const { done, value } = readResult;
             if (done) break;
 
             const chunk = decoder.decode(value);
@@ -179,8 +224,12 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
             }
         }
     } finally {
-        // Ensure reader is released
-        reader.releaseLock();
+        // Ensure reader is released safely
+        try {
+            reader.releaseLock();
+        } catch (e) {
+            // Ignore release errors
+        }
     }
 }
 

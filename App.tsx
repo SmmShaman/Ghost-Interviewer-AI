@@ -20,15 +20,15 @@ const BLOCK_CONFIG = {
     SENTENCE_END_REGEX: /[.!?।。,;:]+$/ // Punctuation detection (added comma, semicolon, colon)
 };
 
-// LLM ACCUMULATION CONFIG: Larger blocks for better context
+// LLM ACCUMULATION CONFIG: Send 20-25 words per block for clear display
 const LLM_CONFIG = {
-    MIN_WORDS_FOR_LLM: 30,          // Minimum words before sending to LLM
-    MAX_WORDS_FOR_LLM: 50,          // Force send if exceeds this limit
-    SILENCE_TIMEOUT_MS: 5000,       // Send accumulated text after 5s of silence (increased from 3s)
+    MIN_WORDS_FOR_LLM: 15,          // Minimum words before sending to LLM
+    MAX_WORDS_FOR_LLM: 25,          // Force send at 25 words (target: 20-25)
+    SILENCE_TIMEOUT_MS: 5000,       // Send accumulated text after 5s of silence
     PAUSE_THRESHOLD_MS: 2000,       // 2 seconds pause = complete LLM block
     MIN_WORDS_FOR_SENTENCE: 5,      // Minimum words needed to consider sentence complete
     SENTENCE_MARKERS: /[.!?।。]+$/,  // Sentence-ending punctuation
-    FALLBACK_MAX_WORDS: 100         // Absolute max if no sentence end detected
+    FALLBACK_MAX_WORDS: 30          // Absolute max if no sentence end detected
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -112,6 +112,7 @@ interface AIQueueItem {
     id: string;         // The Question ID
     text: string;       // The Question Text
     responseId: string; // The ID of the Assistant Message to update
+    targetMessageId: string; // The ID of the Interviewer Message to receive LLM translation
 }
 
 const App: React.FC = () => {
@@ -189,8 +190,12 @@ const App: React.FC = () => {
     wordCount: number;      // Total words accumulated
     questionId: string | null;  // Question ID for the accumulated block
     responseId: string | null;  // Response ID for the accumulated block
-  }>({ text: '', wordCount: 0, questionId: null, responseId: null });
+    targetMessageId: string | null; // ID of interviewer message to receive translation
+  }>({ text: '', wordCount: 0, questionId: null, responseId: null, targetMessageId: null });
   const llmSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track ALL LLM translation blocks for center column display
+  const llmTranslationBlocksRef = useRef<Array<{ id: string; translation: string }>>([]);
 
   // SESSION-LEVEL IDs: One questionId per recording session (Start to Stop)
   // This ensures all blocks in a session are treated as ONE question for LLM
@@ -347,10 +352,10 @@ const App: React.FC = () => {
         const queueItem = aiQueueRef.current.shift();
         if (!queueItem) return;
 
-        const { id: messageIdToProcess, text: messageText, responseId } = queueItem;
+        const { id: messageIdToProcess, text: messageText, responseId, targetMessageId } = queueItem;
         const wordCount = messageText.split(/\s+/).length;
 
-        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, provider: ${currentContext.llmProvider}`);
+        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, provider: ${currentContext.llmProvider}`);
 
         // 5. Generate
         const startTime = performance.now();
@@ -378,14 +383,13 @@ const App: React.FC = () => {
                         };
                     }
 
-                    // LLM TRANSLATION: Update FIRST message of session (accumulative display)
-                    // This creates a single growing translation block instead of multiple small blocks
-                    if (msg.id === firstSessionMessageIdRef.current && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
-                        console.log(`🔄 [${Math.round(performance.now())}ms] Updating LLM translation in FIRST message: ${msg.id}`);
+                    // LLM TRANSLATION: Update the TARGET message (each block gets its own translation)
+                    if (msg.id === targetMessageId && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
+                        console.log(`🔄 [${Math.round(performance.now())}ms] Updating LLM translation in message: ${msg.id}`);
                         return {
                             ...msg,
-                            aiTranslation: partial.inputTranslation,  // Replace with latest accumulated translation
-                            isAiTranslated: true  // Mark as AI translated
+                            aiTranslation: partial.inputTranslation,
+                            isAiTranslated: true
                         };
                     }
 
@@ -424,7 +428,7 @@ const App: React.FC = () => {
     console.log(`🔍 [${Math.round(performance.now())}ms] sendLLMAccumulator called | force=${force} | wordCount=${acc.wordCount} | hasText=${!!acc.text.trim()}`);
 
     // Don't send if empty
-    if (!acc.text.trim() || !acc.questionId || !acc.responseId) {
+    if (!acc.text.trim() || !acc.questionId || !acc.responseId || !acc.targetMessageId) {
       console.log(`⏭️ [${Math.round(performance.now())}ms] SKIP: Empty accumulator or missing IDs`);
       return;
     }
@@ -441,18 +445,19 @@ const App: React.FC = () => {
       return;
     }
 
-    console.log(`🚀 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue | Text: "${acc.text.substring(0, 50)}..."`);
+    console.log(`🚀 [${Math.round(performance.now())}ms] LLM ACCUMULATOR: Sending ${acc.wordCount} words to queue | Target: ${acc.targetMessageId} | Text: "${acc.text.substring(0, 50)}..."`);
 
-    // Add to AI queue
+    // Add to AI queue with target message ID
     aiQueueRef.current.push({
       id: acc.questionId,
       text: acc.text,
-      responseId: acc.responseId
+      responseId: acc.responseId,
+      targetMessageId: acc.targetMessageId
     });
     processAIQueue();
 
     // Reset accumulator
-    llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+    llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null, targetMessageId: null };
     console.log(`🧹 [${Math.round(performance.now())}ms] Accumulator reset`);
 
     // Clear silence timer
@@ -463,7 +468,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const addToLLMAccumulator = useCallback((text: string, questionId: string, responseId: string) => {
+  const addToLLMAccumulator = useCallback((text: string, questionId: string, responseId: string, targetMessageId: string) => {
     const acc = llmAccumulatorRef.current;
     const now = Date.now();
     const pauseDuration = now - llmLastActivityRef.current;
@@ -504,17 +509,18 @@ const App: React.FC = () => {
       sendLLMAccumulator(true);
     }
 
-    // Add to accumulator
+    // Add to accumulator - use new targetMessageId if accumulator was empty
     const newText = acc.text ? `${acc.text} ${text}` : text;
     const totalWordCount = newText.split(/\s+/).length;
     llmAccumulatorRef.current = {
       text: newText,
       wordCount: totalWordCount,
       questionId,
-      responseId
+      responseId,
+      targetMessageId: acc.targetMessageId || targetMessageId // Keep first target if accumulating
     };
 
-    console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Text: "${newText.substring(0, 50)}..."`);
+    console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Target: ${llmAccumulatorRef.current.targetMessageId} | Text: "${newText.substring(0, 50)}..."`);
 
     // Clear previous pause timer
     if (llmSilenceTimerRef.current) {
@@ -646,7 +652,8 @@ const App: React.FC = () => {
     // STREAM 2: LLM ACCUMULATOR (collect larger blocks for better context)
     // Run AI analysis even in SIMPLE mode to get [INPUT_TRANSLATION]
     // Instead of sending immediately, accumulate text for better LLM context
-    addToLLMAccumulator(text, questionId, responseId);
+    // Pass blockId as targetMessageId - this message will receive the LLM translation
+    addToLLMAccumulator(text, questionId, responseId, blockId);
 
     // Reset visual state when Ghost is done (AI might still be chugging in background)
     ghostPromise.finally(() => {
@@ -1148,7 +1155,37 @@ const App: React.FC = () => {
 
   const handleClearSession = (shouldSave: boolean) => {
       if (shouldSave) handleSaveSession();
+
+      // Clear all messages
       setMessages([]);
+
+      // Clear all session refs
+      firstSessionMessageIdRef.current = null;
+      sessionQuestionIdRef.current = null;
+      sessionResponseIdRef.current = null;
+
+      // Clear LLM accumulator
+      llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+      if (llmSilenceTimerRef.current) {
+          clearTimeout(llmSilenceTimerRef.current);
+          llmSilenceTimerRef.current = null;
+      }
+
+      // Clear AI queue
+      aiQueueRef.current = [];
+
+      // Clear translation blocks tracker
+      llmTranslationBlocksRef.current = [];
+
+      // Clear delta tracking
+      committedWordCountRef.current = 0;
+      lastFullTextRef.current = "";
+
+      // Clear visual states
+      setTranscript("");
+      setInterimTranscript("");
+      setLiveTranslation("");
+
       setIsClearModalOpen(false);
   };
 
@@ -1447,7 +1484,7 @@ const App: React.FC = () => {
                      <div ref={messagesEndRef} />
                  </div>
 
-                 {/* COLUMN 2: LLM Translation - Current Block */}
+                 {/* COLUMN 2: LLM Translation - Current/Latest Block */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-orange-500 bg-orange-900/10 min-h-[200px] rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center gap-2">
@@ -1456,11 +1493,14 @@ const App: React.FC = () => {
                          </div>
                          <div className="p-6 flex flex-col justify-center min-h-[150px]">
                              {(() => {
-                                 // Get LLM translation from first session message
-                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const llmTranslation = firstMsg?.aiTranslation || '';
+                                 // Get LATEST message with LLM translation
+                                 const messagesWithTranslation = messages.filter(m =>
+                                     m.role === 'interviewer' && m.aiTranslation && m.aiTranslation !== '...'
+                                 );
+                                 const latestMsg = messagesWithTranslation[messagesWithTranslation.length - 1];
+                                 const llmTranslation = latestMsg?.aiTranslation || '';
 
-                                 return llmTranslation && llmTranslation !== '...' ? (
+                                 return llmTranslation ? (
                                      <div className="text-lg md:text-xl text-orange-400 font-bold leading-relaxed animate-fade-in-up">
                                          {llmTranslation}
                                      </div>
@@ -1479,23 +1519,29 @@ const App: React.FC = () => {
                      </div>
                  </div>
 
-                 {/* COLUMN 3: LLM Translation - Full Copy */}
+                 {/* COLUMN 3: LLM Translation - All Blocks */}
                  <div className="sticky top-8 h-fit">
                      <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
                          <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center gap-2 sticky top-0 bg-emerald-950/80 backdrop-blur">
                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">LLM Переклад</span>
+                             <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">LLM Переклад (Всі блоки)</span>
                          </div>
-                         <div className="p-4">
+                         <div className="p-4 space-y-4">
                              {(() => {
-                                 // Get LLM translation from first session message
-                                 const firstMsg = messages.find(m => m.id === firstSessionMessageIdRef.current);
-                                 const llmTranslation = firstMsg?.aiTranslation || '';
+                                 // Get ALL messages with LLM translations
+                                 const messagesWithTranslation = messages.filter(m =>
+                                     m.role === 'interviewer' && m.aiTranslation && m.aiTranslation !== '...'
+                                 );
 
-                                 return llmTranslation && llmTranslation !== '...' ? (
-                                     <div className="text-sm md:text-base text-emerald-200 leading-relaxed font-medium">
-                                         {llmTranslation}
-                                     </div>
+                                 return messagesWithTranslation.length > 0 ? (
+                                     messagesWithTranslation.map((msg, idx) => (
+                                         <div key={msg.id} className="pb-3 border-b border-emerald-500/10 last:border-b-0">
+                                             <div className="text-[10px] text-emerald-500/50 mb-1">Блок {idx + 1}</div>
+                                             <div className="text-sm md:text-base text-emerald-200 leading-relaxed font-medium">
+                                                 {msg.aiTranslation}
+                                             </div>
+                                         </div>
+                                     ))
                                  ) : (
                                      <div className="text-[10px] text-emerald-500/50 italic">
                                          Переклад з'явиться тут після обробки...
