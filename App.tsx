@@ -396,9 +396,10 @@ const App: React.FC = () => {
     // Don't send if empty
     if (!acc.text.trim() || !acc.questionId || !acc.responseId) return;
 
-    const shouldSend = force ||
-                      acc.wordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM ||
-                      acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM;
+    // Only send if:
+    // 1. Force flag is true (Stop button, new question, etc.)
+    // 2. OR reached max words limit (safety)
+    const shouldSend = force || acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM;
 
     if (!shouldSend) return;
 
@@ -453,13 +454,12 @@ const App: React.FC = () => {
       return;
     }
 
-    // Set silence timer - send after X seconds of no new text
-    llmSilenceTimerRef.current = setTimeout(() => {
-      sendLLMAccumulator(true);
-    }, LLM_CONFIG.SILENCE_TIMEOUT_MS);
-
-    // Try to send if minimum reached
-    sendLLMAccumulator(false);
+    // Set silence timer - send after X seconds of no new text (only if MIN reached)
+    if (llmAccumulatorRef.current.wordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM) {
+      llmSilenceTimerRef.current = setTimeout(() => {
+        sendLLMAccumulator(true);
+      }, LLM_CONFIG.SILENCE_TIMEOUT_MS);
+    }
   }, [sendLLMAccumulator]);
 
   // ----------------------------------------------------------------------
