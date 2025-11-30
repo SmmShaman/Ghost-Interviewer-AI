@@ -127,6 +127,16 @@ const App: React.FC = () => {
   const llmLastActivityRef = useRef<number>(Date.now()); // Track pause duration
   const firstSessionMessageIdRef = useRef<string | null>(null); // ID of FIRST message in session (for LLM updates)
 
+  // DEBOUNCE: Store latest streaming data and batch UI updates
+  const streamingPartialRef = useRef<{
+    responseId: string | null;
+    targetMessageId: string | null;
+    partial: any;
+    startTime: number;
+  } | null>(null);
+  const streamingUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const STREAMING_DEBOUNCE_MS = 100; // Update UI max every 100ms
+
   const contextRef = useRef(context);
   
   // Persist Context to LocalStorage whenever it changes
@@ -288,6 +298,41 @@ const App: React.FC = () => {
         let finalTranslation = '';
         let rawLLMResponse = ''; // Track raw response for fallback
 
+        // DEBOUNCED UI UPDATE: Flush buffered streaming data to UI
+        const flushStreamingUpdate = () => {
+            const data = streamingPartialRef.current;
+            if (!data || !data.partial) return;
+
+            const { partial, responseId: respId, targetMessageId: targetId, startTime: sTime } = data;
+            const currentTime = performance.now();
+
+            setMessages(prev => prev.map(msg => {
+                // Update Assistant Message (Right/Middle Columns)
+                if (msg.id === respId) {
+                    return {
+                        ...msg,
+                        text: partial.answer,
+                        analysis: partial.analysis,
+                        strategy: partial.strategy,
+                        answerTranslation: partial.answerTranslation,
+                        rationale: partial.rationale,
+                        latency: Math.round(currentTime - sTime)
+                    };
+                }
+
+                // LLM TRANSLATION: Update the TARGET message
+                if (msg.id === targetId && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
+                    return {
+                        ...msg,
+                        aiTranslation: partial.inputTranslation,
+                        isAiTranslated: true
+                    };
+                }
+
+                return msg;
+            }));
+        };
+
         await generateInterviewAssist(
             messageText,
             [], // Send empty array to process ONLY current block (Atomic Architecture)
@@ -295,8 +340,6 @@ const App: React.FC = () => {
             (partial) => {
                 // Check if aborted before updating
                 if (signal.aborted) return;
-
-                const currentTime = performance.now();
 
                 // Track ALL output for fallback (in case [INPUT_TRANSLATION] tag is missing)
                 if (partial.answer) {
@@ -306,38 +349,34 @@ const App: React.FC = () => {
                 // Track final translation for pending block
                 if (partial.inputTranslation) {
                     finalTranslation = partial.inputTranslation;
-                    console.log(`📝 [${Math.round(currentTime)}ms] Got inputTranslation: "${partial.inputTranslation.substring(0, 50)}..."`);
                 }
 
-                setMessages(prev => prev.map(msg => {
-                    // Update Assistant Message (Right/Middle Columns)
-                    if (msg.id === responseId) {
-                        return {
-                            ...msg,
-                            text: partial.answer,
-                            analysis: partial.analysis,
-                            strategy: partial.strategy,
-                            answerTranslation: partial.answerTranslation,
-                            rationale: partial.rationale,
-                            latency: Math.round(currentTime - startTime)
-                        };
-                    }
+                // DEBOUNCE: Store latest partial data, don't update UI immediately
+                streamingPartialRef.current = {
+                    responseId,
+                    targetMessageId,
+                    partial,
+                    startTime
+                };
 
-                    // LLM TRANSLATION: Update the TARGET message (each block gets its own translation)
-                    if (msg.id === targetMessageId && partial.inputTranslation && partial.inputTranslation.trim().length > 0) {
-                        console.log(`🔄 [${Math.round(performance.now())}ms] Updating LLM translation in message: ${msg.id}`);
-                        return {
-                            ...msg,
-                            aiTranslation: partial.inputTranslation,
-                            isAiTranslated: true
-                        };
-                    }
-
-                    return msg;
-                }));
+                // Schedule debounced UI update if not already scheduled
+                if (!streamingUpdateTimerRef.current) {
+                    streamingUpdateTimerRef.current = setTimeout(() => {
+                        flushStreamingUpdate();
+                        streamingUpdateTimerRef.current = null;
+                    }, STREAMING_DEBOUNCE_MS);
+                }
             },
             signal // Pass abort signal to LLM service
         );
+
+        // Final flush after stream ends (ensure last chunk is displayed)
+        if (streamingUpdateTimerRef.current) {
+            clearTimeout(streamingUpdateTimerRef.current);
+            streamingUpdateTimerRef.current = null;
+        }
+        flushStreamingUpdate();
+        streamingPartialRef.current = null;
 
         const endTime = performance.now();
         console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total | finalTranslation=${!!finalTranslation} | rawResponse=${!!rawLLMResponse}`);
@@ -373,6 +412,13 @@ const App: React.FC = () => {
         }
 
     } catch (e: any) {
+        // Clean up streaming timer on error/abort
+        if (streamingUpdateTimerRef.current) {
+            clearTimeout(streamingUpdateTimerRef.current);
+            streamingUpdateTimerRef.current = null;
+        }
+        streamingPartialRef.current = null;
+
         if (e.name === 'AbortError') {
             console.log(`🛑 [${Math.round(performance.now())}ms] LLM ABORTED`);
             // Move aborted block to completed - preserve Chrome preview
@@ -1036,6 +1082,13 @@ const App: React.FC = () => {
           llmAbortControllerRef.current.abort();
           llmAbortControllerRef.current = null;
       }
+
+      // Clean up streaming debounce timer
+      if (streamingUpdateTimerRef.current) {
+          clearTimeout(streamingUpdateTimerRef.current);
+          streamingUpdateTimerRef.current = null;
+      }
+      streamingPartialRef.current = null;
 
       // CLEAR LLM queue - don't send any more requests
       const queueLength = aiQueueRef.current.length;
