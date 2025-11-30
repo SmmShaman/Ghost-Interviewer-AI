@@ -71,6 +71,9 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const [jobProfileName, setJobProfileName] = useState("");
   const selectedJobProfileId = context.activeJobProfileId || "";
 
+  // Save feedback states
+  const [savedFeedback, setSavedFeedback] = useState<'candidate' | 'job' | 'prompt' | null>(null);
+
   // LEGACY: Old Profile Manager State (for backward compatibility)
   const [profileName, setProfileName] = useState("");
   const selectedProfileId = context.activeProfileId || "";
@@ -280,6 +283,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       }
 
       onContextChange({ ...context, savedPrompts: updatedPrompts, activePromptId: newPreset.id });
+      setSavedFeedback('prompt');
+      setTimeout(() => setSavedFeedback(null), 1500);
   };
 
   const handleDeletePreset = () => {
@@ -338,6 +343,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       }
 
       onContextChange({ ...context, savedCandidateProfiles: updatedProfiles, activeCandidateProfileId: newProfile.id });
+      setSavedFeedback('candidate');
+      setTimeout(() => setSavedFeedback(null), 1500);
   };
 
   const handleDeleteCandidateProfile = () => {
@@ -398,6 +405,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       }
 
       onContextChange({ ...context, savedJobProfiles: updatedProfiles, activeJobProfileId: newProfile.id });
+      setSavedFeedback('job');
+      setTimeout(() => setSavedFeedback(null), 1500);
   };
 
   const handleDeleteJobProfile = () => {
@@ -619,31 +628,37 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           {/* Profile Selector */}
           <div className="flex gap-2 mb-2">
             <select
-              className="flex-1 bg-gray-900 border border-emerald-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-emerald-500"
+              className="flex-1 min-w-0 bg-gray-900 border border-emerald-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-emerald-500"
               value={selectedCandidateProfileId}
               onChange={(e) => handleCandidateProfileSelect(e.target.value)}
+              title={selectedCandidateProfileId ? (context.savedCandidateProfiles || []).find(p => p.id === selectedCandidateProfileId)?.name : ''}
             >
               <option value="" className="bg-gray-900">{t.candidateProfiles?.select || "Select Profile..."}</option>
               {(context.savedCandidateProfiles || []).map(p => (
-                <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>
+                <option key={p.id} value={p.id} className="bg-gray-900">{p.name.length > 25 ? p.name.slice(0, 25) + '...' : p.name}</option>
               ))}
             </select>
-            <button onClick={handleNewCandidateProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-emerald-500">+</button>
-            <button onClick={handleDeleteCandidateProfile} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
+            <button onClick={handleNewCandidateProfile} title="New Profile" className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-emerald-500 flex-shrink-0">+</button>
+            <button onClick={handleDeleteCandidateProfile} title="Delete Profile" className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50 flex-shrink-0">✕</button>
           </div>
           <div className="flex gap-2 mb-3">
             <input
               type="text"
               placeholder={t.candidateProfiles?.namePlaceholder || "Profile Name"}
-              className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
               value={candidateProfileName}
               onChange={(e) => setCandidateProfileName(e.target.value)}
             />
             <button
               onClick={handleSaveCandidateProfile}
-              className="px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white hover:bg-emerald-500"
+              title="Save Profile"
+              className={`px-3 py-1 rounded text-xs font-bold text-white transition-all flex-shrink-0 ${
+                savedFeedback === 'candidate'
+                  ? 'bg-green-500 scale-105'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
             >
-              {t.profiles.save}
+              {savedFeedback === 'candidate' ? '✓' : t.profiles.save}
             </button>
           </div>
 
@@ -717,31 +732,37 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           {/* Job Profile Selector */}
           <div className="flex gap-2 mb-2">
             <select
-              className="flex-1 bg-gray-900 border border-blue-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-blue-500"
+              className="flex-1 min-w-0 bg-gray-900 border border-blue-800/50 rounded text-xs px-2 py-1.5 text-gray-300 outline-none focus:border-blue-500"
               value={selectedJobProfileId}
               onChange={(e) => handleJobProfileSelect(e.target.value)}
+              title={selectedJobProfileId ? (context.savedJobProfiles || []).find(p => p.id === selectedJobProfileId)?.name : ''}
             >
               <option value="" className="bg-gray-900">{t.jobProfiles?.select || "Select Job..."}</option>
               {(context.savedJobProfiles || []).map(p => (
-                <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>
+                <option key={p.id} value={p.id} className="bg-gray-900">{p.name.length > 25 ? p.name.slice(0, 25) + '...' : p.name}</option>
               ))}
             </select>
-            <button onClick={handleNewJobProfile} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-blue-500">+</button>
-            <button onClick={handleDeleteJobProfile} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
+            <button onClick={handleNewJobProfile} title="New Job" className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white hover:border-blue-500 flex-shrink-0">+</button>
+            <button onClick={handleDeleteJobProfile} title="Delete Job" className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50 flex-shrink-0">✕</button>
           </div>
           <div className="flex gap-2 mb-3">
             <input
               type="text"
               placeholder={t.jobProfiles?.namePlaceholder || "Job Name"}
-              className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-blue-500"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-blue-500"
               value={jobProfileName}
               onChange={(e) => setJobProfileName(e.target.value)}
             />
             <button
               onClick={handleSaveJobProfile}
-              className="px-3 py-1 bg-blue-600 rounded text-xs font-bold text-white hover:bg-blue-500"
+              title="Save Job"
+              className={`px-3 py-1 rounded text-xs font-bold text-white transition-all flex-shrink-0 ${
+                savedFeedback === 'job'
+                  ? 'bg-green-500 scale-105'
+                  : 'bg-blue-600 hover:bg-blue-500'
+              }`}
             >
-              {t.profiles.save}
+              {savedFeedback === 'job' ? '✓' : t.profiles.save}
             </button>
           </div>
 
@@ -835,13 +856,18 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
               className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:border-emerald-500 outline-none"
               value={selectedDeviceId}
               onChange={(e) => handleDeviceChange(e.target.value)}
+              title={selectedDeviceId ? availableDevices.find(d => d.deviceId === selectedDeviceId)?.label || '' : ''}
             >
               <option value="" className="bg-gray-900">{t.defaultMic}</option>
-              {availableDevices.map(device => (
-                <option key={device.deviceId} value={device.deviceId} className="bg-gray-900">
-                  {device.label || `Microphone ${device.deviceId.slice(0, 5)}...`}
-                </option>
-              ))}
+              {availableDevices.map(device => {
+                const label = device.label || `Microphone ${device.deviceId.slice(0, 5)}...`;
+                const truncatedLabel = label.length > 35 ? label.slice(0, 35) + '...' : label;
+                return (
+                  <option key={device.deviceId} value={device.deviceId} className="bg-gray-900" title={label}>
+                    {truncatedLabel}
+                  </option>
+                );
+              })}
             </select>
 
             <div className="flex items-center gap-2">
@@ -910,32 +936,38 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           {/* Prompt Manager UI */}
           <div className="flex gap-2 mb-2">
             <select
-              className="flex-1 bg-gray-900 border border-gray-700 rounded text-xs px-2 py-1 text-gray-300 outline-none"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded text-xs px-2 py-1 text-gray-300 outline-none"
               value={selectedPresetId}
               onChange={(e) => handlePresetSelect(e.target.value)}
+              title={selectedPresetId ? context.savedPrompts.find(p => p.id === selectedPresetId)?.name : ''}
             >
               <option value="" className="bg-gray-900">{t.prompts.select}</option>
               {context.savedPrompts.map(p => (
-                <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>
+                <option key={p.id} value={p.id} className="bg-gray-900">{p.name.length > 25 ? p.name.slice(0, 25) + '...' : p.name}</option>
               ))}
             </select>
-            <button onClick={handleNewPreset} className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white">+</button>
-            <button onClick={handleDeletePreset} className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50">✕</button>
+            <button onClick={handleNewPreset} title="New Prompt" className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 hover:text-white flex-shrink-0">+</button>
+            <button onClick={handleDeletePreset} title="Delete Prompt" className="px-2 py-1 bg-red-900/30 border border-red-900/50 rounded text-xs text-red-400 hover:bg-red-900/50 flex-shrink-0">✕</button>
           </div>
 
           <div className="flex gap-2 mb-2">
             <input
               type="text"
               placeholder={t.prompts.namePlaceholder}
-              className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
             />
             <button
               onClick={handleSavePreset}
-              className="px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white hover:bg-emerald-500"
+              title="Save Prompt"
+              className={`px-3 py-1 rounded text-xs font-bold text-white transition-all flex-shrink-0 ${
+                savedFeedback === 'prompt'
+                  ? 'bg-green-500 scale-105'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
             >
-              {t.prompts.save}
+              {savedFeedback === 'prompt' ? '✓' : t.prompts.save}
             </button>
           </div>
 
