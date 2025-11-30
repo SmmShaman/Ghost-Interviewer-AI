@@ -438,7 +438,271 @@ export const generateInterviewAssist = async (
 export const translateText = async (text: string, targetLang: string): Promise<string> => {
     // Basic implementation - for now just returns text as this is rarely used in current flow
     // Future: implement router for this too
-    return text; 
+    return text;
+}
+
+// ========== STREAMING TRANSLATION (NEW) ==========
+
+export interface StreamingTranslationResult {
+    translation: string;
+    intent: {
+        containsQuestion: boolean;
+        questionConfidence: number;
+        speechType: 'QUESTION' | 'INFO' | 'STORY' | 'SMALL_TALK' | 'UNKNOWN';
+        detectedQuestions?: string[];
+    };
+}
+
+/**
+ * Incremental LLM translation for streaming architecture.
+ * Translates accumulated text and classifies intent.
+ *
+ * @param fullText - Complete accumulated text from interviewer
+ * @param alreadyTranslated - Previous translation (for incremental updates)
+ * @param context - Interview context (language settings, etc.)
+ * @param signal - Optional abort signal
+ * @returns Translation and intent classification
+ */
+export const generateStreamingTranslation = async (
+    fullText: string,
+    alreadyTranslated: string,
+    context: InterviewContext,
+    signal?: AbortSignal
+): Promise<StreamingTranslationResult> => {
+    const prompt = constructStreamingPrompt(fullText, alreadyTranslated, context);
+
+    let resultText = '';
+
+    try {
+        const onUpdate = (data: any) => {
+            if (data.inputTranslation) {
+                resultText = data.inputTranslation;
+            }
+        };
+
+        if (context.llmProvider === 'groq') {
+            await generateViaGroqDirect(prompt, context.groqApiKey, onUpdate, signal);
+        } else {
+            await generateViaAzureDirect(prompt, onUpdate, signal);
+        }
+
+        // Parse intent from result (basic heuristics for now)
+        const intent = classifyIntent(fullText, resultText);
+
+        return {
+            translation: resultText,
+            intent
+        };
+    } catch (e: any) {
+        if (e.name === 'AbortError') throw e;
+        console.error('Streaming translation error:', e);
+        return {
+            translation: alreadyTranslated || '',
+            intent: {
+                containsQuestion: false,
+                questionConfidence: 0,
+                speechType: 'UNKNOWN'
+            }
+        };
+    }
+};
+
+function constructStreamingPrompt(fullText: string, alreadyTranslated: string, context: InterviewContext): string {
+    const hasExistingTranslation = alreadyTranslated && alreadyTranslated.trim().length > 0;
+
+    if (hasExistingTranslation) {
+        // Incremental mode - tell LLM what's already translated
+        return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
+
+КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст надходить поступово.
+
+ПОПЕРЕДНІЙ ПЕРЕКЛАД (вже зроблено):
+"${alreadyTranslated}"
+
+ПОВНИЙ ОРИГІНАЛЬНИЙ ТЕКСТ (включаючи нове):
+"${fullText}"
+
+ЗАВДАННЯ:
+1. Переклади ВЕСЬ текст заново, покращуючи попередній переклад з урахуванням нового контексту
+2. Зберігай природність та плавність перекладу
+3. Виправляй можливі помилки розпізнавання мовлення
+
+ВАЖЛИВО:
+- Передавай СЕНС, а не буквальний переклад
+- Використовуй природні ${context.nativeLanguage}-мовні конструкції
+- Зглажуй обірваність фраз
+
+Відповідай ТІЛЬКИ перекладом у форматі:
+[INPUT_TRANSLATION]
+твій повний переклад тут
+[/INPUT_TRANSLATION]`;
+    }
+
+    // First translation - no previous context
+    return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
+
+КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі.
+
+ТЕКСТ ДЛЯ ПЕРЕКЛАДУ:
+"${fullText}"
+
+ПРАВИЛА:
+1. Передавай СЕНС, а не буквальний переклад
+2. Використовуй природні ${context.nativeLanguage}-мовні конструкції
+3. Виправляй можливі помилки розпізнавання мовлення
+4. Зглажуй обірваність фраз
+
+Відповідай ТІЛЬКИ перекладом у форматі:
+[INPUT_TRANSLATION]
+твій переклад тут
+[/INPUT_TRANSLATION]`;
+}
+
+function classifyIntent(originalText: string, translation: string): StreamingTranslationResult['intent'] {
+    // Heuristic intent classification
+    // TODO: Can be improved with LLM classification in the future
+
+    const questionIndicators = [
+        // Norwegian question words
+        'hva', 'hvordan', 'hvorfor', 'når', 'hvor', 'hvem', 'hvilken', 'hvilke',
+        // English question words
+        'what', 'how', 'why', 'when', 'where', 'who', 'which',
+        // German question words
+        'was', 'wie', 'warum', 'wann', 'wo', 'wer', 'welche',
+        // Question marks
+        '?'
+    ];
+
+    const infoIndicators = [
+        'vi har', 'hos oss', 'vår bedrift', 'selskapet', 'firmaet',
+        'we have', 'at our', 'our company', 'the company',
+        'wir haben', 'bei uns', 'unsere firma'
+    ];
+
+    const smallTalkIndicators = [
+        'været', 'helg', 'ferie', 'kaffe',
+        'weather', 'weekend', 'holiday', 'coffee',
+        'wetter', 'wochenende', 'urlaub', 'kaffee'
+    ];
+
+    const lowerOriginal = originalText.toLowerCase();
+    const lowerTranslation = translation.toLowerCase();
+
+    // Check for question
+    let questionScore = 0;
+    for (const indicator of questionIndicators) {
+        if (lowerOriginal.includes(indicator)) questionScore += 2;
+        if (lowerTranslation.includes(indicator)) questionScore += 1;
+    }
+
+    // Check for company info
+    let infoScore = 0;
+    for (const indicator of infoIndicators) {
+        if (lowerOriginal.includes(indicator)) infoScore += 2;
+    }
+
+    // Check for small talk
+    let smallTalkScore = 0;
+    for (const indicator of smallTalkIndicators) {
+        if (lowerOriginal.includes(indicator)) smallTalkScore += 2;
+    }
+
+    // Determine type
+    const maxScore = Math.max(questionScore, infoScore, smallTalkScore);
+
+    if (questionScore > 3 && questionScore === maxScore) {
+        return {
+            containsQuestion: true,
+            questionConfidence: Math.min(100, questionScore * 15),
+            speechType: 'QUESTION'
+        };
+    }
+
+    if (infoScore > 3 && infoScore === maxScore) {
+        return {
+            containsQuestion: false,
+            questionConfidence: 0,
+            speechType: 'INFO'
+        };
+    }
+
+    if (smallTalkScore > 3 && smallTalkScore === maxScore) {
+        return {
+            containsQuestion: false,
+            questionConfidence: 0,
+            speechType: 'SMALL_TALK'
+        };
+    }
+
+    // Default - unknown but might be question if has question mark
+    const hasQuestionMark = originalText.includes('?');
+    return {
+        containsQuestion: hasQuestionMark,
+        questionConfidence: hasQuestionMark ? 70 : 20,
+        speechType: hasQuestionMark ? 'QUESTION' : 'UNKNOWN'
+    };
+}
+
+// Direct API calls (without the full interview assist logic)
+async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
+    if (!AZURE_API_KEY) {
+        throw new Error("Azure API Key is missing");
+    }
+
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'api-key': AZURE_API_KEY
+        },
+        body: JSON.stringify({
+            messages: [{ role: "user", content: prompt }],
+            stream: true,
+            max_tokens: 512
+        }),
+        signal
+    });
+
+    if (!response.ok) {
+        throw new Error(`Azure API Error: ${response.status}`);
+    }
+
+    await processStream(response, onUpdate, signal);
+}
+
+async function generateViaGroqDirect(prompt: string, apiKey: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
+    const key = apiKey || GROQ_API_KEY_DEFAULT;
+    if (!key) throw new Error("Groq API Key is missing");
+
+    if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const response = await fetch(GROQ_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`
+        },
+        body: JSON.stringify({
+            model: GROQ_MODEL,
+            messages: [{ role: "user", content: prompt }],
+            stream: true,
+            temperature: 0.5,
+            max_tokens: 512
+        }),
+        signal
+    });
+
+    if (!response.ok) {
+        throw new Error(`Groq API Error: ${response.status}`);
+    }
+
+    await processStream(response, onUpdate, signal);
 }
 
 // Helper for parsing structured output with closing tags support

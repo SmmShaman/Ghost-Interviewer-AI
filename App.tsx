@@ -7,12 +7,14 @@ import LandingPage from './components/LandingPage';
 import SimpleModeLayout from './components/layouts/SimpleModeLayout';
 import FocusModeLayout from './components/layouts/FocusModeLayout';
 import FullModeLayout from './components/layouts/FullModeLayout';
+import StreamingSimpleModeLayout from './components/layouts/StreamingSimpleModeLayout';
 import { MicIcon, StopIcon, DownloadIcon, TrashIcon } from './components/Icons';
 import { InterviewContext, AppState, Message, IWindow, ViewMode } from './types';
 import { generateInterviewAssist } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
 import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
+import { useStreamingMode } from './hooks/useStreamingMode';
 import {
     BLOCK_CONFIG,
     LLM_CONFIG,
@@ -74,6 +76,20 @@ const App: React.FC = () => {
   const [modelProgress, setModelProgress] = useState(0);
   const [isModelReady, setIsModelReady] = useState(false);
   const [modelError, setModelError] = useState(false);
+
+  // STREAMING MODE: New architecture toggle (for SIMPLE mode)
+  // Set to true to use the new streaming/subtitle-like UI
+  const [useStreamingUI, setUseStreamingUI] = useState(true);
+
+  // STREAMING MODE HOOK: Manages accumulated text and translations
+  const streamingMode = useStreamingMode(context, {
+    llmTriggerWords: 25,
+    llmPauseMs: 2000,
+    ghostContextWords: 50,
+    onQuestionDetected: (confidence) => {
+      console.log(`❓ [StreamingMode] Question detected with ${confidence}% confidence`);
+    }
+  });
 
   const t = translations[uiLang];
   
@@ -139,7 +155,17 @@ const App: React.FC = () => {
   const STREAMING_DEBOUNCE_MS = 100; // Update UI max every 100ms
 
   const contextRef = useRef(context);
-  
+
+  // STREAMING MODE REFS: For accessing in speech recognition callback
+  const useStreamingUIRef = useRef(useStreamingUI);
+  const streamingModeRef = useRef(streamingMode);
+
+  // Keep refs updated
+  useEffect(() => {
+    useStreamingUIRef.current = useStreamingUI;
+    streamingModeRef.current = streamingMode;
+  }, [useStreamingUI, streamingMode]);
+
   // Persist Context to LocalStorage whenever it changes
   useEffect(() => {
     contextRef.current = context;
@@ -859,6 +885,30 @@ const App: React.FC = () => {
         // Store for reference
         lastFullTextRef.current = fullText;
 
+        // ========== STREAMING MODE (NEW ARCHITECTURE) ==========
+        // In SIMPLE mode with streaming UI, use continuous accumulation instead of blocks
+        const isStreamingMode = contextRef.current.viewMode === 'SIMPLE' && useStreamingUIRef.current;
+
+        if (isStreamingMode) {
+            // STREAMING: Add words continuously to accumulator
+            // No block splitting - just accumulate
+            if (fullFinalText.trim()) {
+                // Only add finalized words (not interim) to avoid duplicates
+                const finalWords = fullFinalText.trim().split(/\s+/);
+                const newFinalWords = finalWords.slice(committedWordCountRef.current);
+                if (newFinalWords.length > 0) {
+                    streamingModeRef.current?.addWords(newFinalWords.join(' '));
+                    committedWordCountRef.current = finalWords.length;
+                    console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING: Added ${newFinalWords.length} words`);
+                }
+            }
+
+            // Update interim display
+            setInterimTranscript(currentInterim);
+            return; // Skip block-based logic
+        }
+
+        // ========== LEGACY BLOCK MODE ==========
         // --- BLOCK SPLITTING LOGIC (Delta Tracking) ---
         const hasFinalContent = fullFinalText.trim().length > 0;
 
@@ -1067,6 +1117,12 @@ const App: React.FC = () => {
 
       console.log(`🎙️ [${Math.round(performance.now())}ms] SESSION START: questionId=${sessionQuestionIdRef.current}`);
 
+      // STREAMING MODE: Start session
+      if (context.viewMode === 'SIMPLE' && useStreamingUI) {
+          streamingMode.startSession();
+          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session started`);
+      }
+
       try {
           recognitionRef.current.start();
           shouldBeListening.current = true;
@@ -1091,6 +1147,12 @@ const App: React.FC = () => {
       committedWordCountRef.current = 0;
       lastFullTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+      // STREAMING MODE: Stop session and finalize translation
+      if (context.viewMode === 'SIMPLE' && useStreamingUI) {
+          streamingMode.stopSession();
+          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session stopped`);
+      }
 
       // ABORT all pending LLM requests immediately
       if (llmAbortControllerRef.current) {
@@ -1424,8 +1486,24 @@ const App: React.FC = () => {
       )}
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8">
-         {/* SIMPLE MODE */}
-         {context.viewMode === 'SIMPLE' && (
+         {/* SIMPLE MODE - NEW STREAMING UI */}
+         {context.viewMode === 'SIMPLE' && useStreamingUI && (
+             <StreamingSimpleModeLayout
+                 accumulatedOriginal={streamingMode.state.originalText}
+                 accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
+                 accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 isListening={streamingMode.state.isListening}
+                 isProcessingLLM={streamingMode.state.isProcessingLLM}
+                 showOriginal={true}
+                 showGhost={false}
+                 preferLLM={true}
+                 wordCount={streamingMode.state.wordCount}
+                 sessionDuration={streamingMode.state.sessionDuration}
+             />
+         )}
+
+         {/* SIMPLE MODE - LEGACY BLOCK UI */}
+         {context.viewMode === 'SIMPLE' && !useStreamingUI && (
              <SimpleModeLayout
                  messages={messages}
                  interimTranscript={interimTranscript}
