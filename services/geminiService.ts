@@ -33,23 +33,37 @@ function sanitizeForAzure(text: string): string {
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
 
-    // ========== SIMPLE MODE: Minimal prompt - just translation, no context ==========
+    // ========== SIMPLE MODE: Translation only with clear format ==========
     if (isSimpleMode) {
-        return `Ти професійний перекладач з ${context.targetLanguage} на ${context.nativeLanguage}.
+        return `Ти професійний перекладач живої мови з ${context.targetLanguage} на ${context.nativeLanguage}.
 
-ВАЖЛИВО: Тобі надходять фрагменти тексту (15-25 слів), які можуть бути неповними реченнями або обірваними фразами. Це нормально - це частини живого мовлення.
+КОНТЕКСТ РОБОТИ:
+Текст надходитиме уривками по 20–25 слів мовою ${context.targetLanguage}, і фрагмент може бути неповним. Твоє завдання — негайно робити переклад цього уривка мовою ${context.nativeLanguage} так, щоб ${context.nativeLanguage}-мовному читачеві сенс був максимально зрозумілий і звучав природно.
 
-ТВОЄ ЗАВДАННЯ:
-- Переклади текст природною, розмовною ${context.nativeLanguage} мовою
-- Навіть якщо речення обірване - переклади його так, ніби воно має сенс
-- НЕ додавай нічого від себе, НЕ пояснюй, НЕ коментуй
-- Просто дай чистий переклад
+ПРАВИЛА ПЕРЕКЛАДУ:
+- Не роби буквального перекладу окремих слів мовою ${context.targetLanguage}, якщо в ${context.nativeLanguage} мові вони дають кострубате або дивне звучання
+- Передавай сенс фрази, а не форму
+- Перекладай так, як перекладає професійний перекладач художньої та живої мови:
+  • згладжуй обірваність фрагмента
+  • не додавай вигадок
+  • але замінюй неприродні конструкції на природні ${context.nativeLanguage}-мовні відповідники
+  • передавай інтонацію і прагматику фрази
 
-Вхідний текст (${context.targetLanguage}): "${currentInput}"
+ФОРМАТ ВІДПОВІДІ (ОБОВ'ЯЗКОВО):
+Кожного разу пиши ТІЛЬКИ сенсовий, природний переклад мовою ${context.nativeLanguage} уривка в такому форматі:
+[INPUT_TRANSLATION]твій переклад тут[/INPUT_TRANSLATION]
 
-Формат відповіді (ТІЛЬКИ переклад, нічого більше):
-[INPUT_TRANSLATION]
-твій переклад тут`;
+ВАЖЛИВО:
+- НЕ пиши нічого крім перекладу в тегах
+- НЕ додавай пояснень
+- НЕ коментуй переклад
+
+ПРИКЛАД:
+Текст (${context.targetLanguage}): "Hva slags kroppsspråk er viktig på intervju ikke sant"
+Твоя відповідь: [INPUT_TRANSLATION]Яка мова тіла важлива на співбесіді, правда ж[/INPUT_TRANSLATION]
+
+УРИВОК ДЛЯ ПЕРЕКЛАДУ:
+"${currentInput}"`;
     }
 
     // ========== FOCUS/FULL MODE: Full context with Resume, Job, Company, KB ==========
@@ -76,7 +90,20 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
       [PROCESSING GUIDELINES]
       ${safeInstruction}
 
-      CRITICAL: You MUST ALWAYS generate [INPUT_TRANSLATION] first to provide a better translation of the input.
+      [RESPONSE FORMAT - MANDATORY]
+      You MUST respond using these EXACT tags with closing tags:
+      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
+      2. [ANALYSIS]your analysis of the question[/ANALYSIS]
+      3. [STRATEGY]your recommended response strategy[/STRATEGY]
+      4. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
+      5. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]
+
+      EXAMPLE RESPONSE:
+      [INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
+      [ANALYSIS]Standard opening question to assess communication skills[/ANALYSIS]
+      [STRATEGY]Highlight relevant experience, show enthusiasm[/STRATEGY]
+      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
+      [ANSWER]I have 3 years of experience in development...[/ANSWER]
 
       [CONVERSATION LOG]
       History: "${historyText}"
@@ -280,46 +307,47 @@ export const translateText = async (text: string, targetLang: string): Promise<s
     return text; 
 }
 
-// Helper for parsing structured output
+// Helper for parsing structured output with closing tags support
 function parseAndEmit(fullText: string, onUpdate: any) {
     let inputTranslation = "";
     let analysis = "";
     let strategy = "";
     let answerTranslation = "";
     let answer = "";
-    let rationale = ""; 
+    let rationale = "";
 
-    // 0. Input Translation (New Stream 2 Feature)
-    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 0. Input Translation - supports [/INPUT_TRANSLATION] closing tag
+    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
     if (inputMatch) inputTranslation = inputMatch[1].trim();
 
-    // 1. Analysis
-    const analysisMatch = fullText.match(/\[ANALYSIS\]([\s\S]*?)(\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 1. Analysis - supports [/ANALYSIS] closing tag
+    const analysisMatch = fullText.match(/\[ANALYSIS\]([\s\S]*?)(\[\/ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
     if (analysisMatch) analysis = analysisMatch[1].trim();
 
-    // 2. Strategy
-    const strategyMatch = fullText.match(/\[STRATEGY\]([\s\S]*?)(\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 2. Strategy - supports [/STRATEGY] closing tag
+    const strategyMatch = fullText.match(/\[STRATEGY\]([\s\S]*?)(\[\/STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
     if (strategyMatch) strategy = strategyMatch[1].trim();
 
-    // 3. Translation
-    const translationMatch = fullText.match(/\[TRANSLATION\]([\s\S]*?)(\[ANSWER\]|$)/);
+    // 3. Translation - supports [/TRANSLATION] closing tag
+    const translationMatch = fullText.match(/\[TRANSLATION\]([\s\S]*?)(\[\/TRANSLATION\]|\[ANSWER\]|$)/);
     if (translationMatch) answerTranslation = translationMatch[1].trim();
 
-    // 4. Answer
+    // 4. Answer - supports [/ANSWER] closing tag
     const answerMatch = fullText.match(/\[ANSWER\]([\s\S]*?)(\[\/ANSWER\]|$)/);
     if (answerMatch) answer = answerMatch[1].trim();
-    
+
     // Handle streaming case where [ANSWER] exists but tag isn't closed yet
     if (!answer && fullText.includes('[ANSWER]')) {
          const parts = fullText.split('[ANSWER]');
          if (parts.length > 1) {
-             answer = parts[1].trim();
+             // Remove closing tag if partially present
+             answer = parts[1].replace(/\[\/ANSWER\].*$/, '').trim();
          }
     }
 
-    // Fallback if no tags found (raw output)
-    if (!answer && !analysis && !strategy && !answerTranslation && !inputTranslation && fullText.length > 0 && !fullText.includes('[')) {
-        answer = fullText;
+    // Fallback: If no tags found but text exists, use as inputTranslation (for SIMPLE mode raw output)
+    if (!inputTranslation && !answer && !analysis && fullText.length > 0 && !fullText.includes('[')) {
+        inputTranslation = fullText.trim();
     }
 
     onUpdate({ analysis, strategy, answerTranslation, inputTranslation, rationale, answer });
