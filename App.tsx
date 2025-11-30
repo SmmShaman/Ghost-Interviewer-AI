@@ -290,7 +290,7 @@ const App: React.FC = () => {
     const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
     const wordCount = messageText.split(/\s+/).length;
 
-    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, block: ${pendingBlockId}, provider: ${currentContext.llmProvider}`);
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words | responseId: ${responseId} | targetId: ${targetMessageId} | block: ${pendingBlockId} | provider: ${currentContext.llmProvider}`);
 
     try {
 
@@ -307,9 +307,12 @@ const App: React.FC = () => {
             const { partial, responseId: respId, targetMessageId: targetId, startTime: sTime } = data;
             const currentTime = performance.now();
 
+            console.log(`🔄 [${Math.round(currentTime)}ms] flushStreamingUpdate | respId: ${respId} | answer: ${!!partial.answer} | translation: ${!!partial.inputTranslation}`);
+
             setMessages(prev => prev.map(msg => {
                 // Update Assistant Message (Right/Middle Columns)
                 if (msg.id === respId) {
+                    console.log(`✅ [${Math.round(performance.now())}ms] UPDATING ASSISTANT msg.id=${msg.id} with answer: "${(partial.answer || '').substring(0, 50)}..."`);
                     return {
                         ...msg,
                         text: partial.answer,
