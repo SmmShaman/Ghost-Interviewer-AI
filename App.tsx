@@ -126,6 +126,7 @@ const App: React.FC = () => {
   const sessionResponseIdRef = useRef<string | null>(null);
   const llmLastActivityRef = useRef<number>(Date.now()); // Track pause duration
   const firstSessionMessageIdRef = useRef<string | null>(null); // ID of FIRST message in session (for LLM updates)
+  const firstSessionAssistantIdRef = useRef<string | null>(null); // ID of FIRST assistant message in session
 
   // DEBOUNCE: Store latest streaming data and batch UI updates
   const streamingPartialRef = useRef<{
@@ -636,9 +637,19 @@ const App: React.FC = () => {
     ];
 
     // Create Assistant Placeholder (Unless SIMPLE mode)
+    // Track FIRST assistant message ID for LLM updates
+    let assistantMsgId: string | null = null;
     if (currentContext.viewMode !== 'SIMPLE') {
+      assistantMsgId = `${responseId}_${Date.now()}`;
+
+      // Track FIRST assistant message of session
+      if (!firstSessionAssistantIdRef.current) {
+        firstSessionAssistantIdRef.current = assistantMsgId;
+        console.log(`🎯 [${Math.round(finalizeStart)}ms] Creating FIRST Assistant message: ${assistantMsgId}`);
+      }
+
       initialMessages.push({
-        id: `${responseId}_${Date.now()}`,
+        id: assistantMsgId,
         role: 'assistant',
         text: '',
         analysis: '',
@@ -701,7 +712,9 @@ const App: React.FC = () => {
     // Run AI analysis even in SIMPLE mode to get [INPUT_TRANSLATION]
     // Instead of sending immediately, accumulate text for better LLM context
     // Pass blockId as targetMessageId - this message will receive the LLM translation
-    addToLLMAccumulator(text, questionId, responseId, blockId);
+    // Pass firstSessionAssistantIdRef as responseId - this assistant message will receive [ANSWER]
+    const assistantIdForLLM = firstSessionAssistantIdRef.current || assistantMsgId || responseId;
+    addToLLMAccumulator(text, questionId, assistantIdForLLM, blockId);
 
     // Reset visual state when Ghost is done (AI might still be chugging in background)
     ghostPromise.finally(() => {
@@ -1118,7 +1131,8 @@ const App: React.FC = () => {
       // CLEAR SESSION IDs and refs
       sessionQuestionIdRef.current = null;
       sessionResponseIdRef.current = null;
-      firstSessionMessageIdRef.current = null;  // Clear first message ref
+      firstSessionMessageIdRef.current = null;  // Clear first interviewer message ref
+      firstSessionAssistantIdRef.current = null;  // Clear first assistant message ref
 
       if (audioContextRef.current) {
           audioContextRef.current.close();
@@ -1199,6 +1213,7 @@ const App: React.FC = () => {
 
       // Clear all session refs
       firstSessionMessageIdRef.current = null;
+      firstSessionAssistantIdRef.current = null;
       sessionQuestionIdRef.current = null;
       sessionResponseIdRef.current = null;
 
