@@ -653,6 +653,9 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
         throw new DOMException('Aborted', 'AbortError');
     }
 
+    // Sanitize prompt to avoid Azure content filtering issues
+    const sanitizedPrompt = sanitizeForAzure(prompt);
+
     const response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
         method: 'POST',
         headers: {
@@ -660,7 +663,7 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
             'api-key': AZURE_API_KEY
         },
         body: JSON.stringify({
-            messages: [{ role: "user", content: prompt }],
+            messages: [{ role: "user", content: sanitizedPrompt }],
             stream: true,
             max_tokens: 512
         }),
@@ -668,7 +671,16 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
     });
 
     if (!response.ok) {
-        throw new Error(`Azure API Error: ${response.status}`);
+        // Try to get error details for debugging
+        let errorDetails = '';
+        try {
+            const errorBody = await response.text();
+            errorDetails = errorBody.slice(0, 500);
+            console.error('Azure API Error details:', errorDetails);
+        } catch (e) {
+            // Ignore parse error
+        }
+        throw new Error(`Azure API Error: ${response.status} - ${errorDetails}`);
     }
 
     await processStream(response, onUpdate, signal);
