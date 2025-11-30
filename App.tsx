@@ -21,14 +21,11 @@ const BLOCK_CONFIG = {
 };
 
 // LLM ACCUMULATION CONFIG: Send 20-25 words per block for clear display
+// CENTER COLUMN BLOCKS ARE INDEPENDENT FROM GHOST BLOCKS (left column)
 const LLM_CONFIG = {
-    MIN_WORDS_FOR_LLM: 15,          // Minimum words before sending to LLM
-    MAX_WORDS_FOR_LLM: 25,          // Force send at 25 words (target: 20-25)
-    SILENCE_TIMEOUT_MS: 5000,       // Send accumulated text after 5s of silence
-    PAUSE_THRESHOLD_MS: 2000,       // 2 seconds pause = complete LLM block
-    MIN_WORDS_FOR_SENTENCE: 5,      // Minimum words needed to consider sentence complete
-    SENTENCE_MARKERS: /[.!?।。]+$/,  // Sentence-ending punctuation
-    FALLBACK_MAX_WORDS: 30          // Absolute max if no sentence end detected
+    MIN_WORDS_FOR_LLM: 15,          // Minimum words before sending to LLM (won't send with fewer)
+    MAX_WORDS_FOR_LLM: 25,          // Target max - auto-send at 25 words
+    PAUSE_THRESHOLD_MS: 2000,       // 2 seconds pause = complete LLM block (if >= MIN_WORDS)
 };
 
 const DEFAULT_PROMPTS: PromptPreset[] = [
@@ -460,10 +457,10 @@ const App: React.FC = () => {
   // ----------------------------------------------------------------------
   // LLM ACCUMULATOR FUNCTIONS
   // ----------------------------------------------------------------------
-  const sendLLMAccumulator = useCallback((force = false) => {
+  const sendLLMAccumulator = useCallback((force = false, isStopButton = false) => {
     const acc = llmAccumulatorRef.current;
 
-    console.log(`🔍 [${Math.round(performance.now())}ms] sendLLMAccumulator called | force=${force} | wordCount=${acc.wordCount} | hasText=${!!acc.text.trim()}`);
+    console.log(`🔍 [${Math.round(performance.now())}ms] sendLLMAccumulator called | force=${force} | isStopButton=${isStopButton} | wordCount=${acc.wordCount} | hasText=${!!acc.text.trim()}`);
 
     // Don't send if empty
     if (!acc.text.trim() || !acc.questionId || !acc.responseId || !acc.targetMessageId) {
@@ -471,15 +468,21 @@ const App: React.FC = () => {
       return;
     }
 
-    // Only send if:
-    // 1. Force flag is true (Stop button, new question, etc.)
-    // 2. OR reached max words limit (safety)
-    const shouldSend = force || acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM;
+    // CRITICAL: Only send if we have enough words OR user pressed STOP
+    // This ensures center column blocks are 20-25 words each
+    const hasEnoughWords = acc.wordCount >= LLM_CONFIG.MIN_WORDS_FOR_LLM; // 15 words minimum
+    const reachedMaxWords = acc.wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM; // 25 words maximum
 
-    console.log(`🎯 [${Math.round(performance.now())}ms] shouldSend=${shouldSend} | force=${force} | wordCount=${acc.wordCount} | MAX=${LLM_CONFIG.MAX_WORDS_FOR_LLM}`);
+    // Only send if:
+    // 1. User pressed STOP (isStopButton=true) - send whatever we have
+    // 2. OR reached max words (25+)
+    // 3. OR force=true AND we have minimum words (15+)
+    const shouldSend = isStopButton || reachedMaxWords || (force && hasEnoughWords);
+
+    console.log(`🎯 [${Math.round(performance.now())}ms] shouldSend=${shouldSend} | isStopButton=${isStopButton} | hasEnoughWords=${hasEnoughWords} (${acc.wordCount}>=${LLM_CONFIG.MIN_WORDS_FOR_LLM}) | reachedMaxWords=${reachedMaxWords}`);
 
     if (!shouldSend) {
-      console.log(`⏭️ [${Math.round(performance.now())}ms] SKIP: Not ready to send (need force or ${LLM_CONFIG.MAX_WORDS_FOR_LLM}+ words)`);
+      console.log(`⏭️ [${Math.round(performance.now())}ms] SKIP: Need ${LLM_CONFIG.MIN_WORDS_FOR_LLM}+ words (have ${acc.wordCount}) or STOP button`);
       return;
     }
 
@@ -532,28 +535,26 @@ const App: React.FC = () => {
     const newWordCount = text.split(/\s+/).length;
     console.log(`📥 [${Math.round(performance.now())}ms] addToLLMAccumulator | Adding ${newWordCount} words | Pause: ${pauseDuration}ms | Current total: ${acc.wordCount}`);
 
-    // SMART SENTENCE DETECTION: Check if we should complete the current LLM block
+    // CHECK if we should complete the current LLM block
+    // SIMPLIFIED: Only check pause duration and max words - let sendLLMAccumulator handle min word check
     const shouldCompleteLLMBlock = (accText: string, pause: number): boolean => {
       const wordCount = accText.split(/\s+/).length;
 
-      // Condition 1: Pause > 2 seconds
+      // Condition 1: Long pause (>= 2 seconds) - send what we have
+      // Note: sendLLMAccumulator will check minimum word count
       if (pause >= LLM_CONFIG.PAUSE_THRESHOLD_MS) {
-        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Pause ${pause}ms >= ${LLM_CONFIG.PAUSE_THRESHOLD_MS}ms`);
+        console.log(`🎯 [${Math.round(performance.now())}ms] shouldCompleteLLMBlock: Long pause ${pause}ms`);
         return true;
       }
 
-      // Condition 2: Complete sentence (punctuation + min words)
-      if (wordCount >= LLM_CONFIG.MIN_WORDS_FOR_SENTENCE &&
-          LLM_CONFIG.SENTENCE_MARKERS.test(accText.trim())) {
-        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Sentence end detected`);
+      // Condition 2: Reached max words - MUST send
+      if (wordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
+        console.log(`🎯 [${Math.round(performance.now())}ms] shouldCompleteLLMBlock: Max words (${wordCount} >= ${LLM_CONFIG.MAX_WORDS_FOR_LLM})`);
         return true;
       }
 
-      // Condition 3: Fallback - too many words without sentence end
-      if (wordCount >= LLM_CONFIG.FALLBACK_MAX_WORDS) {
-        console.log(`🎯 [${Math.round(performance.now())}ms] LLM Block Complete: Fallback max words (${wordCount} >= ${LLM_CONFIG.FALLBACK_MAX_WORDS})`);
-        return true;
-      }
+      // REMOVED: Sentence detection with MIN_WORDS_FOR_SENTENCE (5 words) - too aggressive
+      // We only want blocks of 20-25 words, not 5+ word sentences
 
       return false;
     };
@@ -579,6 +580,14 @@ const App: React.FC = () => {
     setCurrentCollectingText(newText);
 
     console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Target: ${llmAccumulatorRef.current.targetMessageId} | Text: "${newText.substring(0, 50)}..."`);
+
+    // IMMEDIATELY SEND if we've reached MAX_WORDS (25 words)
+    // This ensures blocks are sent at exactly 20-25 words without waiting
+    if (totalWordCount >= LLM_CONFIG.MAX_WORDS_FOR_LLM) {
+      console.log(`🚀 [${Math.round(performance.now())}ms] MAX WORDS REACHED (${totalWordCount} >= ${LLM_CONFIG.MAX_WORDS_FOR_LLM}) - Sending immediately`);
+      sendLLMAccumulator(true); // force=true, but will check hasEnoughWords which should be true
+      return; // Exit early, don't set pause timer
+    }
 
     // Clear previous pause timer
     if (llmSilenceTimerRef.current) {
@@ -1114,15 +1123,19 @@ const App: React.FC = () => {
           aiQueueRef.current = [];
       }
 
-      // CLEAR LLM accumulator without sending
+      // SEND accumulated text to LLM when STOP is pressed (even if < 15 words)
+      // User pressed STOP, so send whatever we have collected
       if (llmAccumulatorRef.current.text.trim()) {
-          console.log(`🛑 [${Math.round(performance.now())}ms] DISCARDING LLM accumulator (${llmAccumulatorRef.current.wordCount} words)`);
-          llmAccumulatorRef.current = { text: '', wordCount: 0, questionId: null, responseId: null };
+          console.log(`🛑 [${Math.round(performance.now())}ms] SENDING LLM accumulator on STOP (${llmAccumulatorRef.current.wordCount} words)`);
+          sendLLMAccumulator(true, true); // force=true, isStopButton=true - sends regardless of word count
       }
       if (llmSilenceTimerRef.current) {
           clearTimeout(llmSilenceTimerRef.current);
           llmSilenceTimerRef.current = null;
       }
+
+      // Clear visual collecting text
+      setCurrentCollectingText('');
 
       // Reset processing flag
       isAIProcessingRef.current = false;
