@@ -9,7 +9,7 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 - Provides instant translations using local AI models (Hugging Face Transformers)
 - Generates strategic responses using cloud LLMs (Azure OpenAI or Groq)
 - Supports multiple view modes (Simple, Focus, Full) for different use cases
-- Features a "stealth mode" for discreet usage during video interviews
+- Features an animated gear menu for quick settings access during sessions
 
 ## Tech Stack
 
@@ -33,7 +33,8 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 ├── translations.ts             # i18n strings (English and Ukrainian)
 ├── netlify.toml                # Netlify deployment configuration
 ├── components/
-│   ├── SetupPanel.tsx          # Settings sidebar (profiles, models, audio config)
+│   ├── SetupPanel.tsx          # Full settings panel (profiles, models, audio config)
+│   ├── GearMenu.tsx            # Animated gear menu with quick settings dropdowns
 │   ├── BrickRow.tsx            # Main message display row (interviewer + AI response)
 │   ├── CandidateRow.tsx        # User's speech display row
 │   ├── AnswerCard.tsx          # Legacy answer card component
@@ -219,6 +220,81 @@ The app uses a dual-profile system:
 
 Profiles are stored in `localStorage` and can be saved/loaded via SetupPanel.
 
+### GearMenu Component (components/GearMenu.tsx)
+
+The GearMenu provides quick access to common settings during active sessions without opening the full SetupPanel.
+
+**Features:**
+- Animated gear button with rotation on open
+- Horizontal slide-out menu with staggered animations
+- Dropdown submenus for each setting category
+- Color-coded items (emerald for mode, blue for language, purple for AI, orange for audio)
+- Click outside to close
+
+**Menu Items:**
+1. **Mode** - Switch between FULL/FOCUS/SIMPLE
+2. **Language** - Select interview language (Norwegian, English, German, French)
+3. **AI Model** - Choose Azure GPT-4 or Groq Llama 3
+4. **Audio** - Toggle stereo mode on/off
+5. **Full Settings** - Opens the complete SetupPanel
+
+**Usage in App.tsx:**
+```typescript
+<GearMenu
+  context={context}
+  onContextChange={setContext}
+  uiLang={uiLang}
+  onOpenFullSettings={() => setShowSetup(true)}
+/>
+```
+
+### Mode-Specific Configuration (ModeConfig)
+
+Each view mode has its own configuration for prompts and AI settings:
+
+```typescript
+interface ModeConfig {
+  full: {
+    aiModel: 'azure' | 'groq';
+    strategyDetailLevel: 'brief' | 'detailed' | 'comprehensive';
+    translationPrompt: string;
+    analysisPrompt: string;
+    answerPrompt: string;
+  };
+  focus: {
+    aiModel: 'azure' | 'groq';
+    translationPrompt: string;
+    answerPrompt: string;
+  };
+  simple: {
+    translationPrompt: string;
+    useChromeAPI: boolean;
+  };
+}
+```
+
+**Benefits:**
+- Each mode can have different AI models and prompts
+- SIMPLE mode can bypass cloud AI entirely with Chrome Translator API
+- Users can customize prompts per-mode without affecting other modes
+
+### SetupPanel UX Features
+
+The SetupPanel uses collapsible dropdown sections for organization:
+
+**Visual Feedback:**
+- Save buttons show checkmark (✓) animation when profile/prompt is saved
+- Progress bar for Knowledge Base size (green → orange → red as it fills)
+- Dropdown options show truncated text with full title on hover
+
+**Dropdown Sections:**
+1. 🎯 Mode Selection - View mode cards with descriptions
+2. 👤 Your Profile - Candidate profiles (Resume, Knowledge Base)
+3. 💼 Job Application - Job profiles (Company, Job Description, Application Letter)
+4. 🌐 Language Settings - Target and native language selection
+5. 🎧 Audio Setup - Microphone selection, stereo mode, audio testing
+6. 🧠 Advanced Prompts - Custom prompts and mode-specific prompt editors
+
 ## Key Types (types.ts)
 
 ```typescript
@@ -240,6 +316,13 @@ interface JobProfile {
   companyDescription: string;
   jobDescription: string;
   applicationLetter: string;   // Søknad
+}
+
+// Mode-specific configuration
+interface ModeConfig {
+  full: ModePrompts & { aiModel: 'azure' | 'groq'; strategyDetailLevel: string };
+  focus: ModePrompts & { aiModel: 'azure' | 'groq' };
+  simple: { translationPrompt: string; useChromeAPI: boolean };
 }
 
 // Main context object persisted to localStorage
@@ -266,6 +349,7 @@ interface InterviewContext {
   ghostModel: 'opus' | 'nllb';
   llmProvider: 'azure' | 'groq';
   groqApiKey: string;
+  modeConfig: ModeConfig;      // Mode-specific prompts and settings
   // ... more fields
 }
 
