@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SetupPanel from './components/SetupPanel';
 import BrickRow from './components/BrickRow';
 import CandidateRow from './components/CandidateRow';
-import { MicIcon, StopIcon, SettingsIcon, SendIcon, EyeIcon, EyeOffIcon, DownloadIcon, TrashIcon } from './components/Icons';
+import { MicIcon, StopIcon, SettingsIcon, DownloadIcon, TrashIcon } from './components/Icons';
 import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile, ModeConfig } from './types';
 import { generateInterviewAssist, translateText } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
@@ -193,7 +193,6 @@ const App: React.FC = () => {
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSetupOpen, setIsSetupOpen] = useState(false);
-  const [stealthMode, setStealthMode] = useState(false);
   const [uiLang, setUiLang] = useState<'en' | 'uk'>('en');
   const [hasSessionStarted, setHasSessionStarted] = useState(false); // Landing vs Working view
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
@@ -1255,14 +1254,6 @@ const App: React.FC = () => {
   }, [isUserSpeaking]);
 
 
-  const handleManualSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      if(transcript.trim()) {
-          finalizeBlock(transcript);
-          setTranscript("");
-      }
-  }
-
   const toggleLanguage = () => {
       setUiLang(prev => prev === 'en' ? 'uk' : 'en');
   };
@@ -1508,7 +1499,7 @@ const App: React.FC = () => {
 
   // WORKING VIEW: Show after mode is selected
   return (
-    <div className={`relative h-screen w-screen flex flex-col transition-opacity duration-300 ${stealthMode ? 'bg-transparent' : 'bg-gray-950'}`}>
+    <div className="relative h-screen w-screen flex flex-col bg-gray-950">
       {!isModelReady && (
         <div className={`absolute top-0 left-0 right-0 z-[100] backdrop-blur-md border-b text-center py-2 transition-all ${modelError ? 'bg-red-900/95 border-red-500' : 'bg-blue-900/80 border-blue-500/30'}`}>
              <div className="flex flex-col items-center justify-center gap-1">
@@ -1548,7 +1539,7 @@ const App: React.FC = () => {
 
       <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} />
 
-      <div className={`flex justify-between items-center p-4 z-40 ${stealthMode ? 'opacity-20 hover:opacity-100 transition-opacity' : 'bg-gray-900/50 backdrop-blur border-b border-gray-800'} ${!isModelReady ? 'mt-10' : ''}`}>
+      <div className={`flex justify-between items-center p-4 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
         <div className="flex items-center gap-4">
             {/* Back to Home */}
             <button
@@ -1571,13 +1562,7 @@ const App: React.FC = () => {
             <button onClick={() => setIsSetupOpen(true)} className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700">
                 <SettingsIcon />
             </button>
-            <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
-                <div className={`w-2.5 h-2.5 rounded-full shadow-lg ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
-                <span className="text-xs font-mono font-bold tracking-wider text-gray-200">
-                    {isUserSpeaking ? "YOU ARE SPEAKING" : appState === AppState.LISTENING ? (context.stereoMode ? "LISTENING (STEREO)" : t.listening) : appState === AppState.PROCESSING ? t.generating : t.paused}
-                </span>
-            </div>
-            <button onClick={toggleLanguage} className="ml-2 px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
+            <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
         </div>
@@ -1592,10 +1577,13 @@ const App: React.FC = () => {
                     <TrashIcon className="w-5 h-5" />
                  </button>
              </div>
-             <button onClick={() => setStealthMode(!stealthMode)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all ${stealthMode ? 'bg-emerald-900/30 border-emerald-500/50 text-emerald-400' : 'bg-gray-800 border-gray-700 text-gray-400'}`}>
-                {stealthMode ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-                {stealthMode ? t.stealthOn : t.stealthOff}
-             </button>
+             {/* Listening/Pause Indicator - moved to right side */}
+             <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
+                <div className={`w-2.5 h-2.5 rounded-full shadow-lg ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
+                <span className="text-xs font-mono font-bold tracking-wider text-gray-200">
+                    {isUserSpeaking ? "YOU ARE SPEAKING" : appState === AppState.LISTENING ? (context.stereoMode ? "LISTENING (STEREO)" : t.listening) : appState === AppState.PROCESSING ? t.generating : t.paused}
+                </span>
+            </div>
         </div>
       </div>
 
@@ -1610,7 +1598,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <div className={`flex-1 overflow-y-auto px-4 md:px-8 py-8 ${stealthMode ? 'opacity-90' : ''}`}>
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8">
          {/* SIMPLE MODE: Three-column layout */}
          {context.viewMode === 'SIMPLE' ? (
              <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
@@ -1776,27 +1764,21 @@ const App: React.FC = () => {
          )}
       </div>
 
-      <div className={`p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent ${stealthMode ? 'opacity-10 hover:opacity-100 transition-opacity' : ''}`}>
-        <div className="max-w-4xl mx-auto flex gap-6 items-end">
+      <div className="p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent">
+        <div className="flex justify-center">
             <button
                 onClick={toggleListening}
                 disabled={!isModelReady}
-                title={!isModelReady ? "Waiting for translation model to load..." : undefined}
-                className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl transition-all transform ${
+                title={!isModelReady ? "Waiting for translation model to load..." : (shouldBeListening.current ? t.paused : t.listening)}
+                className={`w-20 h-20 rounded-full flex items-center justify-center shadow-2xl transition-all transform ${
                     !isModelReady
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
                         : shouldBeListening.current
-                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/30 hover:scale-105 hover:-translate-y-1'
-                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/30 hover:scale-105 hover:-translate-y-1'
+                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/50 hover:scale-110 ring-4 ring-red-500/30'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/50 hover:scale-110 ring-4 ring-emerald-500/30'
                 }`}>
-                {shouldBeListening.current ? <StopIcon className="w-8 h-8" /> : <MicIcon className="w-8 h-8" />}
+                {shouldBeListening.current ? <StopIcon className="w-10 h-10" /> : <MicIcon className="w-10 h-10" />}
             </button>
-            <form onSubmit={handleManualSubmit} className="flex-1 flex gap-3 relative">
-                <input type="text" value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder={t.placeholderInput} className="flex-1 h-16 bg-gray-900/80 backdrop-blur border border-gray-800 rounded-2xl px-8 text-lg text-gray-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 focus:bg-gray-900 outline-none placeholder-gray-600 shadow-xl transition-all" />
-                <button type="submit" className="absolute right-3 top-3 bottom-3 w-12 bg-gray-800 text-gray-400 rounded-xl hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center">
-                    <SendIcon className="w-5 h-5" />
-                </button>
-            </form>
         </div>
       </div>
     </div>
