@@ -35,6 +35,8 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
     const isFocusMode = context.viewMode === 'FOCUS';
     const isFullMode = context.viewMode === 'FULL';
 
+    console.log(`📋 [constructPrompt] viewMode="${context.viewMode}" | isSimple=${isSimpleMode} | isFocus=${isFocusMode} | isFull=${isFullMode}`);
+
     // Get mode-specific prompts from context
     const modeConfig = context.modeConfig;
     const simpleConfig = modeConfig?.simple;
