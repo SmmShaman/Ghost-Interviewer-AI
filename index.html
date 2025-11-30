@@ -33,6 +33,26 @@
               finalFadeIn: {
                 '0%': { opacity: '0', transform: 'translateY(-4px)' },
                 '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              gearSpin: {
+                '0%': { transform: 'rotate(0deg)' },
+                '100%': { transform: 'rotate(180deg)' },
+              },
+              slideInRight: {
+                '0%': { opacity: '0', transform: 'translateX(-20px)' },
+                '100%': { opacity: '1', transform: 'translateX(0)' },
+              },
+              slideOutLeft: {
+                '0%': { opacity: '1', transform: 'translateX(0)' },
+                '100%': { opacity: '0', transform: 'translateX(-20px)' },
+              },
+              dropDown: {
+                '0%': { opacity: '0', transform: 'translateY(-10px) scaleY(0.8)', transformOrigin: 'top' },
+                '100%': { opacity: '1', transform: 'translateY(0) scaleY(1)', transformOrigin: 'top' },
+              },
+              dropUp: {
+                '0%': { opacity: '1', transform: 'translateY(0) scaleY(1)', transformOrigin: 'top' },
+                '100%': { opacity: '0', transform: 'translateY(-10px) scaleY(0.8)', transformOrigin: 'top' },
               }
             },
             animation: {
@@ -40,6 +60,11 @@
               'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
               'ghost-pulse': 'ghostPulse 2s ease-in-out infinite',
               'final-fade-in': 'finalFadeIn 0.5s ease-out forwards',
+              'gear-spin': 'gearSpin 0.5s ease-out',
+              'slide-in-right': 'slideInRight 0.4s ease-out forwards',
+              'slide-out-left': 'slideOutLeft 0.3s ease-in forwards',
+              'drop-down': 'dropDown 0.3s ease-out forwards',
+              'drop-up': 'dropUp 0.25s ease-in forwards',
             }
           }
         }
