@@ -34,6 +34,27 @@ export interface InterviewProfile {
 
 export type ViewMode = 'FULL' | 'FOCUS' | 'SIMPLE';
 
+// Mode-Specific Configuration for Mode-Centric Cards UI
+export interface ModePrompts {
+  translationPrompt: string;     // How to translate input
+  analysisPrompt?: string;       // How to analyze question (not for SIMPLE)
+  answerPrompt?: string;         // How to generate answer (not for SIMPLE)
+}
+
+export interface ModeConfig {
+  full: ModePrompts & {
+    aiModel: 'azure' | 'groq';
+    strategyDetailLevel: 'brief' | 'detailed' | 'comprehensive';
+  };
+  focus: ModePrompts & {
+    aiModel: 'azure' | 'groq';
+  };
+  simple: {
+    translationPrompt: string;
+    useChromeAPI: boolean;       // Whether to prefer Chrome Translator API
+  };
+}
+
 export interface InterviewContext {
   // === ACTIVE DATA (loaded from selected profiles) ===
   resume: string;
@@ -69,6 +90,9 @@ export interface InterviewContext {
   ghostModel: 'opus' | 'nllb'; // Select local model type
   llmProvider: 'azure' | 'groq'; // Select Cloud Provider
   groqApiKey: string; // Store Groq Key
+
+  // === MODE-SPECIFIC CONFIGURATION ===
+  modeConfig: ModeConfig; // Mode-specific prompts and settings
 }
 
 export interface TextBlock {

@@ -32,9 +32,22 @@ function sanitizeForAzure(text: string): string {
 
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
+    const isFocusMode = context.viewMode === 'FOCUS';
+    const isFullMode = context.viewMode === 'FULL';
+
+    // Get mode-specific prompts from context
+    const modeConfig = context.modeConfig;
+    const simpleConfig = modeConfig?.simple;
+    const focusConfig = modeConfig?.focus;
+    const fullConfig = modeConfig?.full;
 
     // ========== SIMPLE MODE: Translation only with clear format ==========
     if (isSimpleMode) {
+        // Use custom translation prompt if provided
+        const customTranslationHint = simpleConfig?.translationPrompt
+            ? `\n\nДОДАТКОВІ ВКАЗІВКИ:\n${simpleConfig.translationPrompt}`
+            : '';
+
         return `Ти професійний перекладач живої мови з ${context.targetLanguage} на ${context.nativeLanguage}.
 
 КОНТЕКСТ РОБОТИ:
@@ -47,7 +60,7 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
   • згладжуй обірваність фрагмента
   • не додавай вигадок
   • але замінюй неприродні конструкції на природні ${context.nativeLanguage}-мовні відповідники
-  • передавай інтонацію і прагматику фрази
+  • передавай інтонацію і прагматику фрази${customTranslationHint}
 
 ФОРМАТ ВІДПОВІДІ (ОБОВ'ЯЗКОВО):
 Кожного разу пиши ТІЛЬКИ сенсовий, природний переклад мовою ${context.nativeLanguage} уривка в такому форматі:
@@ -71,6 +84,51 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
     // Reduced to 1500 chars to stay within Groq's 12k token limit
     const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 1500);
 
+    // Get mode-specific prompt hints
+    const currentConfig = isFocusMode ? focusConfig : fullConfig;
+    const translationHint = currentConfig?.translationPrompt || '';
+    const analysisHint = (currentConfig as any)?.analysisPrompt || '';
+    const answerHint = currentConfig?.answerPrompt || '';
+    const strategyLevel = (fullConfig as any)?.strategyDetailLevel || 'detailed';
+
+    // Build mode-specific processing guidelines
+    let modeSpecificGuidelines = '';
+    if (translationHint) {
+        modeSpecificGuidelines += `\n[TRANSLATION GUIDELINES]\n${translationHint}\n`;
+    }
+    if (isFullMode && analysisHint) {
+        modeSpecificGuidelines += `\n[ANALYSIS GUIDELINES]\n${analysisHint}\n`;
+    }
+    if (answerHint) {
+        modeSpecificGuidelines += `\n[ANSWER GUIDELINES]\n${answerHint}\n`;
+    }
+    if (isFullMode) {
+        modeSpecificGuidelines += `\n[STRATEGY DETAIL LEVEL]: ${strategyLevel}\n`;
+    }
+
+    // For FOCUS mode, skip Analysis and Strategy sections
+    const responseFormat = isFocusMode
+        ? `You MUST respond using these EXACT tags with closing tags:
+      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
+      2. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
+      3. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]`
+        : `You MUST respond using these EXACT tags with closing tags:
+      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
+      2. [ANALYSIS]your analysis of the question[/ANALYSIS]
+      3. [STRATEGY]your recommended response strategy[/STRATEGY]
+      4. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
+      5. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]`;
+
+    const exampleResponse = isFocusMode
+        ? `[INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
+      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
+      [ANSWER]I have 3 years of experience in development...[/ANSWER]`
+        : `[INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
+      [ANALYSIS]Standard opening question to assess communication skills[/ANALYSIS]
+      [STRATEGY]Highlight relevant experience, show enthusiasm[/STRATEGY]
+      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
+      [ANSWER]I have 3 years of experience in development...[/ANSWER]`;
+
     return `
       Request: Process the input data and generate a structured response based on the formatting rules.
 
@@ -89,21 +147,13 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
 
       [PROCESSING GUIDELINES]
       ${safeInstruction}
+      ${modeSpecificGuidelines}
 
       [RESPONSE FORMAT - MANDATORY]
-      You MUST respond using these EXACT tags with closing tags:
-      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
-      2. [ANALYSIS]your analysis of the question[/ANALYSIS]
-      3. [STRATEGY]your recommended response strategy[/STRATEGY]
-      4. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
-      5. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]
+      ${responseFormat}
 
       EXAMPLE RESPONSE:
-      [INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
-      [ANALYSIS]Standard opening question to assess communication skills[/ANALYSIS]
-      [STRATEGY]Highlight relevant experience, show enthusiasm[/STRATEGY]
-      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
-      [ANSWER]I have 3 years of experience in development...[/ANSWER]
+      ${exampleResponse}
 
       [CONVERSATION LOG]
       History: "${historyText}"
