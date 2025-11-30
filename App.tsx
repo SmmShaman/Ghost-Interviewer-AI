@@ -360,20 +360,24 @@ const App: React.FC = () => {
     llmAbortControllerRef.current = new AbortController();
     const signal = llmAbortControllerRef.current.signal;
 
+    // 3. Dequeue BEFORE try block so variables are available in catch
+    const queueItem = aiQueueRef.current.shift();
+    if (!queueItem) {
+        isAIProcessingRef.current = false;
+        return;
+    }
+
+    const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
+    const wordCount = messageText.split(/\s+/).length;
+
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, block: ${pendingBlockId}, provider: ${currentContext.llmProvider}`);
+
     try {
-        // 3. Dequeue
-        // We now get the FULL object directly, avoiding React State lookup race conditions
-        const queueItem = aiQueueRef.current.shift();
-        if (!queueItem) return;
-
-        const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
-        const wordCount = messageText.split(/\s+/).length;
-
-        console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words, target: ${targetMessageId}, block: ${pendingBlockId}, provider: ${currentContext.llmProvider}`);
 
         // 5. Generate
         const startTime = performance.now();
         let finalTranslation = '';
+        let rawLLMResponse = ''; // Track raw response for fallback
 
         await generateInterviewAssist(
             messageText,
@@ -385,9 +389,15 @@ const App: React.FC = () => {
 
                 const currentTime = performance.now();
 
+                // Track ALL output for fallback (in case [INPUT_TRANSLATION] tag is missing)
+                if (partial.answer) {
+                    rawLLMResponse = partial.answer;
+                }
+
                 // Track final translation for pending block
                 if (partial.inputTranslation) {
                     finalTranslation = partial.inputTranslation;
+                    console.log(`📝 [${Math.round(currentTime)}ms] Got inputTranslation: "${partial.inputTranslation.substring(0, 50)}..."`);
                 }
 
                 setMessages(prev => prev.map(msg => {
@@ -421,17 +431,24 @@ const App: React.FC = () => {
         );
 
         const endTime = performance.now();
-        console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total`);
+        console.log(`🤖 [${Math.round(endTime)}ms] LLM END: ${Math.round(endTime - startTime)}ms total | finalTranslation=${!!finalTranslation} | rawResponse=${!!rawLLMResponse}`);
+
+        // FALLBACK: If no [INPUT_TRANSLATION] tag, use raw response
+        if (!finalTranslation && rawLLMResponse) {
+            console.log(`⚠️ [${Math.round(performance.now())}ms] No [INPUT_TRANSLATION] tag found, using raw response as fallback`);
+            finalTranslation = rawLLMResponse;
+        }
 
         // Move pending block to completed with translation
-        if (pendingBlockId && finalTranslation) {
+        // ALWAYS move block to completed (even if translation is empty - shows error state)
+        if (pendingBlockId) {
             setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
             setCompletedBlocks(prev => [...prev, {
                 id: pendingBlockId,
                 text: messageText,
                 wordCount,
                 status: 'completed' as const,
-                translation: finalTranslation,
+                translation: finalTranslation || '[Помилка перекладу]',
                 timestamp: Date.now()
             }]);
             console.log(`✅ [${Math.round(performance.now())}ms] Block ${pendingBlockId} completed and moved to Column 3`);
@@ -440,15 +457,40 @@ const App: React.FC = () => {
     } catch (e: any) {
         if (e.name === 'AbortError') {
             console.log(`🛑 [${Math.round(performance.now())}ms] LLM ABORTED`);
+            // Move aborted block to completed with error state
+            if (pendingBlockId) {
+                setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
+                setCompletedBlocks(prev => [...prev, {
+                    id: pendingBlockId,
+                    text: messageText,
+                    wordCount,
+                    status: 'completed' as const,
+                    translation: '[Скасовано]',
+                    timestamp: Date.now()
+                }]);
+            }
         } else {
             console.error("Queue Processing Error", e);
+            // Move error block to completed with error state
+            if (pendingBlockId) {
+                setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
+                setCompletedBlocks(prev => [...prev, {
+                    id: pendingBlockId,
+                    text: messageText,
+                    wordCount,
+                    status: 'completed' as const,
+                    translation: `[Помилка: ${e.message || 'Unknown'}]`,
+                    timestamp: Date.now()
+                }]);
+            }
         }
     } finally {
         // 6. Unlock and Process Next
         llmAbortControllerRef.current = null;
         isAIProcessingRef.current = false;
-        // Only process next if not stopped
-        if (aiQueueRef.current.length > 0 && shouldBeListening.current) {
+        // ALWAYS process next items in queue (even if stopped - to complete pending blocks)
+        if (aiQueueRef.current.length > 0) {
+            console.log(`🔄 [${Math.round(performance.now())}ms] Processing next item in queue (${aiQueueRef.current.length} remaining)`);
             processAIQueue();
         }
     }
