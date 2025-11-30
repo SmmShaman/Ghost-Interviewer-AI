@@ -119,7 +119,8 @@ interface PendingLLMBlock {
     text: string;           // Original text being collected/translated
     wordCount: number;
     status: 'collecting' | 'processing' | 'completed';
-    translation?: string;   // LLM translation when completed
+    chromePreview?: string; // Chrome API instant translation (preview)
+    translation?: string;   // LLM artistic translation when completed
     timestamp: number;
 }
 
@@ -159,7 +160,8 @@ const App: React.FC = () => {
   // Shows blocks at different stages: collecting → processing → completed
   const [pendingBlocks, setPendingBlocks] = useState<PendingLLMBlock[]>([]);
   const [completedBlocks, setCompletedBlocks] = useState<PendingLLMBlock[]>([]);
-  const [currentCollectingText, setCurrentCollectingText] = useState<string>(''); // Live text being collected
+  const [currentCollectingText, setCurrentCollectingText] = useState<string>(''); // Live ORIGINAL text being collected
+  const [currentCollectingTranslation, setCurrentCollectingTranslation] = useState<string>(''); // Live CHROME translation
 
   // Model Download State
   const [modelProgress, setModelProgress] = useState(0);
@@ -441,47 +443,70 @@ const App: React.FC = () => {
 
         // Move pending block to completed with translation
         // ALWAYS move block to completed (even if translation is empty - shows error state)
+        // Preserve chromePreview from pending block for dual display in Column 3
         if (pendingBlockId) {
-            setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
-            setCompletedBlocks(prev => [...prev, {
-                id: pendingBlockId,
-                text: messageText,
-                wordCount,
-                status: 'completed' as const,
-                translation: finalTranslation || '[Помилка перекладу]',
-                timestamp: Date.now()
-            }]);
+            setPendingBlocks(prev => {
+                const pendingBlock = prev.find(b => b.id === pendingBlockId);
+                const chromePreview = pendingBlock?.chromePreview || '';
+
+                // Move to completed with both Chrome preview and LLM translation
+                setCompletedBlocks(completed => [...completed, {
+                    id: pendingBlockId,
+                    text: messageText,
+                    wordCount,
+                    status: 'completed' as const,
+                    chromePreview, // Instant Chrome translation
+                    translation: finalTranslation || '[Помилка перекладу]', // LLM artistic translation
+                    timestamp: Date.now()
+                }]);
+
+                return prev.filter(b => b.id !== pendingBlockId);
+            });
             console.log(`✅ [${Math.round(performance.now())}ms] Block ${pendingBlockId} completed and moved to Column 3`);
         }
 
     } catch (e: any) {
         if (e.name === 'AbortError') {
             console.log(`🛑 [${Math.round(performance.now())}ms] LLM ABORTED`);
-            // Move aborted block to completed with error state
+            // Move aborted block to completed - preserve Chrome preview
             if (pendingBlockId) {
-                setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
-                setCompletedBlocks(prev => [...prev, {
-                    id: pendingBlockId,
-                    text: messageText,
-                    wordCount,
-                    status: 'completed' as const,
-                    translation: '[Скасовано]',
-                    timestamp: Date.now()
-                }]);
+                setPendingBlocks(prev => {
+                    const pendingBlock = prev.find(b => b.id === pendingBlockId);
+                    const chromePreview = pendingBlock?.chromePreview || '';
+
+                    setCompletedBlocks(completed => [...completed, {
+                        id: pendingBlockId,
+                        text: messageText,
+                        wordCount,
+                        status: 'completed' as const,
+                        chromePreview, // Still show Chrome preview even if LLM aborted
+                        translation: '[Скасовано]',
+                        timestamp: Date.now()
+                    }]);
+
+                    return prev.filter(b => b.id !== pendingBlockId);
+                });
             }
         } else {
             console.error("Queue Processing Error", e);
-            // Move error block to completed with error state
+            // Move error block to completed - preserve Chrome preview
             if (pendingBlockId) {
-                setPendingBlocks(prev => prev.filter(b => b.id !== pendingBlockId));
-                setCompletedBlocks(prev => [...prev, {
-                    id: pendingBlockId,
-                    text: messageText,
-                    wordCount,
-                    status: 'completed' as const,
-                    translation: `[Помилка: ${e.message || 'Unknown'}]`,
-                    timestamp: Date.now()
-                }]);
+                setPendingBlocks(prev => {
+                    const pendingBlock = prev.find(b => b.id === pendingBlockId);
+                    const chromePreview = pendingBlock?.chromePreview || '';
+
+                    setCompletedBlocks(completed => [...completed, {
+                        id: pendingBlockId,
+                        text: messageText,
+                        wordCount,
+                        status: 'completed' as const,
+                        chromePreview, // Still show Chrome preview even on error
+                        translation: `[Помилка: ${e.message || 'Unknown'}]`,
+                        timestamp: Date.now()
+                    }]);
+
+                    return prev.filter(b => b.id !== pendingBlockId);
+                });
             }
         }
     } finally {
@@ -525,20 +550,23 @@ const App: React.FC = () => {
     console.log(`🚀 [${Math.round(performance.now())}ms] SENDING TO LLM: ${acc.wordCount} words | Target: ${acc.targetMessageId}`);
 
     // Create a pending block for visual display (ONLY when actually sending)
+    // Include Chrome preview translation for instant display in Column 2/3
     const blockId = `block_${Date.now()}`;
     const newBlock: PendingLLMBlock = {
       id: blockId,
       text: acc.text,
       wordCount: acc.wordCount,
       status: 'processing',
+      chromePreview: currentCollectingTranslation, // Save Chrome translation for display
       timestamp: Date.now()
     };
 
     // Add to pending blocks (visual queue)
     setPendingBlocks(prev => [...prev, newBlock]);
 
-    // Clear the collecting text display
+    // Clear the collecting text display (both original and translation)
     setCurrentCollectingText('');
+    setCurrentCollectingTranslation('');
 
     // Add to AI queue with target message ID AND block ID
     aiQueueRef.current.push({
@@ -579,8 +607,18 @@ const App: React.FC = () => {
       targetMessageId: acc.targetMessageId || targetMessageId // Keep first target if accumulating
     };
 
-    // Update visual collecting text for center column
+    // Update visual collecting text for center column (ORIGINAL)
     setCurrentCollectingText(newText);
+
+    // ⚡ LIVE CHROME TRANSLATION: Translate accumulated text instantly
+    // This provides real-time preview in Column 2 while waiting for LLM
+    localTranslator.translatePhrase(newText).then(words => {
+      const chromeTranslation = words.map(w => w.ghostTranslation).join(' ');
+      setCurrentCollectingTranslation(chromeTranslation);
+      console.log(`⚡ [${Math.round(performance.now())}ms] LIVE Chrome translation: "${chromeTranslation.substring(0, 50)}..."`);
+    }).catch(err => {
+      console.warn(`Chrome translation error:`, err);
+    });
 
     console.log(`📊 [${Math.round(performance.now())}ms] ACCUMULATOR STATE: ${totalWordCount} words | Target: ${llmAccumulatorRef.current.targetMessageId} | Text: "${newText.substring(0, 50)}..."`);
 
@@ -1124,8 +1162,9 @@ const App: React.FC = () => {
           llmSilenceTimerRef.current = null;
       }
 
-      // Clear visual collecting text
+      // Clear visual collecting text (both original and translation)
       setCurrentCollectingText('');
+      setCurrentCollectingTranslation('');
 
       // Reset processing flag
       isAIProcessingRef.current = false;
@@ -1251,6 +1290,7 @@ const App: React.FC = () => {
       setPendingBlocks([]);
       setCompletedBlocks([]);
       setCurrentCollectingText('');
+      setCurrentCollectingTranslation('');
 
       setIsClearModalOpen(false);
   };
@@ -1552,42 +1592,43 @@ const App: React.FC = () => {
 
                  {/* COLUMN 2: Visual Queue - Collecting + Processing Blocks */}
                  <div className="sticky top-8 h-fit space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
-                     {/* COLLECTING BLOCK - Currently accumulating words */}
+                     {/* COLLECTING BLOCK - LIVE Chrome translation of accumulating text */}
                      {currentCollectingText && (
-                         <div className="border-l-4 border-yellow-500 bg-yellow-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-yellow-950/30 border-b border-yellow-500/10 flex items-center justify-between">
+                         <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl animate-fade-in-up">
+                             <div className="px-4 py-2 bg-cyan-950/30 border-b border-cyan-500/10 flex items-center justify-between">
                                  <div className="flex items-center gap-2">
-                                     <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></span>
-                                     <span className="text-[10px] font-black text-yellow-300 uppercase tracking-widest">Збір слів...</span>
+                                     <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                                     <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">⚡ Live переклад</span>
                                  </div>
                                  <div className="flex items-center gap-2">
-                                     <span className="text-[10px] font-mono text-yellow-400">
+                                     <span className="text-[10px] font-mono text-cyan-400">
                                          {currentCollectingText.split(/\s+/).length} / {LLM_CONFIG.MAX_WORDS_FOR_LLM}
                                      </span>
-                                     <div className="w-16 h-1.5 bg-yellow-900/50 rounded-full overflow-hidden">
+                                     <div className="w-16 h-1.5 bg-cyan-900/50 rounded-full overflow-hidden">
                                          <div
-                                             className="h-full bg-yellow-400 transition-all duration-300"
+                                             className="h-full bg-cyan-400 transition-all duration-300"
                                              style={{ width: `${Math.min(100, (currentCollectingText.split(/\s+/).length / LLM_CONFIG.MAX_WORDS_FOR_LLM) * 100)}%` }}
                                          />
                                      </div>
                                  </div>
                              </div>
                              <div className="p-4">
-                                 <div className="text-sm text-yellow-200/80 leading-relaxed">
-                                     {currentCollectingText}
+                                 {/* Show CHROME TRANSLATION (Ukrainian), not original (Norwegian) */}
+                                 <div className="text-sm text-cyan-100 leading-relaxed font-medium">
+                                     {currentCollectingTranslation || <span className="text-cyan-400/50 italic">Перекладаю...</span>}
                                  </div>
                              </div>
                          </div>
                      )}
 
-                     {/* PROCESSING BLOCKS - Waiting for LLM */}
+                     {/* PROCESSING BLOCKS - Show Chrome preview while LLM processes */}
                      {pendingBlocks.map((block, idx) => (
                          <div key={block.id} className="border-l-4 border-orange-500 bg-orange-900/10 rounded-lg shadow-xl animate-fade-in-up">
                              <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center justify-between">
                                  <div className="flex items-center gap-2">
                                      <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
                                      <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">
-                                         Переклад... {block.wordCount} слів
+                                         LLM обробляє... {block.wordCount} слів
                                      </span>
                                  </div>
                                  <div className="flex gap-1">
@@ -1597,8 +1638,9 @@ const App: React.FC = () => {
                                  </div>
                              </div>
                              <div className="p-4">
-                                 <div className="text-sm text-orange-200/60 leading-relaxed italic">
-                                     {block.text}
+                                 {/* Show Chrome preview (Ukrainian) while LLM processes */}
+                                 <div className="text-sm text-orange-100/90 leading-relaxed">
+                                     {block.chromePreview || <span className="text-orange-400/50 italic">{block.text}</span>}
                                  </div>
                              </div>
                          </div>
@@ -1643,9 +1685,19 @@ const App: React.FC = () => {
                                              <span className="text-emerald-600">•</span>
                                              <span>{block.wordCount} слів</span>
                                          </div>
+                                         {/* LLM Artistic Translation (primary) */}
                                          <div className="text-base md:text-lg text-emerald-200 leading-relaxed font-medium">
                                              {block.translation}
                                          </div>
+                                         {/* Chrome Preview (secondary, for comparison) */}
+                                         {block.chromePreview && block.translation !== block.chromePreview && (
+                                             <div className="mt-2 pt-2 border-t border-emerald-800/30">
+                                                 <div className="text-[9px] text-cyan-500/50 uppercase tracking-wider mb-1">⚡ Chrome</div>
+                                                 <div className="text-xs text-cyan-300/60 leading-relaxed">
+                                                     {block.chromePreview}
+                                                 </div>
+                                             </div>
+                                         )}
                                      </div>
                                  ))
                              ) : (
