@@ -1,167 +1,30 @@
-
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SetupPanel from './components/SetupPanel';
 import GearMenu from './components/GearMenu';
 import BrickRow from './components/BrickRow';
 import CandidateRow from './components/CandidateRow';
-import { MicIcon, StopIcon, SettingsIcon, DownloadIcon, TrashIcon } from './components/Icons';
-import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile, ModeConfig } from './types';
-import { generateInterviewAssist, translateText } from './services/geminiService';
+import LandingPage from './components/LandingPage';
+import SimpleModeLayout from './components/layouts/SimpleModeLayout';
+import FocusModeLayout from './components/layouts/FocusModeLayout';
+import FullModeLayout from './components/layouts/FullModeLayout';
+import { MicIcon, StopIcon, DownloadIcon, TrashIcon } from './components/Icons';
+import { InterviewContext, AppState, Message, IWindow, ViewMode } from './types';
+import { generateInterviewAssist } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
 import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
+import {
+    BLOCK_CONFIG,
+    LLM_CONFIG,
+    DEFAULT_MODE_CONFIG,
+    DEFAULT_CONTEXT,
+    STORAGE_KEY,
+    LANG_MAP,
+    AIQueueItem,
+    PendingLLMBlock
+} from './config/constants';
 
-// --- CONFIGURATION CONSTANTS ---
-const BLOCK_CONFIG = {
-    SILENCE_TIMEOUT_MS: 1500,       // Split if silence > 1.5s (reduced for faster response)
-    MAX_WORDS_PER_BLOCK: 12,        // Split FINAL chunks at 12 words (Ghost translation)
-    MAX_WORDS_OVERFLOW: 20,         // Force split interim at 20 words (hard limit)
-    MIN_WORDS_FOR_SENTENCE: 5,      // Allow sentence split after just 5 words
-    SENTENCE_END_REGEX: /[.!?।。,;:]+$/ // Punctuation detection (added comma, semicolon, colon)
-};
-
-// LLM ACCUMULATION CONFIG: Send 20-25 words per block for clear display
-// CENTER COLUMN BLOCKS ARE INDEPENDENT FROM GHOST BLOCKS (left column)
-// STRICT THRESHOLD: Only send when 20-25 words accumulated, NO automatic pause/sentence triggers
-const LLM_CONFIG = {
-    MIN_WORDS_FOR_LLM: 20,          // STRICT minimum - won't send with fewer words (except STOP button)
-    MAX_WORDS_FOR_LLM: 25,          // Auto-send when this threshold is reached
-};
-
-const DEFAULT_PROMPTS: PromptPreset[] = [
-    { id: 'default', name: 'Standard Bridge', content: translations.en.defaultPrompt }
-];
-
-// NEW: Candidate Profiles (Static - Resume + Knowledge Base)
-const DEFAULT_CANDIDATE_PROFILES: CandidateProfile[] = [
-    {
-        id: 'example_candidate',
-        name: 'Example Profile',
-        resume: "Experienced React Developer. 3 years experience with JavaScript, TypeScript, Tailwind CSS. Created 'Elvarika' - a language learning app using AI. Familiar with Node.js.",
-        knowledgeBase: "Project Elvarika uses React 18, Zustand for state management, and OpenAI API. Database is Supabase."
-    }
-];
-
-// NEW: Job Profiles (Dynamic - Company + Job + Application)
-const DEFAULT_JOB_PROFILES: JobProfile[] = [
-    {
-        id: 'example_job',
-        name: 'Example: Java Dev Position',
-        companyDescription: "Innovative tech company focusing on Scandinavian markets. Values honesty, clean code, and fast iteration.",
-        jobDescription: "We are looking for a Java Developer with Spring Boot experience. Knowledge of microservices and SQL databases (PostgreSQL) is required. Must speak Norwegian.",
-        applicationLetter: "" // Søknad - user fills this
-    }
-];
-
-// LEGACY: Keep for backward compatibility
-const DEFAULT_PROFILES: InterviewProfile[] = [
-    {
-        id: 'example_java',
-        name: 'Example: Java Dev',
-        resume: "Experienced React Developer. 3 years experience with JavaScript, TypeScript, Tailwind CSS. Created 'Elvarika' - a language learning app using AI. Familiar with Node.js.",
-        jobDescription: "We are looking for a Java Developer with Spring Boot experience. Knowledge of microservices and SQL databases (PostgreSQL) is required. Must speak Norwegian.",
-        companyDescription: "Innovative tech company focusing on Scandinavian markets. Values honesty, clean code, and fast iteration.",
-        knowledgeBase: "Project Elvarika uses React 18, Zustand for state management, and OpenAI API. Database is Supabase."
-    }
-];
-
-// Default Mode-Specific Prompts
-const DEFAULT_MODE_CONFIG: ModeConfig = {
-  full: {
-    aiModel: 'azure',
-    strategyDetailLevel: 'detailed',
-    translationPrompt: `Translate the interviewer's question with full context.
-Provide a natural, conversational translation that captures nuances.
-Fix any speech recognition errors.`,
-    analysisPrompt: `Provide deep strategic analysis of the question.
-Identify the hidden intent behind the question.
-Explain what the interviewer is really looking for.
-Write in Native Language.`,
-    answerPrompt: `Generate a structured, formal response.
-Use SIMPLE, SHORT sentences (B1 level).
-Bridge the candidate's experience to job requirements.
-Write the answer in Target Language.`
-  },
-  focus: {
-    aiModel: 'azure',
-    translationPrompt: `Quick, accurate translation of the question.
-Preserve the original meaning and intent.
-Fix any speech recognition errors.`,
-    answerPrompt: `Direct, concise answer to the question.
-Use simple sentences (B1 level).
-Focus on the most relevant experience.
-Write in Target Language.`
-  },
-  simple: {
-    translationPrompt: `Natural, flowing translation.
-Translate as a professional interpreter would.
-Don't be too literal - convey the meaning naturally.`,
-    useChromeAPI: true
-  }
-};
-
-const DEFAULT_CONTEXT: InterviewContext = {
-  // === ACTIVE DATA ===
-  resume: DEFAULT_CANDIDATE_PROFILES[0].resume,
-  knowledgeBase: DEFAULT_CANDIDATE_PROFILES[0].knowledgeBase,
-  companyDescription: DEFAULT_JOB_PROFILES[0].companyDescription,
-  jobDescription: DEFAULT_JOB_PROFILES[0].jobDescription,
-  applicationLetter: DEFAULT_JOB_PROFILES[0].applicationLetter,
-
-  // === LANGUAGE ===
-  targetLanguage: "Norwegian",
-  nativeLanguage: "Ukrainian",
-  proficiencyLevel: "B1",
-  tone: "Professional",
-
-  // === AI CONFIG ===
-  systemInstruction: translations.en.defaultPrompt,
-  savedPrompts: DEFAULT_PROMPTS,
-  activePromptId: "",
-
-  // === NEW PROFILE SYSTEM ===
-  savedCandidateProfiles: DEFAULT_CANDIDATE_PROFILES,
-  savedJobProfiles: DEFAULT_JOB_PROFILES,
-  activeCandidateProfileId: "",
-  activeJobProfileId: "",
-
-  // === LEGACY (for migration) ===
-  savedProfiles: DEFAULT_PROFILES,
-  activeProfileId: "",
-
-  // === UI & HARDWARE ===
-  stereoMode: false,
-  viewMode: 'FULL',
-  ghostModel: 'opus',
-  llmProvider: 'azure',
-  groqApiKey: "",
-
-  // === MODE-SPECIFIC CONFIGURATION ===
-  modeConfig: DEFAULT_MODE_CONFIG
-};
-
-const STORAGE_KEY = 'ghost_interviewer_context_v2';
-
-// Queue Item Interface to avoid State Lookup Race Conditions
-interface AIQueueItem {
-    id: string;         // The Question ID
-    text: string;       // The Question Text
-    responseId: string; // The ID of the Assistant Message to update
-    targetMessageId: string; // The ID of the Interviewer Message to receive LLM translation
-    pendingBlockId?: string; // The ID of the visual pending block in center column
-}
-
-// Pending LLM Block for visual queue in center column
-interface PendingLLMBlock {
-    id: string;
-    text: string;           // Original text being collected/translated
-    wordCount: number;
-    status: 'collecting' | 'processing' | 'completed';
-    chromePreview?: string; // Chrome API instant translation (preview)
-    translation?: string;   // LLM artistic translation when completed
-    timestamp: number;
-}
+// Configuration constants imported from config/constants.ts
 
 const App: React.FC = () => {
   // State initialization with LocalStorage check
@@ -895,17 +758,7 @@ const App: React.FC = () => {
       recognition.continuous = true;
       recognition.interimResults = true; // CRITICAL for speed
       
-      const langMap: Record<string, string> = {
-            'Norwegian': 'no-NO',
-            'English': 'en-US',
-            'German': 'de-DE',
-            'Spanish': 'es-ES',
-            'French': 'fr-FR',
-            'Ukrainian': 'uk-UA',
-            'Russian': 'ru-RU',
-            'Polish': 'pl-PL'
-      };
-      recognition.lang = langMap[context.targetLanguage] || 'en-US';
+      recognition.lang = LANG_MAP[context.targetLanguage] || 'en-US';
 
       recognition.onresult = (event: any) => {
         // CRITICAL: Ignore trailing events after session ended
@@ -1128,15 +981,11 @@ const App: React.FC = () => {
   // Dynamic Language Update
   useEffect(() => {
     if (recognitionRef.current) {
-        const langMap: Record<string, string> = {
-            'Norwegian': 'no-NO', 'English': 'en-US', 'German': 'de-DE',
-            'Spanish': 'es-ES', 'French': 'fr-FR', 'Ukrainian': 'uk-UA', 'Russian': 'ru-RU', 'Polish': 'pl-PL'
-        };
-        const newLang = langMap[context.targetLanguage] || 'en-US';
+        const newLang = LANG_MAP[context.targetLanguage] || 'en-US';
         if (recognitionRef.current.lang !== newLang) {
              recognitionRef.current.lang = newLang;
              if (shouldBeListening.current) {
-                 recognitionRef.current.stop(); 
+                 recognitionRef.current.stop();
              }
         }
     }
@@ -1380,127 +1229,22 @@ const App: React.FC = () => {
     }, 100);
   };
 
-  // Full-screen Landing Page (shown before session starts)
-  const renderLandingPage = () => (
-    <div className="h-screen w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up">
-        {/* Model loading indicator */}
-        {!isModelReady && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
-            <div className={`flex items-center gap-3 px-4 py-2 rounded-full ${modelError ? 'bg-red-900/80 border-red-500' : 'bg-blue-900/80 border-blue-500/30'} border backdrop-blur-md`}>
-              <span className={`text-[10px] font-bold uppercase tracking-widest ${modelError ? 'text-white' : 'text-blue-200 animate-pulse'}`}>
-                {modelError ? "MODEL ERROR" : `${t.modelDownload} ${modelProgress}%`}
-              </span>
-              {!modelError && (
-                <div className="w-20 h-1.5 bg-blue-950 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-400 transition-all duration-300" style={{ width: `${modelProgress}%` }} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Title */}
-        <div className="text-center space-y-3 mb-12">
-            <h1 className="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
-                Ghost Interviewer
-            </h1>
-            <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
-        </div>
-
-        {/* Mode Selection Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-6 mb-12">
-            {/* SIMPLE Mode */}
-            <button
-              onClick={() => startSessionWithMode('SIMPLE')}
-              disabled={!isModelReady}
-              className={`group p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
-                hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
-                transition-all duration-300 text-left relative overflow-hidden
-                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all"></div>
-                <div className="relative">
-                    <div className="text-amber-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
-                        <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
-                        {t.modes.simple}
-                    </div>
-                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.simpleDesc}</div>
-                    <div className="mt-6 flex items-center gap-2 text-amber-500/70 text-xs font-mono">
-                        <MicIcon className="w-4 h-4" />
-                        <span>Click to start</span>
-                    </div>
-                </div>
-            </button>
-
-            {/* FOCUS Mode */}
-            <button
-              onClick={() => startSessionWithMode('FOCUS')}
-              disabled={!isModelReady}
-              className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
-                hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
-                transition-all duration-300 text-left relative overflow-hidden
-                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
-                <div className="relative">
-                    <div className="text-blue-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
-                        <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-                        {t.modes.focus}
-                    </div>
-                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.focusDesc}</div>
-                    <div className="mt-6 flex items-center gap-2 text-blue-500/70 text-xs font-mono">
-                        <MicIcon className="w-4 h-4" />
-                        <span>Click to start</span>
-                    </div>
-                </div>
-            </button>
-
-            {/* FULL Mode */}
-            <button
-              onClick={() => startSessionWithMode('FULL')}
-              disabled={!isModelReady}
-              className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
-                hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
-                transition-all duration-300 text-left relative overflow-hidden
-                ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all"></div>
-                <div className="relative">
-                    <div className="text-emerald-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
-                        <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
-                        {t.modes.full}
-                    </div>
-                    <div className="text-gray-300 text-sm leading-relaxed">{t.modes.fullDesc}</div>
-                    <div className="mt-6 flex items-center gap-2 text-emerald-500/70 text-xs font-mono">
-                        <MicIcon className="w-4 h-4" />
-                        <span>Click to start</span>
-                    </div>
-                </div>
-            </button>
-        </div>
-
-        {/* Footer hint */}
-        <div className="text-center space-y-4">
-            <p className="text-xs text-gray-500 font-mono">{t.pressMic}</p>
-            {/* Animated Gear Menu on Landing Page */}
-            <div className="flex justify-center">
-                <GearMenu
-                  context={context}
-                  onContextChange={setContext}
-                  uiLang={uiLang}
-                  onOpenFullSettings={() => setIsSetupOpen(true)}
-                />
-            </div>
-        </div>
-
-        {/* Settings Panel (available from landing) */}
-        <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} />
-    </div>
-  );
-
   // LANDING PAGE: Show mode selection before session starts
   if (!hasSessionStarted) {
-    return renderLandingPage();
+    return (
+      <LandingPage
+        context={context}
+        setContext={setContext}
+        isModelReady={isModelReady}
+        modelError={modelError}
+        modelProgress={modelProgress}
+        uiLang={uiLang}
+        t={t}
+        isSetupOpen={isSetupOpen}
+        setIsSetupOpen={setIsSetupOpen}
+        startSessionWithMode={startSessionWithMode}
+      />
+    );
   }
 
   // WORKING VIEW: Show after mode is selected
@@ -1609,510 +1353,48 @@ const App: React.FC = () => {
       )}
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8">
-         {/* ============================================================ */}
-         {/* SIMPLE MODE: 3 columns (Ghost + Queue + Translations)        */}
-         {/* ============================================================ */}
+         {/* SIMPLE MODE */}
          {context.viewMode === 'SIMPLE' && (
-             <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-                 {/* COLUMN 1: Scrollable Ghost blocks */}
-                 <div className="space-y-6">
-                     {renderMessages()}
-
-                     {interimTranscript && !isUserSpeaking && (
-                         <BrickRow
-                             isLive={true}
-                             interviewerMessage={{ id: 'live', role: 'interviewer', text: interimTranscript, timestamp: Date.now() }}
-                             liveTranslation={liveTranslation}
-                             viewMode={context.viewMode}
-                         />
-                     )}
-
-                     {interimTranscript && isUserSpeaking && (
-                         <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
-                     )}
-
-                     <div ref={messagesEndRef} />
-                 </div>
-
-                 {/* COLUMN 2: Visual Queue - Collecting + Processing Blocks */}
-                 <div className="sticky top-8 h-fit space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
-                     {/* COLLECTING BLOCK - LIVE Chrome translation of accumulating text */}
-                     {currentCollectingText && (
-                         <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-cyan-950/30 border-b border-cyan-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                                     <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">⚡ Live переклад</span>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                     <span className="text-[10px] font-mono text-cyan-400">
-                                         {currentCollectingText.split(/\s+/).length} / {LLM_CONFIG.MAX_WORDS_FOR_LLM}
-                                     </span>
-                                     <div className="w-16 h-1.5 bg-cyan-900/50 rounded-full overflow-hidden">
-                                         <div
-                                             className="h-full bg-cyan-400 transition-all duration-300"
-                                             style={{ width: `${Math.min(100, (currentCollectingText.split(/\s+/).length / LLM_CONFIG.MAX_WORDS_FOR_LLM) * 100)}%` }}
-                                         />
-                                     </div>
-                                 </div>
-                             </div>
-                             <div className="p-4">
-                                 {/* Show CHROME TRANSLATION (Ukrainian), not original (Norwegian) */}
-                                 <div className="text-sm text-cyan-100 leading-relaxed font-medium">
-                                     {currentCollectingTranslation || <span className="text-cyan-400/50 italic">Перекладаю...</span>}
-                                 </div>
-                             </div>
-                         </div>
-                     )}
-
-                     {/* PROCESSING BLOCKS - Show Chrome preview while LLM processes */}
-                     {pendingBlocks.map((block, idx) => (
-                         <div key={block.id} className="border-l-4 border-orange-500 bg-orange-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-orange-950/30 border-b border-orange-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
-                                     <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest">
-                                         LLM обробляє... {block.wordCount} слів
-                                     </span>
-                                 </div>
-                                 <div className="flex gap-1">
-                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
-                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '150ms'}}></div>
-                                     <div className="w-1 h-3 bg-orange-400 rounded-full animate-pulse" style={{animationDelay: '300ms'}}></div>
-                                 </div>
-                             </div>
-                             <div className="p-4">
-                                 {/* Show Chrome preview (Ukrainian) while LLM processes */}
-                                 <div className="text-sm text-orange-100/90 leading-relaxed">
-                                     {block.chromePreview || <span className="text-orange-400/50 italic">{block.text}</span>}
-                                 </div>
-                             </div>
-                         </div>
-                     ))}
-
-                     {/* Empty state */}
-                     {!currentCollectingText && pendingBlocks.length === 0 && (
-                         <div className="border-l-4 border-gray-600 bg-gray-900/10 rounded-lg shadow-xl">
-                             <div className="px-4 py-2 bg-gray-950/30 border-b border-gray-600/10 flex items-center gap-2">
-                                 <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
-                                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Черга LLM</span>
-                             </div>
-                             <div className="p-6 flex flex-col items-center justify-center min-h-[100px] text-center">
-                                 <div className="text-gray-500 text-xs">
-                                     Слова з'являться тут під час запису...
-                                 </div>
-                             </div>
-                         </div>
-                     )}
-                 </div>
-
-                 {/* COLUMN 3: Completed Translations */}
-                 <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between sticky top-0 bg-emerald-950/80 backdrop-blur">
-                             <div className="flex items-center gap-2">
-                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                 <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Готові переклади</span>
-                             </div>
-                             {completedBlocks.length > 0 && (
-                                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded">
-                                     {completedBlocks.length} блоків
-                                 </span>
-                             )}
-                         </div>
-                         <div className="p-4 space-y-4">
-                             {completedBlocks.length > 0 ? (
-                                 completedBlocks.map((block, idx) => (
-                                     <div key={block.id} className="pb-3 border-b border-emerald-500/10 last:border-b-0 animate-fade-in-up">
-                                         <div className="text-[10px] text-emerald-500/50 mb-1 flex items-center gap-2">
-                                             <span>Блок {idx + 1}</span>
-                                             <span className="text-emerald-600">•</span>
-                                             <span>{block.wordCount} слів</span>
-                                         </div>
-                                         {/* LLM Artistic Translation (primary) */}
-                                         <div className="text-base md:text-lg text-emerald-200 leading-relaxed font-medium">
-                                             {block.translation}
-                                         </div>
-                                         {/* Chrome Preview (secondary, for comparison) */}
-                                         {block.chromePreview && block.translation !== block.chromePreview && (
-                                             <div className="mt-2 pt-2 border-t border-emerald-800/30">
-                                                 <div className="text-[9px] text-cyan-500/50 uppercase tracking-wider mb-1">⚡ Chrome</div>
-                                                 <div className="text-xs text-cyan-300/60 leading-relaxed">
-                                                     {block.chromePreview}
-                                                 </div>
-                                             </div>
-                                         )}
-                                     </div>
-                                 ))
-                             ) : (
-                                 <div className="text-[10px] text-emerald-500/50 italic text-center py-8">
-                                     Готові переклади з'являться тут...
-                                 </div>
-                             )}
-                         </div>
-                     </div>
-                 </div>
-             </div>
+             <SimpleModeLayout
+                 messages={messages}
+                 interimTranscript={interimTranscript}
+                 liveTranslation={liveTranslation}
+                 isUserSpeaking={isUserSpeaking}
+                 currentCollectingText={currentCollectingText}
+                 currentCollectingTranslation={currentCollectingTranslation}
+                 pendingBlocks={pendingBlocks}
+                 completedBlocks={completedBlocks}
+                 messagesEndRef={messagesEndRef}
+                 renderMessages={renderMessages}
+             />
          )}
 
-         {/* ============================================================ */}
-         {/* FOCUS MODE: 2 columns (Question/Translation + Answer)        */}
-         {/* ============================================================ */}
+         {/* FOCUS MODE */}
          {context.viewMode === 'FOCUS' && (
-             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                 {/* COLUMN 1: Question + Translation (Scrollable) */}
-                 <div className="space-y-4">
-                     {/* Interviewer blocks with translations */}
-                     {messages.filter(m => m.role === 'interviewer').map((msg, idx) => (
-                         <div key={msg.id} className="border-l-4 border-red-500 bg-red-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-red-950/30 border-b border-red-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-                                     <span className="text-[10px] font-black text-red-300 uppercase tracking-widest">Питання</span>
-                                 </div>
-                                 <span className="text-[10px] font-mono text-red-400/50">#{idx + 1}</span>
-                             </div>
-                             <div className="p-4 space-y-3">
-                                 {/* Original text */}
-                                 <div className="text-base text-red-200 leading-relaxed font-medium">
-                                     {msg.text}
-                                 </div>
-                                 {/* Ghost translation (instant) */}
-                                 {msg.ghostTranslation && msg.ghostTranslation !== '...' && (
-                                     <div className="pt-2 border-t border-red-800/30">
-                                         <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">👻 Ghost</div>
-                                         <div className="text-sm text-gray-400 italic leading-relaxed">
-                                             {msg.ghostTranslation}
-                                         </div>
-                                     </div>
-                                 )}
-                                 {/* LLM translation (artistic) */}
-                                 {msg.aiTranslation && msg.aiTranslation !== '...' && (
-                                     <div className="pt-2 border-t border-blue-800/30">
-                                         <div className="text-[9px] text-blue-500/70 uppercase tracking-wider mb-1">🤖 LLM переклад</div>
-                                         <div className="text-sm text-blue-200 leading-relaxed font-medium">
-                                             {msg.aiTranslation}
-                                         </div>
-                                     </div>
-                                 )}
-                             </div>
-                         </div>
-                     ))}
-
-                     {/* Collecting block - LIVE text being accumulated */}
-                     {currentCollectingText && (
-                         <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-cyan-950/30 border-b border-cyan-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                                     <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">⚡ Записую...</span>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                     <span className="text-[10px] font-mono text-cyan-400">
-                                         {currentCollectingText.split(/\s+/).length} / {LLM_CONFIG.MAX_WORDS_FOR_LLM}
-                                     </span>
-                                     <div className="w-16 h-1.5 bg-cyan-900/50 rounded-full overflow-hidden">
-                                         <div className="h-full bg-cyan-400 transition-all duration-300" style={{ width: `${Math.min(100, (currentCollectingText.split(/\s+/).length / LLM_CONFIG.MAX_WORDS_FOR_LLM) * 100)}%` }} />
-                                     </div>
-                                 </div>
-                             </div>
-                             <div className="p-4 space-y-2">
-                                 <div className="text-sm text-cyan-100/80">{currentCollectingText}</div>
-                                 {currentCollectingTranslation && (
-                                     <div className="text-sm text-cyan-300/70 italic border-t border-cyan-800/30 pt-2">
-                                         {currentCollectingTranslation}
-                                     </div>
-                                 )}
-                             </div>
-                         </div>
-                     )}
-
-                     {/* Live interim transcript */}
-                     {interimTranscript && !isUserSpeaking && !currentCollectingText && (
-                         <div className="border-l-4 border-red-500/50 bg-red-900/5 rounded-lg p-4 animate-pulse">
-                             <div className="text-sm text-red-300/70 italic">{interimTranscript}</div>
-                             {liveTranslation && (
-                                 <div className="text-xs text-gray-500 mt-2">{liveTranslation}</div>
-                             )}
-                         </div>
-                     )}
-
-                     {interimTranscript && isUserSpeaking && (
-                         <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
-                     )}
-
-                     <div ref={messagesEndRef} />
-                 </div>
-
-                 {/* COLUMN 2: Answer (Sticky) */}
-                 <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between sticky top-0 bg-emerald-950/80 backdrop-blur">
-                             <div className="flex items-center gap-2">
-                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
-                                 <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Відповідь</span>
-                             </div>
-                             {messages.filter(m => m.role === 'assistant' && m.text).length > 0 && (
-                                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded">
-                                     {messages.filter(m => m.role === 'assistant' && m.text).length} відп.
-                                 </span>
-                             )}
-                         </div>
-                         <div className="p-4 space-y-4">
-                             {messages.filter(m => m.role === 'assistant').map((msg, idx) => (
-                                 <div key={msg.id} className="pb-4 border-b border-emerald-500/10 last:border-b-0 animate-fade-in-up">
-                                     {msg.text ? (
-                                         <>
-                                             {/* Answer in target language */}
-                                             <div className="text-lg md:text-xl font-bold text-emerald-300 leading-relaxed mb-3">
-                                                 "{msg.text}"
-                                             </div>
-                                             {/* Translation to native */}
-                                             {msg.answerTranslation && (
-                                                 <div className="text-sm text-gray-400 italic border-t border-emerald-800/30 pt-3">
-                                                     {msg.answerTranslation}
-                                                 </div>
-                                             )}
-                                             {msg.latency && (
-                                                 <div className="text-[10px] text-emerald-500/40 mt-2">{msg.latency}ms</div>
-                                             )}
-                                         </>
-                                     ) : (
-                                         <div className="space-y-3">
-                                             <div className="animate-pulse bg-emerald-700/20 rounded h-6 w-full"></div>
-                                             <div className="animate-pulse bg-emerald-700/20 rounded h-6 w-2/3"></div>
-                                         </div>
-                                     )}
-                                 </div>
-                             ))}
-                             {messages.filter(m => m.role === 'assistant').length === 0 && (
-                                 <div className="text-[10px] text-emerald-500/50 italic text-center py-8">
-                                     Відповіді з'являться тут...
-                                 </div>
-                             )}
-                             {/* Processing indicator */}
-                             {pendingBlocks.length > 0 && (
-                                 <div className="pt-4 border-t border-emerald-500/10 animate-pulse">
-                                     <div className="flex items-center gap-2 text-[10px] text-orange-400">
-                                         <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
-                                         <span>Генерую відповідь...</span>
-                                     </div>
-                                 </div>
-                             )}
-                         </div>
-                     </div>
-                 </div>
-             </div>
+             <FocusModeLayout
+                 messages={messages}
+                 interimTranscript={interimTranscript}
+                 liveTranslation={liveTranslation}
+                 isUserSpeaking={isUserSpeaking}
+                 currentCollectingText={currentCollectingText}
+                 currentCollectingTranslation={currentCollectingTranslation}
+                 pendingBlocks={pendingBlocks}
+                 messagesEndRef={messagesEndRef}
+             />
          )}
 
-         {/* ============================================================ */}
-         {/* FULL MODE: 3 columns (Question + Strategy + Answer)          */}
-         {/* ============================================================ */}
+         {/* FULL MODE */}
          {context.viewMode === 'FULL' && (
-             <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-                 {/* COLUMN 1: Question + Translation (Scrollable) */}
-                 <div className="space-y-4">
-                     {/* Interviewer blocks with translations */}
-                     {messages.filter(m => m.role === 'interviewer').map((msg, idx) => (
-                         <div key={msg.id} className="border-l-4 border-red-500 bg-red-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-red-950/30 border-b border-red-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-                                     <span className="text-[10px] font-black text-red-300 uppercase tracking-widest">Питання</span>
-                                 </div>
-                                 <span className="text-[10px] font-mono text-red-400/50">#{idx + 1}</span>
-                             </div>
-                             <div className="p-4 space-y-3">
-                                 {/* Original text */}
-                                 <div className="text-base text-red-200 leading-relaxed font-medium">
-                                     {msg.text}
-                                 </div>
-                                 {/* Ghost translation (instant) */}
-                                 {msg.ghostTranslation && msg.ghostTranslation !== '...' && (
-                                     <div className="pt-2 border-t border-red-800/30">
-                                         <div className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">👻 Ghost</div>
-                                         <div className="text-sm text-gray-400 italic leading-relaxed">
-                                             {msg.ghostTranslation}
-                                         </div>
-                                     </div>
-                                 )}
-                                 {/* LLM translation (artistic) */}
-                                 {msg.aiTranslation && msg.aiTranslation !== '...' && (
-                                     <div className="pt-2 border-t border-blue-800/30">
-                                         <div className="text-[9px] text-blue-500/70 uppercase tracking-wider mb-1">🤖 LLM переклад</div>
-                                         <div className="text-sm text-blue-200 leading-relaxed font-medium">
-                                             {msg.aiTranslation}
-                                         </div>
-                                     </div>
-                                 )}
-                             </div>
-                         </div>
-                     ))}
-
-                     {/* Collecting block - LIVE text being accumulated */}
-                     {currentCollectingText && (
-                         <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl animate-fade-in-up">
-                             <div className="px-4 py-2 bg-cyan-950/30 border-b border-cyan-500/10 flex items-center justify-between">
-                                 <div className="flex items-center gap-2">
-                                     <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                                     <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">⚡ Записую...</span>
-                                 </div>
-                                 <div className="flex items-center gap-2">
-                                     <span className="text-[10px] font-mono text-cyan-400">
-                                         {currentCollectingText.split(/\s+/).length} / {LLM_CONFIG.MAX_WORDS_FOR_LLM}
-                                     </span>
-                                     <div className="w-16 h-1.5 bg-cyan-900/50 rounded-full overflow-hidden">
-                                         <div className="h-full bg-cyan-400 transition-all duration-300" style={{ width: `${Math.min(100, (currentCollectingText.split(/\s+/).length / LLM_CONFIG.MAX_WORDS_FOR_LLM) * 100)}%` }} />
-                                     </div>
-                                 </div>
-                             </div>
-                             <div className="p-4 space-y-2">
-                                 <div className="text-sm text-cyan-100/80">{currentCollectingText}</div>
-                                 {currentCollectingTranslation && (
-                                     <div className="text-sm text-cyan-300/70 italic border-t border-cyan-800/30 pt-2">
-                                         {currentCollectingTranslation}
-                                     </div>
-                                 )}
-                             </div>
-                         </div>
-                     )}
-
-                     {/* Live interim transcript */}
-                     {interimTranscript && !isUserSpeaking && !currentCollectingText && (
-                         <div className="border-l-4 border-red-500/50 bg-red-900/5 rounded-lg p-4 animate-pulse">
-                             <div className="text-sm text-red-300/70 italic">{interimTranscript}</div>
-                             {liveTranslation && (
-                                 <div className="text-xs text-gray-500 mt-2">{liveTranslation}</div>
-                             )}
-                         </div>
-                     )}
-
-                     {interimTranscript && isUserSpeaking && (
-                         <CandidateRow isLive={true} message={{ id: 'live-candidate', role: 'candidate', text: interimTranscript, timestamp: Date.now() }} liveTranslation={liveTranslation} />
-                     )}
-
-                     <div ref={messagesEndRef} />
-                 </div>
-
-                 {/* COLUMN 2: Strategy/Analysis (Sticky) */}
-                 <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-purple-500 bg-purple-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-purple-950/30 border-b border-purple-500/10 flex items-center justify-between sticky top-0 bg-purple-950/80 backdrop-blur">
-                             <div className="flex items-center gap-2">
-                                 <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
-                                 <span className="text-[10px] font-black text-purple-300 uppercase tracking-widest">Стратегія</span>
-                             </div>
-                         </div>
-                         <div className="p-4 space-y-4">
-                             {messages.filter(m => m.role === 'assistant').map((msg, idx) => (
-                                 <div key={msg.id} className="pb-4 border-b border-purple-500/10 last:border-b-0 animate-fade-in-up">
-                                     {(msg.analysis || msg.strategy) ? (
-                                         <div className="space-y-3">
-                                             {/* Analysis */}
-                                             {msg.analysis && (
-                                                 <div>
-                                                     <div className="text-[9px] text-purple-500/70 uppercase tracking-wider mb-1">Аналіз</div>
-                                                     <div className="text-xs text-purple-200/70 italic leading-relaxed border-l-2 border-purple-500/30 pl-2">
-                                                         {msg.analysis}
-                                                     </div>
-                                                 </div>
-                                             )}
-                                             {/* Strategy */}
-                                             {msg.strategy && (
-                                                 <div>
-                                                     <div className="text-[9px] text-purple-500/70 uppercase tracking-wider mb-1">Стратегія</div>
-                                                     <div className="text-sm text-purple-100 font-medium leading-relaxed whitespace-pre-line">
-                                                         {msg.strategy}
-                                                     </div>
-                                                 </div>
-                                             )}
-                                         </div>
-                                     ) : (
-                                         <div className="space-y-3">
-                                             <div className="animate-pulse bg-purple-700/20 rounded h-4 w-3/4"></div>
-                                             <div className="animate-pulse bg-purple-700/20 rounded h-4 w-full"></div>
-                                             <div className="animate-pulse bg-purple-700/20 rounded h-4 w-5/6"></div>
-                                         </div>
-                                     )}
-                                 </div>
-                             ))}
-                             {messages.filter(m => m.role === 'assistant').length === 0 && (
-                                 <div className="text-[10px] text-purple-500/50 italic text-center py-8">
-                                     Стратегія з'явиться тут...
-                                 </div>
-                             )}
-                             {/* Processing indicator */}
-                             {pendingBlocks.length > 0 && (
-                                 <div className="pt-4 border-t border-purple-500/10 animate-pulse">
-                                     <div className="flex items-center gap-2 text-[10px] text-orange-400">
-                                         <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
-                                         <span>Аналізую питання...</span>
-                                     </div>
-                                 </div>
-                             )}
-                         </div>
-                     </div>
-                 </div>
-
-                 {/* COLUMN 3: Answer (Sticky) */}
-                 <div className="sticky top-8 h-fit">
-                     <div className="border-l-4 border-emerald-500 bg-emerald-900/10 min-h-[400px] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-lg shadow-xl">
-                         <div className="px-4 py-2 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between sticky top-0 bg-emerald-950/80 backdrop-blur">
-                             <div className="flex items-center gap-2">
-                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
-                                 <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">Відповідь</span>
-                             </div>
-                             {messages.filter(m => m.role === 'assistant' && m.text).length > 0 && (
-                                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded">
-                                     {messages.filter(m => m.role === 'assistant' && m.text).length} відп.
-                                 </span>
-                             )}
-                         </div>
-                         <div className="p-4 space-y-4">
-                             {messages.filter(m => m.role === 'assistant').map((msg, idx) => (
-                                 <div key={msg.id} className="pb-4 border-b border-emerald-500/10 last:border-b-0 animate-fade-in-up">
-                                     {msg.text ? (
-                                         <>
-                                             {/* Answer in target language */}
-                                             <div className="text-lg md:text-xl font-bold text-emerald-300 leading-relaxed mb-3">
-                                                 "{msg.text}"
-                                             </div>
-                                             {/* Translation to native */}
-                                             {msg.answerTranslation && (
-                                                 <div className="text-sm text-gray-400 italic border-t border-emerald-800/30 pt-3">
-                                                     {msg.answerTranslation}
-                                                 </div>
-                                             )}
-                                             {msg.latency && (
-                                                 <div className="text-[10px] text-emerald-500/40 mt-2">{msg.latency}ms</div>
-                                             )}
-                                         </>
-                                     ) : (
-                                         <div className="space-y-3">
-                                             <div className="animate-pulse bg-emerald-700/20 rounded h-6 w-full"></div>
-                                             <div className="animate-pulse bg-emerald-700/20 rounded h-6 w-2/3"></div>
-                                         </div>
-                                     )}
-                                 </div>
-                             ))}
-                             {messages.filter(m => m.role === 'assistant').length === 0 && (
-                                 <div className="text-[10px] text-emerald-500/50 italic text-center py-8">
-                                     Відповіді з'являться тут...
-                                 </div>
-                             )}
-                             {/* Processing indicator */}
-                             {pendingBlocks.length > 0 && (
-                                 <div className="pt-4 border-t border-emerald-500/10 animate-pulse">
-                                     <div className="flex items-center gap-2 text-[10px] text-orange-400">
-                                         <div className="w-2 h-2 rounded-full bg-orange-400 animate-ping"></div>
-                                         <span>Генерую відповідь...</span>
-                                     </div>
-                                 </div>
-                             )}
-                         </div>
-                     </div>
-                 </div>
-             </div>
+             <FullModeLayout
+                 messages={messages}
+                 interimTranscript={interimTranscript}
+                 liveTranslation={liveTranslation}
+                 isUserSpeaking={isUserSpeaking}
+                 currentCollectingText={currentCollectingText}
+                 currentCollectingTranslation={currentCollectingTranslation}
+                 pendingBlocks={pendingBlocks}
+                 messagesEndRef={messagesEndRef}
+             />
          )}
       </div>
 
