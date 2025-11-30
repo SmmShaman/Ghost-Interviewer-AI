@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SetupPanel from './components/SetupPanel';
+import GearMenu from './components/GearMenu';
 import BrickRow from './components/BrickRow';
 import CandidateRow from './components/CandidateRow';
 import { MicIcon, StopIcon, SettingsIcon, DownloadIcon, TrashIcon } from './components/Icons';
@@ -1479,12 +1480,17 @@ const App: React.FC = () => {
         </div>
 
         {/* Footer hint */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-4">
             <p className="text-xs text-gray-500 font-mono">{t.pressMic}</p>
-            <button onClick={() => setIsSetupOpen(true)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-2 mx-auto">
-                <SettingsIcon className="w-3 h-3" />
-                <span>Settings</span>
-            </button>
+            {/* Animated Gear Menu on Landing Page */}
+            <div className="flex justify-center">
+                <GearMenu
+                  context={context}
+                  onContextChange={setContext}
+                  uiLang={uiLang}
+                  onOpenFullSettings={() => setIsSetupOpen(true)}
+                />
+            </div>
         </div>
 
         {/* Settings Panel (available from landing) */}
@@ -1559,9 +1565,13 @@ const App: React.FC = () => {
             }`}>
                 {context.viewMode}
             </div>
-            <button onClick={() => setIsSetupOpen(true)} className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700">
-                <SettingsIcon />
-            </button>
+            {/* Animated Gear Menu */}
+            <GearMenu
+              context={context}
+              onContextChange={handleContextChange}
+              uiLang={uiLang}
+              onOpenFullSettings={() => setIsSetupOpen(true)}
+            />
             <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
