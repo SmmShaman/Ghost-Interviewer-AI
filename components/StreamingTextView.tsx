@@ -1,0 +1,248 @@
+/**
+ * STREAMING TEXT VIEW COMPONENT
+ *
+ * Відображає текст як безперервний потік (субтитри), а не як окремі блоки.
+ * Текст росте вниз, нові слова з'являються плавно.
+ *
+ * ОСОБЛИВОСТІ:
+ * - Один текстовий контейнер замість списку карток
+ * - Переклад великим шрифтом (основний фокус)
+ * - Оригінал маленьким шрифтом знизу
+ * - Автоматичний scroll вниз
+ * - Пульсуючий курсор показує активність
+ * - Плавна анімація появи нових слів
+ */
+
+import React, { useEffect, useRef, useState } from 'react';
+
+interface StreamingTextViewProps {
+    // Текст для відображення
+    translationText: string;      // Переклад (основний, великий)
+    originalText?: string;        // Оригінал (маленький, знизу)
+
+    // Стан
+    isActive: boolean;            // Чи йде запис
+    isProcessing?: boolean;       // Чи обробляє LLM
+
+    // Стиль
+    variant?: 'ghost' | 'llm' | 'mixed';
+    showOriginal?: boolean;
+    showCursor?: boolean;
+
+    // Колір
+    accentColor?: 'emerald' | 'cyan' | 'blue' | 'amber';
+
+    // Заголовок
+    title?: string;
+
+    // Висота
+    minHeight?: string;
+    maxHeight?: string;
+}
+
+const StreamingTextView: React.FC<StreamingTextViewProps> = ({
+    translationText,
+    originalText = '',
+    isActive,
+    isProcessing = false,
+    variant = 'ghost',
+    showOriginal = true,
+    showCursor = true,
+    accentColor = 'emerald',
+    title = 'Переклад',
+    minHeight = '300px',
+    maxHeight = 'calc(100vh - 12rem)'
+}) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+
+    // Color schemes
+    const colorSchemes = {
+        emerald: {
+            border: 'border-emerald-500',
+            bg: 'bg-emerald-900/10',
+            header: 'bg-emerald-950/30',
+            headerBorder: 'border-emerald-500/10',
+            dot: 'bg-emerald-400',
+            dotGlow: 'shadow-[0_0_8px_rgba(52,211,153,0.8)]',
+            title: 'text-emerald-300',
+            text: 'text-emerald-100',
+            cursor: 'text-emerald-400',
+            originalLabel: 'text-emerald-500/50',
+            originalText: 'text-emerald-200/40'
+        },
+        cyan: {
+            border: 'border-cyan-500',
+            bg: 'bg-cyan-900/10',
+            header: 'bg-cyan-950/30',
+            headerBorder: 'border-cyan-500/10',
+            dot: 'bg-cyan-400',
+            dotGlow: 'shadow-[0_0_8px_rgba(34,211,238,0.8)]',
+            title: 'text-cyan-300',
+            text: 'text-cyan-100',
+            cursor: 'text-cyan-400',
+            originalLabel: 'text-cyan-500/50',
+            originalText: 'text-cyan-200/40'
+        },
+        blue: {
+            border: 'border-blue-500',
+            bg: 'bg-blue-900/10',
+            header: 'bg-blue-950/30',
+            headerBorder: 'border-blue-500/10',
+            dot: 'bg-blue-400',
+            dotGlow: 'shadow-[0_0_8px_rgba(96,165,250,0.8)]',
+            title: 'text-blue-300',
+            text: 'text-blue-100',
+            cursor: 'text-blue-400',
+            originalLabel: 'text-blue-500/50',
+            originalText: 'text-blue-200/40'
+        },
+        amber: {
+            border: 'border-amber-500',
+            bg: 'bg-amber-900/10',
+            header: 'bg-amber-950/30',
+            headerBorder: 'border-amber-500/10',
+            dot: 'bg-amber-400',
+            dotGlow: 'shadow-[0_0_8px_rgba(251,191,36,0.8)]',
+            title: 'text-amber-300',
+            text: 'text-amber-100',
+            cursor: 'text-amber-400',
+            originalLabel: 'text-amber-500/50',
+            originalText: 'text-amber-200/40'
+        }
+    };
+
+    const colors = colorSchemes[accentColor];
+
+    // Auto-scroll to bottom when new content arrives
+    useEffect(() => {
+        if (shouldAutoScroll && containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+    }, [translationText, shouldAutoScroll]);
+
+    // Detect manual scroll (user scrolled up) -> disable auto-scroll
+    const handleScroll = () => {
+        if (!containerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+        setShouldAutoScroll(isAtBottom);
+    };
+
+    // Word count
+    const wordCount = translationText.trim().split(/\s+/).filter(w => w).length;
+
+    return (
+        <div
+            className={`border-l-4 ${colors.border} ${colors.bg} rounded-lg shadow-xl flex flex-col overflow-hidden`}
+            style={{ minHeight, maxHeight }}
+        >
+            {/* Header */}
+            <div className={`px-4 py-2.5 ${colors.header} border-b ${colors.headerBorder} flex items-center justify-between sticky top-0 backdrop-blur z-10`}>
+                <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${colors.dot} ${isActive ? `animate-pulse ${colors.dotGlow}` : ''}`}></span>
+                    <span className={`text-[10px] font-black ${colors.title} uppercase tracking-widest`}>
+                        {title}
+                    </span>
+                    {variant === 'llm' && (
+                        <span className="text-[8px] text-gray-500 ml-1">LLM</span>
+                    )}
+                    {variant === 'ghost' && (
+                        <span className="text-[8px] text-gray-500 ml-1">Ghost</span>
+                    )}
+                </div>
+                <div className="flex items-center gap-3">
+                    {isProcessing && (
+                        <div className="flex gap-0.5">
+                            <div className={`w-1 h-3 ${colors.dot} rounded-full animate-pulse`} style={{animationDelay: '0ms'}}></div>
+                            <div className={`w-1 h-3 ${colors.dot} rounded-full animate-pulse`} style={{animationDelay: '100ms'}}></div>
+                            <div className={`w-1 h-3 ${colors.dot} rounded-full animate-pulse`} style={{animationDelay: '200ms'}}></div>
+                        </div>
+                    )}
+                    {wordCount > 0 && (
+                        <span className={`text-[10px] font-mono ${colors.title} bg-black/20 px-2 py-0.5 rounded`}>
+                            {wordCount} слів
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Main Content Area - Scrollable */}
+            <div
+                ref={containerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
+            >
+                {translationText ? (
+                    <div className="space-y-4">
+                        {/* Translation Text - MAIN FOCUS */}
+                        <div className={`text-lg md:text-xl lg:text-2xl ${colors.text} leading-relaxed font-medium`}>
+                            {translationText}
+                            {showCursor && isActive && (
+                                <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
+                            )}
+                        </div>
+
+                        {/* Original Text - Secondary, smaller */}
+                        {showOriginal && originalText && (
+                            <div className="pt-4 border-t border-gray-800/50">
+                                <div className={`text-[10px] ${colors.originalLabel} uppercase tracking-wider mb-2`}>
+                                    Оригінал
+                                </div>
+                                <div className={`text-sm ${colors.originalText} leading-relaxed italic`}>
+                                    {originalText}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    /* Empty State */
+                    <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                        <div className={`w-16 h-16 rounded-full ${colors.bg} border ${colors.border} flex items-center justify-center mb-4`}>
+                            <svg className={`w-8 h-8 ${colors.title} opacity-50`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                            </svg>
+                        </div>
+                        <div className={`text-sm ${colors.title} opacity-70 mb-2`}>
+                            {isActive ? 'Слухаю...' : 'Очікую запис'}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            {isActive
+                                ? 'Текст з\'явиться тут миттєво'
+                                : 'Натисніть мікрофон щоб почати'
+                            }
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Footer Status Bar */}
+            {isActive && translationText && (
+                <div className={`px-4 py-2 ${colors.header} border-t ${colors.headerBorder} flex items-center justify-between text-[10px]`}>
+                    <div className="flex items-center gap-2">
+                        {shouldAutoScroll ? (
+                            <span className="text-gray-500">📍 Авто-прокрутка</span>
+                        ) : (
+                            <button
+                                onClick={() => {
+                                    setShouldAutoScroll(true);
+                                    if (containerRef.current) {
+                                        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                                    }
+                                }}
+                                className={`${colors.title} hover:underline`}
+                            >
+                                ↓ До кінця
+                            </button>
+                        )}
+                    </div>
+                    <div className="text-gray-500">
+                        {Math.round((Date.now() - performance.timeOrigin) / 1000)}s
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default StreamingTextView;

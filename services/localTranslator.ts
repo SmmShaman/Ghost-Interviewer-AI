@@ -603,6 +603,187 @@ class LocalTranslator {
     public isUsingChromeAPI(): boolean {
         return this.chromeTranslatorAvailable === true;
     }
+
+    // ========== CONTEXT-AWARE TRANSLATION (NEW) ==========
+
+    /**
+     * Translate new words with context from previous text.
+     * This produces better translations by understanding the sentence structure.
+     *
+     * @param newWords - New words to translate
+     * @param context - Previous words for context (last 30-50 words)
+     * @returns Translation of ONLY the new words
+     */
+    async translateWithContext(newWords: string, context: string): Promise<string> {
+        if (!newWords.trim()) return '';
+
+        // Strategy:
+        // 1. Translate context + newWords together
+        // 2. Translate context alone
+        // 3. Return the difference (translation of newWords with context)
+
+        // For Chrome API: Simple approach - translate full, cache context translation
+        const chromeAvailable = await this.checkChromeTranslator();
+        if (chromeAvailable && this.chromeTranslator) {
+            try {
+                // If no context, just translate new words
+                if (!context.trim()) {
+                    const result = await this.chromeTranslator.translate(newWords);
+                    return result;
+                }
+
+                // Translate full text (context + new)
+                const fullText = `${context} ${newWords}`.trim();
+                const fullTranslation = await this.chromeTranslator.translate(fullText);
+
+                // Get cached context translation or translate it
+                const contextCacheKey = `ctx:${context}`;
+                let contextTranslation = this.chunkCache.get(contextCacheKey);
+
+                if (!contextTranslation) {
+                    contextTranslation = await this.chromeTranslator.translate(context);
+                    this.chunkCache.set(contextCacheKey, contextTranslation);
+
+                    // Limit cache size
+                    if (this.chunkCache.size > LocalTranslator.MAX_CACHE_SIZE) {
+                        const firstKey = this.chunkCache.keys().next().value;
+                        if (firstKey) this.chunkCache.delete(firstKey);
+                    }
+                }
+
+                // Extract only the new part
+                // This is approximate - we remove the context translation from full
+                if (fullTranslation.startsWith(contextTranslation)) {
+                    return fullTranslation.slice(contextTranslation.length).trim();
+                }
+
+                // Fallback: estimate based on word ratio
+                const contextWordCount = context.split(/\s+/).length;
+                const fullWordCount = fullText.split(/\s+/).length;
+                const translationWords = fullTranslation.split(/\s+/);
+                const estimatedNewStart = Math.round((contextWordCount / fullWordCount) * translationWords.length);
+                return translationWords.slice(estimatedNewStart).join(' ');
+
+            } catch (e) {
+                console.error('Context-aware Chrome translation failed:', e);
+                // Fallback to simple translation
+                const result = await this.translateWithChrome(newWords);
+                return result || newWords;
+            }
+        }
+
+        // For Transformers.js - similar approach but with caching
+        if (!this.translator) {
+            if (!this.isLoading) this.initialize();
+            return '⏳...';
+        }
+
+        try {
+            if (!context.trim()) {
+                const words = await this.translatePhrase(newWords);
+                return words[0]?.ghostTranslation || newWords;
+            }
+
+            const fullText = `${context} ${newWords}`.trim();
+
+            // Translate full text
+            let fullOutput;
+            if (this.activeModelId.includes('nllb')) {
+                fullOutput = await this.translator(fullText, {
+                    src_lang: this.sourceLang,
+                    tgt_lang: this.targetLang
+                });
+            } else {
+                fullOutput = await this.translator(fullText);
+            }
+
+            const fullResult = Array.isArray(fullOutput) ? fullOutput[0] : fullOutput;
+            const fullTranslation = fullResult?.translation_text || fullResult?.generated_text || '';
+
+            // Get or compute context translation
+            const contextCacheKey = `ctx:${context}`;
+            let contextTranslation = this.chunkCache.get(contextCacheKey);
+
+            if (!contextTranslation) {
+                let contextOutput;
+                if (this.activeModelId.includes('nllb')) {
+                    contextOutput = await this.translator(context, {
+                        src_lang: this.sourceLang,
+                        tgt_lang: this.targetLang
+                    });
+                } else {
+                    contextOutput = await this.translator(context);
+                }
+                const contextResult = Array.isArray(contextOutput) ? contextOutput[0] : contextOutput;
+                contextTranslation = contextResult?.translation_text || contextResult?.generated_text || '';
+                this.chunkCache.set(contextCacheKey, contextTranslation);
+            }
+
+            // Extract new part
+            if (fullTranslation.startsWith(contextTranslation)) {
+                return fullTranslation.slice(contextTranslation.length).trim();
+            }
+
+            // Fallback estimation
+            const contextWordCount = context.split(/\s+/).length;
+            const fullWordCount = fullText.split(/\s+/).length;
+            const translationWords = fullTranslation.split(/\s+/);
+            const estimatedNewStart = Math.round((contextWordCount / fullWordCount) * translationWords.length);
+            return translationWords.slice(estimatedNewStart).join(' ');
+
+        } catch (e) {
+            console.error('Context-aware Transformers translation failed:', e);
+            const words = await this.translatePhrase(newWords);
+            return words[0]?.ghostTranslation || newWords;
+        }
+    }
+
+    /**
+     * Translate full accumulated text incrementally.
+     * Returns both the full translation and what's new since last call.
+     *
+     * @param fullText - Complete accumulated text
+     * @param previousTranslation - Previous translation (to compute diff)
+     * @returns { full: string, newPart: string }
+     */
+    async translateAccumulated(fullText: string, previousTranslation: string): Promise<{ full: string; newPart: string }> {
+        if (!fullText.trim()) {
+            return { full: '', newPart: '' };
+        }
+
+        const chromeAvailable = await this.checkChromeTranslator();
+        if (chromeAvailable && this.chromeTranslator) {
+            try {
+                const fullTranslation = await this.chromeTranslator.translate(fullText);
+
+                // Compute new part by removing previous
+                let newPart = fullTranslation;
+                if (previousTranslation && fullTranslation.startsWith(previousTranslation)) {
+                    newPart = fullTranslation.slice(previousTranslation.length).trim();
+                } else if (previousTranslation) {
+                    // Estimate based on length ratio
+                    const prevLen = previousTranslation.length;
+                    newPart = fullTranslation.slice(prevLen).trim();
+                }
+
+                return { full: fullTranslation, newPart };
+            } catch (e) {
+                console.error('Accumulated Chrome translation failed:', e);
+                return { full: previousTranslation, newPart: '' };
+            }
+        }
+
+        // Transformers.js fallback
+        const words = await this.translatePhrase(fullText);
+        const fullTranslation = words.map(w => w.ghostTranslation).join(' ');
+
+        let newPart = fullTranslation;
+        if (previousTranslation && fullTranslation.length > previousTranslation.length) {
+            newPart = fullTranslation.slice(previousTranslation.length).trim();
+        }
+
+        return { full: fullTranslation, newPart };
+    }
 }
 
 export const localTranslator = new LocalTranslator();
