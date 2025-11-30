@@ -106,59 +106,80 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
         modeSpecificGuidelines += `\n[STRATEGY DETAIL LEVEL]: ${strategyLevel}\n`;
     }
 
-    // For FOCUS mode, skip Analysis and Strategy sections
-    const responseFormat = isFocusMode
-        ? `You MUST respond using these EXACT tags with closing tags:
-      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
-      2. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
-      3. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]`
-        : `You MUST respond using these EXACT tags with closing tags:
-      1. [INPUT_TRANSLATION]translation to ${context.nativeLanguage}[/INPUT_TRANSLATION]
-      2. [ANALYSIS]your analysis of the question[/ANALYSIS]
-      3. [STRATEGY]your recommended response strategy[/STRATEGY]
-      4. [TRANSLATION]suggested answer in ${context.nativeLanguage}[/TRANSLATION]
-      5. [ANSWER]suggested answer in ${context.targetLanguage}[/ANSWER]`;
+    // ========== FOCUS MODE: Quick answer without analysis ==========
+    if (isFocusMode) {
+        return `Ти асистент для співбесід. Допоможи кандидату відповісти на питання інтерв'юера.
 
-    const exampleResponse = isFocusMode
-        ? `[INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
-      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
-      [ANSWER]I have 3 years of experience in development...[/ANSWER]`
-        : `[INPUT_TRANSLATION]Розкажіть про себе[/INPUT_TRANSLATION]
-      [ANALYSIS]Standard opening question to assess communication skills[/ANALYSIS]
-      [STRATEGY]Highlight relevant experience, show enthusiasm[/STRATEGY]
-      [TRANSLATION]Я маю 3 роки досвіду в розробці...[/TRANSLATION]
-      [ANSWER]I have 3 years of experience in development...[/ANSWER]`;
+КОНТЕКСТ КАНДИДАТА:
+- Резюме: "${context.resume?.slice(0, 1500) || 'не вказано'}"
+- Вакансія: "${context.jobDescription?.slice(0, 1000) || 'не вказано'}"
+- Компанія: "${context.companyDescription?.slice(0, 500) || 'не вказано'}"
+- База знань: "${relevantKnowledge || 'немає'}"
+${modeSpecificGuidelines}
 
-    return `
-      Request: Process the input data and generate a structured response based on the formatting rules.
+ПИТАННЯ ІНТЕРВ'ЮЕРА (${context.targetLanguage}):
+"${currentInput}"
 
-      [DATA CONTEXT]
-      Resume: "${context.resume?.slice(0, 2000) || ''}"
-      Job: "${context.jobDescription?.slice(0, 1500) || ''}"
-      Company: "${context.companyDescription?.slice(0, 1000) || ''}"
-      KB: "${relevantKnowledge || ''}"
+ТВОЯ ВІДПОВІДЬ ПОВИННА БУТИ В ТАКОМУ ФОРМАТІ (використовуй ТОЧНО ці теги):
 
-      [SESSION CONFIG]
-      Target Language: ${context.targetLanguage}
-      Native Language: ${context.nativeLanguage}
-      Proficiency: ${context.proficiencyLevel}
-      Tone: ${context.tone}
-      View Mode: ${context.viewMode}
+[INPUT_TRANSLATION]
+Переклад питання на ${context.nativeLanguage}
+[/INPUT_TRANSLATION]
 
-      [PROCESSING GUIDELINES]
-      ${safeInstruction}
-      ${modeSpecificGuidelines}
+[TRANSLATION]
+Рекомендована відповідь на ${context.nativeLanguage}
+[/TRANSLATION]
 
-      [RESPONSE FORMAT - MANDATORY]
-      ${responseFormat}
+[ANSWER]
+Рекомендована відповідь на ${context.targetLanguage}
+[/ANSWER]
 
-      EXAMPLE RESPONSE:
-      ${exampleResponse}
+ВАЖЛИВО:
+- Використовуй ТІЛЬКИ ці теги у квадратних дужках
+- Кожен тег на окремому рядку
+- Відповідь має бути конкретною, професійною та стислою
+- Базуйся на резюме та вакансії кандидата`;
+    }
 
-      [CONVERSATION LOG]
-      History: "${historyText}"
-      Current Input: "${currentInput}"
-    `;
+    // ========== FULL MODE: Complete analysis with strategy ==========
+    return `Ти асистент для співбесід. Проаналізуй питання та підготуй стратегічну відповідь.
+
+КОНТЕКСТ КАНДИДАТА:
+- Резюме: "${context.resume?.slice(0, 2000) || 'не вказано'}"
+- Вакансія: "${context.jobDescription?.slice(0, 1500) || 'не вказано'}"
+- Компанія: "${context.companyDescription?.slice(0, 1000) || 'не вказано'}"
+- База знань: "${relevantKnowledge || 'немає'}"
+${modeSpecificGuidelines}
+
+ПИТАННЯ ІНТЕРВ'ЮЕРА (${context.targetLanguage}):
+"${currentInput}"
+
+ТВОЯ ВІДПОВІДЬ ПОВИННА БУТИ В ТАКОМУ ФОРМАТІ (використовуй ТОЧНО ці теги):
+
+[INPUT_TRANSLATION]
+Переклад питання на ${context.nativeLanguage}
+[/INPUT_TRANSLATION]
+
+[ANALYSIS]
+Короткий аналіз: що хоче дізнатися інтерв'юер?
+[/ANALYSIS]
+
+[STRATEGY]
+Стратегія відповіді: ключові пункти для згадування
+[/STRATEGY]
+
+[TRANSLATION]
+Рекомендована відповідь на ${context.nativeLanguage}
+[/TRANSLATION]
+
+[ANSWER]
+Рекомендована відповідь на ${context.targetLanguage}
+[/ANSWER]
+
+ВАЖЛИВО:
+- Використовуй ТІЛЬКИ ці теги у квадратних дужках
+- Кожен тег на окремому рядку
+- Відповідь має бути професійною та базуватися на контексті кандидата`;
 }
 
 // AZURE IMPLEMENTATION
@@ -358,6 +379,7 @@ export const translateText = async (text: string, targetLang: string): Promise<s
 }
 
 // Helper for parsing structured output with closing tags support
+// Supports both bracket-style [/TAG] and HTML-style </TAG> closing tags
 function parseAndEmit(fullText: string, onUpdate: any) {
     let inputTranslation = "";
     let analysis = "";
@@ -366,32 +388,32 @@ function parseAndEmit(fullText: string, onUpdate: any) {
     let answer = "";
     let rationale = "";
 
-    // 0. Input Translation - supports [/INPUT_TRANSLATION] closing tag
-    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 0. Input Translation - supports both [/INPUT_TRANSLATION] and </INPUT_TRANSLATION>
+    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]|<\/INPUT_TRANSLATION>|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/i);
     if (inputMatch) inputTranslation = inputMatch[1].trim();
 
-    // 1. Analysis - supports [/ANALYSIS] closing tag
-    const analysisMatch = fullText.match(/\[ANALYSIS\]([\s\S]*?)(\[\/ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 1. Analysis - supports both [/ANALYSIS] and </ANALYSIS>
+    const analysisMatch = fullText.match(/\[ANALYSIS\]([\s\S]*?)(\[\/ANALYSIS\]|<\/ANALYSIS>|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/i);
     if (analysisMatch) analysis = analysisMatch[1].trim();
 
-    // 2. Strategy - supports [/STRATEGY] closing tag
-    const strategyMatch = fullText.match(/\[STRATEGY\]([\s\S]*?)(\[\/STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/);
+    // 2. Strategy - supports both [/STRATEGY] and </STRATEGY>
+    const strategyMatch = fullText.match(/\[STRATEGY\]([\s\S]*?)(\[\/STRATEGY\]|<\/STRATEGY>|\[TRANSLATION\]|\[ANSWER\]|$)/i);
     if (strategyMatch) strategy = strategyMatch[1].trim();
 
-    // 3. Translation - supports [/TRANSLATION] closing tag
-    const translationMatch = fullText.match(/\[TRANSLATION\]([\s\S]*?)(\[\/TRANSLATION\]|\[ANSWER\]|$)/);
+    // 3. Translation (answer translation) - supports both [/TRANSLATION] and </TRANSLATION>
+    const translationMatch = fullText.match(/\[TRANSLATION\]([\s\S]*?)(\[\/TRANSLATION\]|<\/TRANSLATION>|\[ANSWER\]|$)/i);
     if (translationMatch) answerTranslation = translationMatch[1].trim();
 
-    // 4. Answer - supports [/ANSWER] closing tag
-    const answerMatch = fullText.match(/\[ANSWER\]([\s\S]*?)(\[\/ANSWER\]|$)/);
+    // 4. Answer - supports both [/ANSWER] and </ANSWER>
+    const answerMatch = fullText.match(/\[ANSWER\]([\s\S]*?)(\[\/ANSWER\]|<\/ANSWER>|$)/i);
     if (answerMatch) answer = answerMatch[1].trim();
 
     // Handle streaming case where [ANSWER] exists but tag isn't closed yet
     if (!answer && fullText.includes('[ANSWER]')) {
          const parts = fullText.split('[ANSWER]');
          if (parts.length > 1) {
-             // Remove closing tag if partially present
-             answer = parts[1].replace(/\[\/ANSWER\].*$/, '').trim();
+             // Remove closing tag if partially present (both styles)
+             answer = parts[1].replace(/(\[\/ANSWER\]|<\/ANSWER>).*$/i, '').trim();
          }
     }
 
