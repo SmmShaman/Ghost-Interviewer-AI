@@ -5,7 +5,7 @@ import SetupPanel from './components/SetupPanel';
 import BrickRow from './components/BrickRow';
 import CandidateRow from './components/CandidateRow';
 import { MicIcon, StopIcon, SettingsIcon, SendIcon, EyeIcon, EyeOffIcon, DownloadIcon, TrashIcon } from './components/Icons';
-import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile } from './types';
+import { InterviewContext, AppState, Message, IWindow, PromptPreset, InterviewProfile, CandidateProfile, JobProfile, ModeConfig } from './types';
 import { generateInterviewAssist, translateText } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
 import { knowledgeSearch } from './services/knowledgeSearch';
@@ -65,6 +65,41 @@ const DEFAULT_PROFILES: InterviewProfile[] = [
     }
 ];
 
+// Default Mode-Specific Prompts
+const DEFAULT_MODE_CONFIG: ModeConfig = {
+  full: {
+    aiModel: 'azure',
+    strategyDetailLevel: 'detailed',
+    translationPrompt: `Translate the interviewer's question with full context.
+Provide a natural, conversational translation that captures nuances.
+Fix any speech recognition errors.`,
+    analysisPrompt: `Provide deep strategic analysis of the question.
+Identify the hidden intent behind the question.
+Explain what the interviewer is really looking for.
+Write in Native Language.`,
+    answerPrompt: `Generate a structured, formal response.
+Use SIMPLE, SHORT sentences (B1 level).
+Bridge the candidate's experience to job requirements.
+Write the answer in Target Language.`
+  },
+  focus: {
+    aiModel: 'azure',
+    translationPrompt: `Quick, accurate translation of the question.
+Preserve the original meaning and intent.
+Fix any speech recognition errors.`,
+    answerPrompt: `Direct, concise answer to the question.
+Use simple sentences (B1 level).
+Focus on the most relevant experience.
+Write in Target Language.`
+  },
+  simple: {
+    translationPrompt: `Natural, flowing translation.
+Translate as a professional interpreter would.
+Don't be too literal - convey the meaning naturally.`,
+    useChromeAPI: true
+  }
+};
+
 const DEFAULT_CONTEXT: InterviewContext = {
   // === ACTIVE DATA ===
   resume: DEFAULT_CANDIDATE_PROFILES[0].resume,
@@ -99,7 +134,10 @@ const DEFAULT_CONTEXT: InterviewContext = {
   viewMode: 'FULL',
   ghostModel: 'opus',
   llmProvider: 'azure',
-  groqApiKey: ""
+  groqApiKey: "",
+
+  // === MODE-SPECIFIC CONFIGURATION ===
+  modeConfig: DEFAULT_MODE_CONFIG
 };
 
 const STORAGE_KEY = 'ghost_interviewer_context_v2';
@@ -131,8 +169,14 @@ const App: React.FC = () => {
           const saved = localStorage.getItem(STORAGE_KEY);
           if (saved) {
               const parsed = JSON.parse(saved);
-              // Merge with default to ensure new fields (like groqApiKey) exist if loading old state
-              return { ...DEFAULT_CONTEXT, ...parsed };
+              // Merge with default to ensure new fields exist if loading old state
+              // Deep merge modeConfig to preserve any custom prompts
+              const mergedModeConfig = {
+                  full: { ...DEFAULT_MODE_CONFIG.full, ...(parsed.modeConfig?.full || {}) },
+                  focus: { ...DEFAULT_MODE_CONFIG.focus, ...(parsed.modeConfig?.focus || {}) },
+                  simple: { ...DEFAULT_MODE_CONFIG.simple, ...(parsed.modeConfig?.simple || {}) }
+              };
+              return { ...DEFAULT_CONTEXT, ...parsed, modeConfig: mergedModeConfig };
           }
       } catch (e) {
           console.error("Failed to load context", e);

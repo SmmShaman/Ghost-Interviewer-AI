@@ -115,6 +115,39 @@ export const translations = {
           azure: "Azure OpenAI (Enterprise)",
           groq: "Groq (Llama 3 - Fast)",
           apiKeyLabel: "Groq API Key"
+      },
+      // Mode-Centric Cards UI
+      modeCards: {
+          selectMode: "SELECT YOUR INTERVIEW MODE",
+          configure: "Configure",
+          active: "ACTIVE",
+          modeConfig: "MODE CONFIGURATION",
+          aiModel: "AI Model",
+          modePrompts: "Mode-Specific Prompts",
+          translationPrompt: "Translation Prompt",
+          translationPromptHelper: "Controls how the interviewer's question is translated",
+          analysisPrompt: "Analysis Prompt",
+          analysisPromptHelper: "Controls strategic analysis generation",
+          answerPrompt: "Answer Prompt",
+          answerPromptHelper: "Controls suggested answer generation",
+          additionalSettings: "Additional Settings",
+          chromeTranslationFallback: "Prefer Chrome Translation API",
+          strategyDetailLevel: "Strategy Detail Level",
+          strategyBrief: "Brief",
+          strategyDetailed: "Detailed",
+          strategyComprehensive: "Comprehensive",
+          saveChanges: "Save Changes",
+          resetToDefault: "Reset to Default",
+          testMode: "Test Mode",
+          confirmReset: "Reset all prompts for this mode to defaults?"
+      },
+      // Accordion sections
+      accordion: {
+          yourProfile: "YOUR PROFILE",
+          jobApplication: "JOB APPLICATION",
+          audioSetup: "AUDIO SETUP",
+          languageSettings: "LANGUAGE SETTINGS",
+          advancedPrompts: "ADVANCED PROMPTS"
       }
     },
     modes: {
@@ -299,6 +332,39 @@ Example:
           azure: "Azure OpenAI (Enterprise)",
           groq: "Groq (Llama 3 - Швидко)",
           apiKeyLabel: "Ключ Groq API"
+      },
+      // Mode-Centric Cards UI
+      modeCards: {
+          selectMode: "ОБЕРІТЬ РЕЖИМ ІНТЕРВ'Ю",
+          configure: "Налаштувати",
+          active: "АКТИВНИЙ",
+          modeConfig: "НАЛАШТУВАННЯ РЕЖИМУ",
+          aiModel: "ШІ Модель",
+          modePrompts: "Промпти для цього режиму",
+          translationPrompt: "Промпт перекладу",
+          translationPromptHelper: "Контролює переклад питання інтерв'юера",
+          analysisPrompt: "Промпт аналізу",
+          analysisPromptHelper: "Контролює генерацію стратегічного аналізу",
+          answerPrompt: "Промпт відповіді",
+          answerPromptHelper: "Контролює генерацію рекомендованої відповіді",
+          additionalSettings: "Додаткові налаштування",
+          chromeTranslationFallback: "Віддавати перевагу Chrome Translation API",
+          strategyDetailLevel: "Рівень деталізації стратегії",
+          strategyBrief: "Коротко",
+          strategyDetailed: "Детально",
+          strategyComprehensive: "Повно",
+          saveChanges: "Зберегти зміни",
+          resetToDefault: "Скинути до стандартних",
+          testMode: "Тестувати режим",
+          confirmReset: "Скинути всі промпти цього режиму до стандартних?"
+      },
+      // Accordion sections
+      accordion: {
+          yourProfile: "ВАШ ПРОФІЛЬ",
+          jobApplication: "ЗАЯВКА НА ВАКАНСІЮ",
+          audioSetup: "НАЛАШТУВАННЯ АУДІО",
+          languageSettings: "НАЛАШТУВАННЯ МОВИ",
+          advancedPrompts: "РОЗШИРЕНІ ПРОМПТИ"
       }
     },
     modes: {
