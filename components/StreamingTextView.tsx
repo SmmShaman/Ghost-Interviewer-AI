@@ -20,6 +20,10 @@ interface StreamingTextViewProps {
     translationText: string;      // Переклад (основний, великий)
     originalText?: string;        // Оригінал (маленький, знизу)
 
+    // Interim text (real-time, not finalized - shown in grey)
+    interimTranslation?: string;  // Interim translation (grey, at end)
+    interimOriginal?: string;     // Interim original (grey, at end)
+
     // Стан
     isActive: boolean;            // Чи йде запис
     isProcessing?: boolean;       // Чи обробляє LLM
@@ -43,6 +47,8 @@ interface StreamingTextViewProps {
 const StreamingTextView: React.FC<StreamingTextViewProps> = ({
     translationText,
     originalText = '',
+    interimTranslation = '',
+    interimOriginal = '',
     isActive,
     isProcessing = false,
     variant = 'ghost',
@@ -173,24 +179,34 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
             >
-                {translationText ? (
+                {(translationText || interimTranslation) ? (
                     <div className="space-y-4">
                         {/* Translation Text - MAIN FOCUS */}
-                        <div className={`text-lg md:text-xl lg:text-2xl ${colors.text} leading-relaxed font-medium`}>
-                            {translationText}
+                        <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`}>
+                            {/* Finalized text - solid color */}
+                            <span className={colors.text}>{translationText}</span>
+                            {/* Interim text - grey, italic (real-time, not yet finalized) */}
+                            {interimTranslation && (
+                                <span className="text-gray-400 italic ml-1">{interimTranslation}</span>
+                            )}
                             {showCursor && isActive && (
                                 <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
                             )}
                         </div>
 
                         {/* Original Text - Secondary, smaller */}
-                        {showOriginal && originalText && (
+                        {showOriginal && (originalText || interimOriginal) && (
                             <div className="pt-4 border-t border-gray-800/50">
                                 <div className={`text-[10px] ${colors.originalLabel} uppercase tracking-wider mb-2`}>
                                     Оригінал
                                 </div>
-                                <div className={`text-sm ${colors.originalText} leading-relaxed italic`}>
-                                    {originalText}
+                                <div className={`text-sm leading-relaxed italic`}>
+                                    {/* Finalized original - slightly visible */}
+                                    <span className={colors.originalText}>{originalText}</span>
+                                    {/* Interim original - very faint grey */}
+                                    {interimOriginal && (
+                                        <span className="text-gray-500/60 ml-1">{interimOriginal}</span>
+                                    )}
                                 </div>
                             </div>
                         )}

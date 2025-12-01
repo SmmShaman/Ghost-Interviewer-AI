@@ -27,6 +27,10 @@ interface StreamingSimpleModeLayoutProps {
     accumulatedGhostTranslation: string;  // Ghost переклад (миттєвий)
     accumulatedLLMTranslation: string;    // LLM переклад (якісний)
 
+    // Interim (real-time, not finalized yet)
+    interimText?: string;             // Interim original text
+    interimGhostTranslation?: string; // Interim ghost translation
+
     // Стан запису
     isListening: boolean;
     isProcessingLLM: boolean;
@@ -45,6 +49,8 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
     accumulatedLLMTranslation,
+    interimText = '',
+    interimGhostTranslation = '',
     isListening,
     isProcessingLLM,
     showOriginal = true,
@@ -61,6 +67,15 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
     const translationType = preferLLM && accumulatedLLMTranslation ? 'llm' : 'ghost';
 
+    // Combine finalized + interim for smooth display
+    const fullOriginalWithInterim = interimText
+        ? `${accumulatedOriginal} ${interimText}`.trim()
+        : accumulatedOriginal;
+
+    const fullTranslationWithInterim = interimGhostTranslation
+        ? `${displayTranslation} ${interimGhostTranslation}`.trim()
+        : displayTranslation;
+
     // Format duration
     const formatDuration = (ms: number): string => {
         const seconds = Math.floor(ms / 1000);
@@ -74,8 +89,10 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
             {/* Main Translation View */}
             <div className="flex-1">
                 <StreamingTextView
-                    translationText={displayTranslation}
-                    originalText={showOriginal ? accumulatedOriginal : ''}
+                    translationText={fullTranslationWithInterim}
+                    originalText={showOriginal ? fullOriginalWithInterim : ''}
+                    interimTranslation={interimGhostTranslation}
+                    interimOriginal={interimText}
                     isActive={isListening}
                     isProcessing={isProcessingLLM}
                     variant={translationType === 'llm' ? 'llm' : 'ghost'}

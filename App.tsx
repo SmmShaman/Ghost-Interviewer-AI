@@ -905,7 +905,11 @@ const App: React.FC = () => {
                 }
             }
 
-            // Update interim display
+            // REAL-TIME INTERIM: Update interim text for smooth subtitle-like display
+            // This shows words IMMEDIATELY as they're spoken (before finalization)
+            streamingModeRef.current?.setInterimText(currentInterim);
+
+            // Update legacy interim display (for compatibility)
             setInterimTranscript(currentInterim);
             return; // Skip block-based logic
         }
@@ -1494,6 +1498,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 interimText={streamingMode.state.interimText}
+                 interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  showOriginal={true}
@@ -1526,6 +1532,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 interimText={streamingMode.state.interimText}
+                 interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  containsQuestion={streamingMode.state.containsQuestion}
@@ -1559,6 +1567,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 interimText={streamingMode.state.interimText}
+                 interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  containsQuestion={streamingMode.state.containsQuestion}

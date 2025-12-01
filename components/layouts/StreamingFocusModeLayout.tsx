@@ -23,6 +23,10 @@ interface StreamingFocusModeLayoutProps {
     accumulatedGhostTranslation: string;
     accumulatedLLMTranslation: string;
 
+    // Interim (real-time, not finalized yet)
+    interimText?: string;
+    interimGhostTranslation?: string;
+
     // Стан запису
     isListening: boolean;
     isProcessingLLM: boolean;
@@ -46,6 +50,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
     accumulatedLLMTranslation,
+    interimText = '',
+    interimGhostTranslation = '',
     isListening,
     isProcessingLLM,
     containsQuestion,
@@ -88,6 +94,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                     <StreamingTextView
                         translationText={displayTranslation}
                         originalText={accumulatedOriginal}
+                        interimTranslation={interimGhostTranslation}
+                        interimOriginal={interimText}
                         isActive={isListening}
                         isProcessing={isProcessingLLM}
                         variant={translationType === 'llm' ? 'llm' : 'ghost'}
