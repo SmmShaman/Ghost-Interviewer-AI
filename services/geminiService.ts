@@ -503,7 +503,10 @@ export const generateStreamingTranslation = async (
             intent = {
                 containsQuestion: intent?.containsQuestion ?? heuristicIntent.containsQuestion,
                 questionConfidence: intent?.questionConfidence ?? heuristicIntent.questionConfidence,
-                speechType: intent?.speechType !== 'UNKNOWN' ? intent.speechType : heuristicIntent.speechType
+                // Fix: check if intent exists AND has a valid speechType before using it
+                speechType: (intent && intent.speechType && intent.speechType !== 'UNKNOWN')
+                    ? intent.speechType
+                    : heuristicIntent.speechType
             };
         }
 

@@ -16,7 +16,9 @@ import { generateStreamingTranslation, StreamingTranslationResult, generateInter
 export interface StreamingState {
     // Text content
     originalText: string;
+    interimText: string;          // Real-time interim words (not yet finalized)
     ghostTranslation: string;
+    interimGhostTranslation: string; // Translation of interim text
     llmTranslation: string;
 
     // Statistics
@@ -84,7 +86,9 @@ export function useStreamingMode(
     // State
     const [state, setState] = useState<StreamingState>({
         originalText: '',
+        interimText: '',
         ghostTranslation: '',
+        interimGhostTranslation: '',
         llmTranslation: '',
         wordCount: 0,
         sessionStartTime: 0,
@@ -109,6 +113,7 @@ export function useStreamingMode(
     const answerAbortControllerRef = useRef<AbortController | null>(null); // For answer generation
     const llmPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const ghostDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const interimGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For interim translation debounce
     const answerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For answer generation pause
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -406,13 +411,52 @@ export function useStreamingMode(
     }, [executeGhostTranslation, scheduleLLMTranslation]);
 
     /**
+     * Set interim text (real-time, not yet finalized)
+     * This provides smooth subtitle-like display
+     */
+    const setInterimText = useCallback((interimText: string) => {
+        // Update interim text immediately for smooth display
+        setState(prev => ({
+            ...prev,
+            interimText
+        }));
+
+        // Debounce interim translation (50ms - faster than final)
+        if (interimGhostTimerRef.current) {
+            clearTimeout(interimGhostTimerRef.current);
+        }
+
+        if (interimText.trim() && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
+            interimGhostTimerRef.current = setTimeout(async () => {
+                try {
+                    const words = await localTranslator.translatePhraseChunked(interimText);
+                    const translation = words.map(w => w.ghostTranslation).join(' ');
+                    setState(prev => ({
+                        ...prev,
+                        interimGhostTranslation: translation
+                    }));
+                } catch (e) {
+                    // Ignore translation errors for interim text
+                }
+            }, 50);
+        } else {
+            setState(prev => ({
+                ...prev,
+                interimGhostTranslation: ''
+            }));
+        }
+    }, []);
+
+    /**
      * Start a new session
      */
     const startSession = useCallback(() => {
         // Reset state (but keep extractedCompanyInfo - it persists across sessions)
         setState(prev => ({
             originalText: '',
+            interimText: '',
             ghostTranslation: '',
+            interimGhostTranslation: '',
             llmTranslation: '',
             wordCount: 0,
             sessionStartTime: Date.now(),
@@ -454,6 +498,10 @@ export function useStreamingMode(
             clearTimeout(ghostDebounceTimerRef.current);
             ghostDebounceTimerRef.current = null;
         }
+        if (interimGhostTimerRef.current) {
+            clearTimeout(interimGhostTimerRef.current);
+            interimGhostTimerRef.current = null;
+        }
         if (answerPauseTimerRef.current) {
             clearTimeout(answerPauseTimerRef.current);
             answerPauseTimerRef.current = null;
@@ -468,7 +516,8 @@ export function useStreamingMode(
         // NOTE: Don't abort answer generation on stop - let it complete
         // User might want to see the answer after stopping recording
 
-        setState(prev => ({ ...prev, isListening: false }));
+        // Clear interim text on stop
+        setState(prev => ({ ...prev, isListening: false, interimText: '', interimGhostTranslation: '' }));
 
         // Final LLM translation (if there's untranslated content)
         if (wordCountRef.current > llmTranslatedWordCountRef.current) {
@@ -501,6 +550,10 @@ export function useStreamingMode(
             clearTimeout(ghostDebounceTimerRef.current);
             ghostDebounceTimerRef.current = null;
         }
+        if (interimGhostTimerRef.current) {
+            clearTimeout(interimGhostTimerRef.current);
+            interimGhostTimerRef.current = null;
+        }
         if (answerPauseTimerRef.current) {
             clearTimeout(answerPauseTimerRef.current);
             answerPauseTimerRef.current = null;
@@ -523,7 +576,9 @@ export function useStreamingMode(
         // Reset state (full reset including company info)
         setState({
             originalText: '',
+            interimText: '',
             ghostTranslation: '',
+            interimGhostTranslation: '',
             llmTranslation: '',
             wordCount: 0,
             sessionStartTime: 0,
@@ -566,6 +621,7 @@ export function useStreamingMode(
     return {
         state,
         addWords,
+        setInterimText,
         startSession,
         stopSession,
         reset,
