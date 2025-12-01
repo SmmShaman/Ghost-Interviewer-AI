@@ -1282,6 +1282,9 @@ const App: React.FC = () => {
       // Clear all messages
       setMessages([]);
 
+      // Clear streaming mode state
+      streamingMode.reset();
+
       // Clear all session refs
       firstSessionMessageIdRef.current = null;
       firstSessionAssistantIdRef.current = null;
@@ -1320,7 +1323,11 @@ const App: React.FC = () => {
   };
 
   const confirmClear = () => {
-      if (messages.length > 0) setIsClearModalOpen(true);
+      // Check both legacy messages AND streaming mode content
+      const hasContent = messages.length > 0 ||
+                        streamingMode.state.originalText.length > 0 ||
+                        streamingMode.state.interimText.length > 0;
+      if (hasContent) setIsClearModalOpen(true);
   };
 
   // --- RENDER ---
