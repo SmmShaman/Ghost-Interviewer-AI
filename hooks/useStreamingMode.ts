@@ -85,6 +85,7 @@ export function useStreamingMode(
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
+    const originalTextRef = useRef<string>(''); // Track original text for Ghost translation
 
     // Keep context ref updated
     useEffect(() => {
@@ -225,10 +226,14 @@ export function useStreamingMode(
 
         const trimmedNew = newWords.trim();
 
+        // Update state AND keep ref in sync
         setState(prev => {
             const newOriginal = prev.originalText
                 ? `${prev.originalText} ${trimmedNew}`
                 : trimmedNew;
+
+            // Keep ref in sync for async Ghost translation
+            originalTextRef.current = newOriginal;
 
             return {
                 ...prev,
@@ -242,11 +247,9 @@ export function useStreamingMode(
             clearTimeout(ghostDebounceTimerRef.current);
         }
 
+        // Use ref to get current original text (avoids stale closure)
         ghostDebounceTimerRef.current = setTimeout(() => {
-            setState(currentState => {
-                executeGhostTranslation(trimmedNew, currentState.originalText);
-                return currentState;
-            });
+            executeGhostTranslation(trimmedNew, originalTextRef.current);
         }, 100);
 
         // Schedule LLM translation
@@ -274,6 +277,7 @@ export function useStreamingMode(
         });
 
         llmTranslatedWordCountRef.current = 0;
+        originalTextRef.current = '';
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -349,6 +353,7 @@ export function useStreamingMode(
         });
 
         llmTranslatedWordCountRef.current = 0;
+        originalTextRef.current = '';
 
         console.log('🔄 [StreamingMode] Reset');
     }, []);
