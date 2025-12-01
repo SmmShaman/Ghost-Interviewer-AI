@@ -517,10 +517,14 @@ export function useStreamingMode(
             answerPauseTimerRef.current = null;
         }
 
-        // Abort any pending LLM translation request
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
+        // Abort any pending LLM translation request (safely)
+        try {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+            }
+        } catch (e) {
+            // Ignore abort errors
         }
 
         // NOTE: Don't abort answer generation on stop - let it complete
@@ -530,8 +534,14 @@ export function useStreamingMode(
         setState(prev => ({ ...prev, isListening: false, interimText: '', interimGhostTranslation: '' }));
 
         // Final LLM translation (if there's untranslated content)
-        if (wordCountRef.current > llmTranslatedWordCountRef.current) {
-            await executeLLMTranslation();
+        try {
+            if (wordCountRef.current > llmTranslatedWordCountRef.current) {
+                await executeLLMTranslation();
+            }
+        } catch (e: any) {
+            if (e.name !== 'AbortError') {
+                console.error('Final LLM translation error:', e);
+            }
         }
 
         // Trigger answer generation if question was detected but answer not yet started
@@ -573,14 +583,22 @@ export function useStreamingMode(
             sessionIntervalRef.current = null;
         }
 
-        // Abort pending requests
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
+        // Abort pending requests (safely)
+        try {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+            }
+        } catch (e) {
+            // Ignore abort errors
         }
-        if (answerAbortControllerRef.current) {
-            answerAbortControllerRef.current.abort();
-            answerAbortControllerRef.current = null;
+        try {
+            if (answerAbortControllerRef.current) {
+                answerAbortControllerRef.current.abort();
+                answerAbortControllerRef.current = null;
+            }
+        } catch (e) {
+            // Ignore abort errors
         }
 
         // Reset state (full reset including company info)
