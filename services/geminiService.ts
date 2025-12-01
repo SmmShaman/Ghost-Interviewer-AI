@@ -737,7 +737,7 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
         body: JSON.stringify({
             messages: [{ role: "user", content: sanitizedPrompt }],
             stream: true,
-            max_tokens: 512
+            max_completion_tokens: 512
         }),
         signal
     });

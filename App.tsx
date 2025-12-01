@@ -1531,6 +1531,9 @@ const App: React.FC = () => {
                  containsQuestion={streamingMode.state.containsQuestion}
                  questionConfidence={streamingMode.state.questionConfidence}
                  speechType={streamingMode.state.speechType}
+                 generatedAnswer={streamingMode.state.generatedAnswer}
+                 answerTranslation={streamingMode.state.answerTranslation}
+                 isGeneratingAnswer={streamingMode.state.isGeneratingAnswer}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
              />
@@ -1561,6 +1564,12 @@ const App: React.FC = () => {
                  containsQuestion={streamingMode.state.containsQuestion}
                  questionConfidence={streamingMode.state.questionConfidence}
                  speechType={streamingMode.state.speechType}
+                 analysis={streamingMode.state.analysis}
+                 strategy={streamingMode.state.strategy}
+                 isAnalyzing={streamingMode.state.isAnalyzing}
+                 generatedAnswer={streamingMode.state.generatedAnswer}
+                 answerTranslation={streamingMode.state.answerTranslation}
+                 isGeneratingAnswer={streamingMode.state.isGeneratingAnswer}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
              />
