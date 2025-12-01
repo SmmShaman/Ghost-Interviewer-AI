@@ -29,6 +29,9 @@ export interface StreamingState {
     questionConfidence: number;
     speechType: 'QUESTION' | 'INFO' | 'STORY' | 'SMALL_TALK' | 'UNKNOWN';
 
+    // Extracted company info (accumulated during interview)
+    extractedCompanyInfo: string[];
+
     // Processing flags
     isListening: boolean;
     isProcessingGhost: boolean;
@@ -45,6 +48,7 @@ interface UseStreamingModeOptions {
     onGhostUpdate?: (translation: string) => void;
     onLLMUpdate?: (result: StreamingTranslationResult) => void;
     onQuestionDetected?: (confidence: number) => void;
+    onCompanyInfoDetected?: (info: string) => void;
 }
 
 const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
@@ -53,7 +57,8 @@ const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
     ghostContextWords: 50,
     onGhostUpdate: () => {},
     onLLMUpdate: () => {},
-    onQuestionDetected: () => {}
+    onQuestionDetected: () => {},
+    onCompanyInfoDetected: () => {}
 };
 
 export function useStreamingMode(
@@ -73,6 +78,7 @@ export function useStreamingMode(
         containsQuestion: false,
         questionConfidence: 0,
         speechType: 'UNKNOWN',
+        extractedCompanyInfo: [],
         isListening: false,
         isProcessingGhost: false,
         isProcessingLLM: false
@@ -86,6 +92,8 @@ export function useStreamingMode(
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
     const originalTextRef = useRef<string>(''); // Track original text for Ghost translation
+    const llmTranslationRef = useRef<string>(''); // Track LLM translation for async operations
+    const wordCountRef = useRef<number>(0); // Track word count for async operations
 
     // Keep context ref updated
     useEffect(() => {
@@ -148,10 +156,13 @@ export function useStreamingMode(
 
     // === LLM TRANSLATION ===
     const executeLLMTranslation = useCallback(async () => {
-        const currentState = state;
+        // Use refs to avoid stale closure issues
+        const currentWordCount = wordCountRef.current;
+        const currentOriginalText = originalTextRef.current;
+        const currentLLMTranslation = llmTranslationRef.current;
 
         // Check if there's new content
-        if (llmTranslatedWordCountRef.current >= currentState.wordCount) {
+        if (llmTranslatedWordCountRef.current >= currentWordCount) {
             return;
         }
 
@@ -163,14 +174,19 @@ export function useStreamingMode(
 
         try {
             const result = await generateStreamingTranslation(
-                currentState.originalText,
-                currentState.llmTranslation,
+                currentOriginalText,
+                currentLLMTranslation,
                 contextRef.current,
                 signal
             );
 
             // Update state with new translation
-            llmTranslatedWordCountRef.current = currentState.wordCount;
+            llmTranslatedWordCountRef.current = currentWordCount;
+            llmTranslationRef.current = result.translation; // Keep ref in sync
+
+            // Store company info if detected
+            const isCompanyInfo = result.intent.speechType === 'INFO';
+            const newCompanyInfo = isCompanyInfo ? result.translation : null;
 
             setState(prev => ({
                 ...prev,
@@ -178,6 +194,10 @@ export function useStreamingMode(
                 containsQuestion: result.intent.containsQuestion,
                 questionConfidence: result.intent.questionConfidence,
                 speechType: result.intent.speechType,
+                // Accumulate company info when detected
+                extractedCompanyInfo: newCompanyInfo
+                    ? [...prev.extractedCompanyInfo, newCompanyInfo]
+                    : prev.extractedCompanyInfo,
                 isProcessingLLM: false
             }));
 
@@ -185,6 +205,12 @@ export function useStreamingMode(
 
             if (result.intent.containsQuestion && result.intent.questionConfidence > 70) {
                 opts.onQuestionDetected(result.intent.questionConfidence);
+            }
+
+            // Notify about company info extraction
+            if (isCompanyInfo && newCompanyInfo) {
+                opts.onCompanyInfoDetected(newCompanyInfo);
+                console.log(`🏢 [CompanyInfo] Stored: "${newCompanyInfo.substring(0, 50)}..."`);
             }
         } catch (e: any) {
             if (e.name !== 'AbortError') {
@@ -194,7 +220,7 @@ export function useStreamingMode(
         } finally {
             abortControllerRef.current = null;
         }
-    }, [state, opts]);
+    }, [opts]);
 
     // Schedule LLM translation
     const scheduleLLMTranslation = useCallback(() => {
@@ -204,7 +230,7 @@ export function useStreamingMode(
         }
 
         // Check if we should trigger immediately (word threshold)
-        const untranslatedWords = state.wordCount - llmTranslatedWordCountRef.current;
+        const untranslatedWords = wordCountRef.current - llmTranslatedWordCountRef.current;
         if (untranslatedWords >= opts.llmTriggerWords) {
             executeLLMTranslation();
             return;
@@ -214,7 +240,7 @@ export function useStreamingMode(
         llmPauseTimerRef.current = setTimeout(() => {
             executeLLMTranslation();
         }, opts.llmPauseMs);
-    }, [state.wordCount, opts.llmTriggerWords, opts.llmPauseMs, executeLLMTranslation]);
+    }, [opts.llmTriggerWords, opts.llmPauseMs, executeLLMTranslation]);
 
     // === PUBLIC API ===
 
@@ -226,19 +252,21 @@ export function useStreamingMode(
 
         const trimmedNew = newWords.trim();
 
-        // Update state AND keep ref in sync
+        // Update state AND keep refs in sync
         setState(prev => {
             const newOriginal = prev.originalText
                 ? `${prev.originalText} ${trimmedNew}`
                 : trimmedNew;
+            const newWordCount = newOriginal.split(/\s+/).length;
 
-            // Keep ref in sync for async Ghost translation
+            // Keep refs in sync for async operations
             originalTextRef.current = newOriginal;
+            wordCountRef.current = newWordCount;
 
             return {
                 ...prev,
                 originalText: newOriginal,
-                wordCount: newOriginal.split(/\s+/).length
+                wordCount: newWordCount
             };
         });
 
@@ -260,8 +288,8 @@ export function useStreamingMode(
      * Start a new session
      */
     const startSession = useCallback(() => {
-        // Reset state
-        setState({
+        // Reset state (but keep extractedCompanyInfo - it persists across sessions)
+        setState(prev => ({
             originalText: '',
             ghostTranslation: '',
             llmTranslation: '',
@@ -271,13 +299,16 @@ export function useStreamingMode(
             containsQuestion: false,
             questionConfidence: 0,
             speechType: 'UNKNOWN',
+            extractedCompanyInfo: prev.extractedCompanyInfo, // Persist company info
             isListening: true,
             isProcessingGhost: false,
             isProcessingLLM: false
-        });
+        }));
 
         llmTranslatedWordCountRef.current = 0;
         originalTextRef.current = '';
+        llmTranslationRef.current = '';
+        wordCountRef.current = 0;
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -305,12 +336,12 @@ export function useStreamingMode(
         setState(prev => ({ ...prev, isListening: false }));
 
         // Final LLM translation (if there's untranslated content)
-        if (state.wordCount > llmTranslatedWordCountRef.current) {
+        if (wordCountRef.current > llmTranslatedWordCountRef.current) {
             await executeLLMTranslation();
         }
 
         console.log('🛑 [StreamingMode] Session stopped');
-    }, [state.wordCount, executeLLMTranslation]);
+    }, [executeLLMTranslation]);
 
     /**
      * Reset to initial state
@@ -336,7 +367,7 @@ export function useStreamingMode(
             abortControllerRef.current = null;
         }
 
-        // Reset state
+        // Reset state (full reset including company info)
         setState({
             originalText: '',
             ghostTranslation: '',
@@ -347,6 +378,7 @@ export function useStreamingMode(
             containsQuestion: false,
             questionConfidence: 0,
             speechType: 'UNKNOWN',
+            extractedCompanyInfo: [], // Clear company info on full reset
             isListening: false,
             isProcessingGhost: false,
             isProcessingLLM: false
@@ -354,8 +386,10 @@ export function useStreamingMode(
 
         llmTranslatedWordCountRef.current = 0;
         originalTextRef.current = '';
+        llmTranslationRef.current = '';
+        wordCountRef.current = 0;
 
-        console.log('🔄 [StreamingMode] Reset');
+        console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
 
     /**
