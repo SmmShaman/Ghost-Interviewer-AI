@@ -377,6 +377,8 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
                         if (content) {
                             fullText += content;
                             parseAndEmit(fullText, onUpdate);
+                            // Also pass raw full text for intent parsing
+                            onUpdate({ _rawChunk: content, _fullRawText: fullText });
                         }
                     } catch (e) {
                         // ignore parse errors for partial chunks
@@ -472,11 +474,16 @@ export const generateStreamingTranslation = async (
     const prompt = constructStreamingPrompt(fullText, alreadyTranslated, context);
 
     let resultText = '';
+    let fullResponseText = ''; // Capture full response for intent parsing
 
     try {
         const onUpdate = (data: any) => {
             if (data.inputTranslation) {
                 resultText = data.inputTranslation;
+            }
+            // Capture full raw text for intent parsing
+            if (data._fullRawText) {
+                fullResponseText = data._fullRawText;
             }
         };
 
@@ -486,8 +493,21 @@ export const generateStreamingTranslation = async (
             await generateViaAzureDirect(prompt, onUpdate, signal);
         }
 
-        // Parse intent from result (basic heuristics for now)
-        const intent = classifyIntent(fullText, resultText);
+        // Try to parse LLM-based intent first
+        let intent = parseLLMIntent(fullResponseText);
+
+        // Fall back to heuristic classification if LLM didn't provide intent
+        if (!intent || intent.speechType === 'UNKNOWN') {
+            const heuristicIntent = classifyIntent(fullText, resultText);
+            // Merge: use LLM intent if available, otherwise heuristic
+            intent = {
+                containsQuestion: intent?.containsQuestion ?? heuristicIntent.containsQuestion,
+                questionConfidence: intent?.questionConfidence ?? heuristicIntent.questionConfidence,
+                speechType: intent?.speechType !== 'UNKNOWN' ? intent.speechType : heuristicIntent.speechType
+            };
+        }
+
+        console.log(`🎯 [Intent] type=${intent.speechType}, question=${intent.containsQuestion}, confidence=${intent.questionConfidence}%`);
 
         return {
             translation: resultText,
@@ -507,8 +527,66 @@ export const generateStreamingTranslation = async (
     }
 };
 
+/**
+ * Parse LLM-based intent from response text
+ */
+function parseLLMIntent(responseText: string): StreamingTranslationResult['intent'] | null {
+    try {
+        // Look for [INTENT] section
+        const intentMatch = responseText.match(/\[INTENT\]([\s\S]*?)(\[\/INTENT\]|$)/i);
+        if (!intentMatch) return null;
+
+        const intentBlock = intentMatch[1];
+
+        // Parse type
+        const typeMatch = intentBlock.match(/type:\s*(QUESTION|INFO|SMALL_TALK|STORY|UNKNOWN)/i);
+        const speechType = typeMatch
+            ? typeMatch[1].toUpperCase() as 'QUESTION' | 'INFO' | 'STORY' | 'SMALL_TALK' | 'UNKNOWN'
+            : 'UNKNOWN';
+
+        // Parse confidence
+        const confidenceMatch = intentBlock.match(/confidence:\s*(\d+)/i);
+        const questionConfidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : 50;
+
+        // Parse has_question
+        const hasQuestionMatch = intentBlock.match(/has_question:\s*(true|false)/i);
+        const containsQuestion = hasQuestionMatch
+            ? hasQuestionMatch[1].toLowerCase() === 'true'
+            : speechType === 'QUESTION';
+
+        return {
+            containsQuestion,
+            questionConfidence,
+            speechType
+        };
+    } catch (e) {
+        console.warn('Failed to parse LLM intent:', e);
+        return null;
+    }
+}
+
 function constructStreamingPrompt(fullText: string, alreadyTranslated: string, context: InterviewContext): string {
     const hasExistingTranslation = alreadyTranslated && alreadyTranslated.trim().length > 0;
+
+    // Common intent classification instructions
+    const intentInstructions = `
+КЛАСИФІКАЦІЯ МОВЛЕННЯ:
+Визнач тип мовлення та чи є питання до кандидата:
+- QUESTION: Пряме питання до кандидата (наприклад: "Розкажіть про себе", "Який ваш досвід?")
+- INFO: Інформація про компанію/посаду (наприклад: "У нас в компанії ми використовуємо...")
+- SMALL_TALK: Неформальна бесіда (погода, вихідні, як дістались)
+- STORY: Розповідь/історія від інтерв'юера
+- UNKNOWN: Невизначено
+
+ФОРМАТ ВІДПОВІДІ:
+[INPUT_TRANSLATION]
+твій переклад тут
+[/INPUT_TRANSLATION]
+[INTENT]
+type: QUESTION/INFO/SMALL_TALK/STORY/UNKNOWN
+confidence: 0-100
+has_question: true/false
+[/INTENT]`;
 
     if (hasExistingTranslation) {
         // Incremental mode - tell LLM what's already translated
@@ -526,16 +604,13 @@ function constructStreamingPrompt(fullText: string, alreadyTranslated: string, c
 1. Переклади ВЕСЬ текст заново, покращуючи попередній переклад з урахуванням нового контексту
 2. Зберігай природність та плавність перекладу
 3. Виправляй можливі помилки розпізнавання мовлення
+4. Класифікуй тип мовлення
 
 ВАЖЛИВО:
 - Передавай СЕНС, а не буквальний переклад
 - Використовуй природні ${context.nativeLanguage}-мовні конструкції
 - Зглажуй обірваність фраз
-
-Відповідай ТІЛЬКИ перекладом у форматі:
-[INPUT_TRANSLATION]
-твій повний переклад тут
-[/INPUT_TRANSLATION]`;
+${intentInstructions}`;
     }
 
     // First translation - no previous context
@@ -551,11 +626,8 @@ function constructStreamingPrompt(fullText: string, alreadyTranslated: string, c
 2. Використовуй природні ${context.nativeLanguage}-мовні конструкції
 3. Виправляй можливі помилки розпізнавання мовлення
 4. Зглажуй обірваність фраз
-
-Відповідай ТІЛЬКИ перекладом у форматі:
-[INPUT_TRANSLATION]
-твій переклад тут
-[/INPUT_TRANSLATION]`;
+5. Класифікуй тип мовлення
+${intentInstructions}`;
 }
 
 function classifyIntent(originalText: string, translation: string): StreamingTranslationResult['intent'] {

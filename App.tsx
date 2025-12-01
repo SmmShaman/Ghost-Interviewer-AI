@@ -8,6 +8,8 @@ import SimpleModeLayout from './components/layouts/SimpleModeLayout';
 import FocusModeLayout from './components/layouts/FocusModeLayout';
 import FullModeLayout from './components/layouts/FullModeLayout';
 import StreamingSimpleModeLayout from './components/layouts/StreamingSimpleModeLayout';
+import StreamingFocusModeLayout from './components/layouts/StreamingFocusModeLayout';
+import StreamingFullModeLayout from './components/layouts/StreamingFullModeLayout';
 import { MicIcon, StopIcon, DownloadIcon, TrashIcon } from './components/Icons';
 import { InterviewContext, AppState, Message, IWindow, ViewMode } from './types';
 import { generateInterviewAssist } from './services/geminiService';
@@ -886,8 +888,8 @@ const App: React.FC = () => {
         lastFullTextRef.current = fullText;
 
         // ========== STREAMING MODE (NEW ARCHITECTURE) ==========
-        // In SIMPLE mode with streaming UI, use continuous accumulation instead of blocks
-        const isStreamingMode = contextRef.current.viewMode === 'SIMPLE' && useStreamingUIRef.current;
+        // In all modes with streaming UI enabled, use continuous accumulation instead of blocks
+        const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
             // STREAMING: Add words continuously to accumulator
@@ -1117,10 +1119,10 @@ const App: React.FC = () => {
 
       console.log(`🎙️ [${Math.round(performance.now())}ms] SESSION START: questionId=${sessionQuestionIdRef.current}`);
 
-      // STREAMING MODE: Start session
-      if (context.viewMode === 'SIMPLE' && useStreamingUI) {
+      // STREAMING MODE: Start session (all modes when streaming UI enabled)
+      if (useStreamingUI) {
           streamingMode.startSession();
-          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session started`);
+          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session started (${context.viewMode})`);
       }
 
       try {
@@ -1148,10 +1150,10 @@ const App: React.FC = () => {
       lastFullTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-      // STREAMING MODE: Stop session and finalize translation
-      if (context.viewMode === 'SIMPLE' && useStreamingUI) {
+      // STREAMING MODE: Stop session and finalize translation (all modes)
+      if (useStreamingUI) {
           streamingMode.stopSession();
-          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session stopped`);
+          console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING MODE: Session stopped (${context.viewMode})`);
       }
 
       // ABORT all pending LLM requests immediately
@@ -1518,8 +1520,24 @@ const App: React.FC = () => {
              />
          )}
 
-         {/* FOCUS MODE */}
-         {context.viewMode === 'FOCUS' && (
+         {/* FOCUS MODE - NEW STREAMING UI */}
+         {context.viewMode === 'FOCUS' && useStreamingUI && (
+             <StreamingFocusModeLayout
+                 accumulatedOriginal={streamingMode.state.originalText}
+                 accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
+                 accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 isListening={streamingMode.state.isListening}
+                 isProcessingLLM={streamingMode.state.isProcessingLLM}
+                 containsQuestion={streamingMode.state.containsQuestion}
+                 questionConfidence={streamingMode.state.questionConfidence}
+                 speechType={streamingMode.state.speechType}
+                 wordCount={streamingMode.state.wordCount}
+                 sessionDuration={streamingMode.state.sessionDuration}
+             />
+         )}
+
+         {/* FOCUS MODE - LEGACY BLOCK UI */}
+         {context.viewMode === 'FOCUS' && !useStreamingUI && (
              <FocusModeLayout
                  messages={messages}
                  interimTranscript={interimTranscript}
@@ -1532,8 +1550,24 @@ const App: React.FC = () => {
              />
          )}
 
-         {/* FULL MODE */}
-         {context.viewMode === 'FULL' && (
+         {/* FULL MODE - NEW STREAMING UI */}
+         {context.viewMode === 'FULL' && useStreamingUI && (
+             <StreamingFullModeLayout
+                 accumulatedOriginal={streamingMode.state.originalText}
+                 accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
+                 accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 isListening={streamingMode.state.isListening}
+                 isProcessingLLM={streamingMode.state.isProcessingLLM}
+                 containsQuestion={streamingMode.state.containsQuestion}
+                 questionConfidence={streamingMode.state.questionConfidence}
+                 speechType={streamingMode.state.speechType}
+                 wordCount={streamingMode.state.wordCount}
+                 sessionDuration={streamingMode.state.sessionDuration}
+             />
+         )}
+
+         {/* FULL MODE - LEGACY BLOCK UI */}
+         {context.viewMode === 'FULL' && !useStreamingUI && (
              <FullModeLayout
                  messages={messages}
                  interimTranscript={interimTranscript}
