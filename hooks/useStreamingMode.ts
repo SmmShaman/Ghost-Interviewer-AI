@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
 
 export interface StreamingState {
     // Text content
@@ -32,6 +32,14 @@ export interface StreamingState {
     // Extracted company info (accumulated during interview)
     extractedCompanyInfo: string[];
 
+    // Answer generation (for FOCUS/FULL modes)
+    generatedAnswer: string;
+    answerTranslation: string;
+    analysis: string;
+    strategy: string;
+    isGeneratingAnswer: boolean;
+    isAnalyzing: boolean;
+
     // Processing flags
     isListening: boolean;
     isProcessingGhost: boolean;
@@ -43,22 +51,28 @@ interface UseStreamingModeOptions {
     llmTriggerWords?: number;      // Min words before LLM (default: 25)
     llmPauseMs?: number;           // Trigger on pause (default: 2000ms)
     ghostContextWords?: number;    // Context for Ghost (default: 50)
+    answerTriggerConfidence?: number; // Min confidence to trigger answer generation (default: 70)
+    answerPauseMs?: number;        // Wait for pause before generating answer (default: 2500ms)
 
     // Callbacks
     onGhostUpdate?: (translation: string) => void;
     onLLMUpdate?: (result: StreamingTranslationResult) => void;
     onQuestionDetected?: (confidence: number) => void;
     onCompanyInfoDetected?: (info: string) => void;
+    onAnswerGenerated?: (answer: string, translation: string) => void;
 }
 
 const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
     llmTriggerWords: 25,
     llmPauseMs: 2000,
     ghostContextWords: 50,
+    answerTriggerConfidence: 70,
+    answerPauseMs: 2500,
     onGhostUpdate: () => {},
     onLLMUpdate: () => {},
     onQuestionDetected: () => {},
-    onCompanyInfoDetected: () => {}
+    onCompanyInfoDetected: () => {},
+    onAnswerGenerated: () => {}
 };
 
 export function useStreamingMode(
@@ -79,6 +93,12 @@ export function useStreamingMode(
         questionConfidence: 0,
         speechType: 'UNKNOWN',
         extractedCompanyInfo: [],
+        generatedAnswer: '',
+        answerTranslation: '',
+        analysis: '',
+        strategy: '',
+        isGeneratingAnswer: false,
+        isAnalyzing: false,
         isListening: false,
         isProcessingGhost: false,
         isProcessingLLM: false
@@ -86,14 +106,18 @@ export function useStreamingMode(
 
     // Refs for async operations
     const abortControllerRef = useRef<AbortController | null>(null);
+    const answerAbortControllerRef = useRef<AbortController | null>(null); // For answer generation
     const llmPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const ghostDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const answerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For answer generation pause
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
     const originalTextRef = useRef<string>(''); // Track original text for Ghost translation
     const llmTranslationRef = useRef<string>(''); // Track LLM translation for async operations
     const wordCountRef = useRef<number>(0); // Track word count for async operations
+    const lastAnswerTextRef = useRef<string>(''); // Track text that was last used to generate answer (avoid duplicates)
+    const scheduleAnswerGenerationRef = useRef<() => void>(() => {}); // Ref for answer scheduling to avoid circular deps
 
     // Keep context ref updated
     useEffect(() => {
@@ -203,8 +227,14 @@ export function useStreamingMode(
 
             opts.onLLMUpdate(result);
 
-            if (result.intent.containsQuestion && result.intent.questionConfidence > 70) {
+            if (result.intent.containsQuestion && result.intent.questionConfidence >= opts.answerTriggerConfidence) {
                 opts.onQuestionDetected(result.intent.questionConfidence);
+
+                // Trigger answer generation for FOCUS/FULL modes
+                if (contextRef.current.viewMode !== 'SIMPLE') {
+                    console.log(`❓ [LLM] Question detected (${result.intent.questionConfidence}%) - scheduling answer generation`);
+                    scheduleAnswerGenerationRef.current();
+                }
             }
 
             // Notify about company info extraction
@@ -241,6 +271,97 @@ export function useStreamingMode(
             executeLLMTranslation();
         }, opts.llmPauseMs);
     }, [opts.llmTriggerWords, opts.llmPauseMs, executeLLMTranslation]);
+
+    // === ANSWER GENERATION (for FOCUS/FULL modes) ===
+    const executeAnswerGeneration = useCallback(async () => {
+        const currentOriginalText = originalTextRef.current;
+        const currentContext = contextRef.current;
+
+        // Skip if no text or SIMPLE mode (no answer generation needed)
+        if (!currentOriginalText.trim() || currentContext.viewMode === 'SIMPLE') {
+            console.log('⏭️ [Answer] Skipping: SIMPLE mode or no text');
+            return;
+        }
+
+        // Skip if already generating or same text as before
+        if (lastAnswerTextRef.current === currentOriginalText) {
+            console.log('⏭️ [Answer] Skipping: Same text as before');
+            return;
+        }
+
+        // Abort any pending answer generation
+        if (answerAbortControllerRef.current) {
+            answerAbortControllerRef.current.abort();
+        }
+
+        answerAbortControllerRef.current = new AbortController();
+        const signal = answerAbortControllerRef.current.signal;
+
+        setState(prev => ({ ...prev, isGeneratingAnswer: true, isAnalyzing: true }));
+        lastAnswerTextRef.current = currentOriginalText;
+
+        console.log(`🎯 [Answer] Starting generation for ${currentOriginalText.split(/\s+/).length} words (${currentContext.viewMode} mode)`);
+
+        try {
+            await generateInterviewAssist(
+                currentOriginalText,
+                [], // No history, use accumulated text as complete context
+                currentContext,
+                (partial) => {
+                    // Check if aborted
+                    if (signal.aborted) return;
+
+                    // Update state with streaming partial data
+                    setState(prev => ({
+                        ...prev,
+                        // Analysis (FULL mode only)
+                        analysis: partial.analysis || prev.analysis,
+                        // Strategy (FULL mode only)
+                        strategy: partial.strategy || prev.strategy,
+                        // Answer in target language
+                        generatedAnswer: partial.answer || prev.generatedAnswer,
+                        // Answer translation to native language
+                        answerTranslation: partial.answerTranslation || prev.answerTranslation,
+                        // Clear analyzing flag when we have analysis/strategy
+                        isAnalyzing: !partial.analysis && !partial.strategy
+                    }));
+                },
+                signal
+            );
+
+            setState(prev => ({ ...prev, isGeneratingAnswer: false, isAnalyzing: false }));
+
+            console.log(`✅ [Answer] Generation complete`);
+            opts.onAnswerGenerated(lastAnswerTextRef.current, '');
+        } catch (e: any) {
+            if (e.name !== 'AbortError') {
+                console.error('Answer generation error:', e);
+            }
+            setState(prev => ({ ...prev, isGeneratingAnswer: false, isAnalyzing: false }));
+        } finally {
+            answerAbortControllerRef.current = null;
+        }
+    }, [opts]);
+
+    // Schedule answer generation when question detected with high confidence
+    const scheduleAnswerGeneration = useCallback(() => {
+        // Clear existing timer
+        if (answerPauseTimerRef.current) {
+            clearTimeout(answerPauseTimerRef.current);
+        }
+
+        // Schedule answer generation after pause (give user time to finish speaking)
+        answerPauseTimerRef.current = setTimeout(() => {
+            executeAnswerGeneration();
+        }, opts.answerPauseMs);
+
+        console.log(`⏱️ [Answer] Scheduled in ${opts.answerPauseMs}ms`);
+    }, [opts.answerPauseMs, executeAnswerGeneration]);
+
+    // Keep scheduleAnswerGenerationRef updated (avoids circular dependency with executeLLMTranslation)
+    useEffect(() => {
+        scheduleAnswerGenerationRef.current = scheduleAnswerGeneration;
+    }, [scheduleAnswerGeneration]);
 
     // === PUBLIC API ===
 
@@ -300,6 +421,12 @@ export function useStreamingMode(
             questionConfidence: 0,
             speechType: 'UNKNOWN',
             extractedCompanyInfo: prev.extractedCompanyInfo, // Persist company info
+            generatedAnswer: '',
+            answerTranslation: '',
+            analysis: '',
+            strategy: '',
+            isGeneratingAnswer: false,
+            isAnalyzing: false,
             isListening: true,
             isProcessingGhost: false,
             isProcessingLLM: false
@@ -309,6 +436,7 @@ export function useStreamingMode(
         originalTextRef.current = '';
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
+        lastAnswerTextRef.current = ''; // Reset answer text tracker
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -326,12 +454,19 @@ export function useStreamingMode(
             clearTimeout(ghostDebounceTimerRef.current);
             ghostDebounceTimerRef.current = null;
         }
+        if (answerPauseTimerRef.current) {
+            clearTimeout(answerPauseTimerRef.current);
+            answerPauseTimerRef.current = null;
+        }
 
-        // Abort any pending LLM request
+        // Abort any pending LLM translation request
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
         }
+
+        // NOTE: Don't abort answer generation on stop - let it complete
+        // User might want to see the answer after stopping recording
 
         setState(prev => ({ ...prev, isListening: false }));
 
@@ -340,8 +475,18 @@ export function useStreamingMode(
             await executeLLMTranslation();
         }
 
+        // Trigger answer generation if question was detected but answer not yet started
+        // This ensures answer is generated when user stops after asking a question
+        const currentContext = contextRef.current;
+        if (currentContext.viewMode !== 'SIMPLE' &&
+            originalTextRef.current.trim() &&
+            lastAnswerTextRef.current !== originalTextRef.current) {
+            console.log('🎯 [StopSession] Triggering final answer generation');
+            executeAnswerGeneration();
+        }
+
         console.log('🛑 [StreamingMode] Session stopped');
-    }, [executeLLMTranslation]);
+    }, [executeLLMTranslation, executeAnswerGeneration]);
 
     /**
      * Reset to initial state
@@ -356,6 +501,10 @@ export function useStreamingMode(
             clearTimeout(ghostDebounceTimerRef.current);
             ghostDebounceTimerRef.current = null;
         }
+        if (answerPauseTimerRef.current) {
+            clearTimeout(answerPauseTimerRef.current);
+            answerPauseTimerRef.current = null;
+        }
         if (sessionIntervalRef.current) {
             clearInterval(sessionIntervalRef.current);
             sessionIntervalRef.current = null;
@@ -365,6 +514,10 @@ export function useStreamingMode(
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
+        }
+        if (answerAbortControllerRef.current) {
+            answerAbortControllerRef.current.abort();
+            answerAbortControllerRef.current = null;
         }
 
         // Reset state (full reset including company info)
@@ -379,6 +532,12 @@ export function useStreamingMode(
             questionConfidence: 0,
             speechType: 'UNKNOWN',
             extractedCompanyInfo: [], // Clear company info on full reset
+            generatedAnswer: '',
+            answerTranslation: '',
+            analysis: '',
+            strategy: '',
+            isGeneratingAnswer: false,
+            isAnalyzing: false,
             isListening: false,
             isProcessingGhost: false,
             isProcessingLLM: false
@@ -388,6 +547,7 @@ export function useStreamingMode(
         originalTextRef.current = '';
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
+        lastAnswerTextRef.current = '';
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
