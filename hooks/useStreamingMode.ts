@@ -49,6 +49,9 @@ export interface StreamingState {
 }
 
 interface UseStreamingModeOptions {
+    // Feature toggles
+    llmTranslationEnabled?: boolean; // Enable/disable LLM translation (default: true)
+
     // Trigger thresholds
     llmTriggerWords?: number;      // Min words before LLM (default: 25)
     llmPauseMs?: number;           // Trigger on pause (default: 2000ms)
@@ -65,6 +68,7 @@ interface UseStreamingModeOptions {
 }
 
 const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
+    llmTranslationEnabled: true,
     llmTriggerWords: 25,
     llmPauseMs: 2000,
     ghostContextWords: 50,
@@ -185,6 +189,12 @@ export function useStreamingMode(
 
     // === LLM TRANSLATION ===
     const executeLLMTranslation = useCallback(async () => {
+        // Skip if LLM translation is disabled
+        if (!opts.llmTranslationEnabled) {
+            console.log('🚫 [LLM] Translation disabled - using Ghost only');
+            return;
+        }
+
         // Use refs to avoid stale closure issues
         const currentWordCount = wordCountRef.current;
         const currentOriginalText = originalTextRef.current;
