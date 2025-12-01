@@ -1470,13 +1470,27 @@ const App: React.FC = () => {
                     <TrashIcon className="w-5 h-5" />
                  </button>
              </div>
-             {/* Listening/Pause Indicator - moved to right side */}
+             {/* Listening/Pause Indicator */}
              <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
                 <div className={`w-2.5 h-2.5 rounded-full shadow-lg ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
                 <span className="text-xs font-mono font-bold tracking-wider text-gray-200">
                     {isUserSpeaking ? "YOU ARE SPEAKING" : appState === AppState.LISTENING ? (context.stereoMode ? "LISTENING (STEREO)" : t.listening) : appState === AppState.PROCESSING ? t.generating : t.paused}
                 </span>
             </div>
+            {/* Microphone Button - in header */}
+            <button
+                onClick={toggleListening}
+                disabled={!isModelReady}
+                title={!isModelReady ? "Waiting for translation model to load..." : (shouldBeListening.current ? t.paused : t.listening)}
+                className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all transform ${
+                    !isModelReady
+                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
+                        : shouldBeListening.current
+                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/50 hover:scale-105 ring-2 ring-red-500/30'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/50 hover:scale-105 ring-2 ring-emerald-500/30'
+                }`}>
+                {shouldBeListening.current ? <StopIcon className="w-6 h-6" /> : <MicIcon className="w-6 h-6" />}
+            </button>
         </div>
       </div>
 
@@ -1502,7 +1516,7 @@ const App: React.FC = () => {
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
-                 showOriginal={true}
+                 showOriginal={false}
                  showGhost={false}
                  preferLLM={true}
                  wordCount={streamingMode.state.wordCount}
@@ -1600,23 +1614,6 @@ const App: React.FC = () => {
          )}
       </div>
 
-      <div className="p-6 bg-gradient-to-t from-gray-950 via-gray-950 to-transparent">
-        <div className="flex justify-center">
-            <button
-                onClick={toggleListening}
-                disabled={!isModelReady}
-                title={!isModelReady ? "Waiting for translation model to load..." : (shouldBeListening.current ? t.paused : t.listening)}
-                className={`w-20 h-20 rounded-full flex items-center justify-center shadow-2xl transition-all transform ${
-                    !isModelReady
-                        ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
-                        : shouldBeListening.current
-                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-900/50 hover:scale-110 ring-4 ring-red-500/30'
-                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-900/50 hover:scale-110 ring-4 ring-emerald-500/30'
-                }`}>
-                {shouldBeListening.current ? <StopIcon className="w-10 h-10" /> : <MicIcon className="w-10 h-10" />}
-            </button>
-        </div>
-      </div>
     </div>
   );
 };
