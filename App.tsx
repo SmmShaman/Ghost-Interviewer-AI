@@ -83,8 +83,12 @@ const App: React.FC = () => {
   // Set to true to use the new streaming/subtitle-like UI
   const [useStreamingUI, setUseStreamingUI] = useState(true);
 
+  // LLM TRANSLATION TOGGLE: Enable/disable LLM translation (only Ghost/Chrome when disabled)
+  const [llmTranslationEnabled, setLlmTranslationEnabled] = useState(true);
+
   // STREAMING MODE HOOK: Manages accumulated text and translations
   const streamingMode = useStreamingMode(context, {
+    llmTranslationEnabled,
     llmTriggerWords: 25,
     llmPauseMs: 2000,
     ghostContextWords: 50,
@@ -1464,6 +1468,18 @@ const App: React.FC = () => {
             />
             <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
+            </button>
+            {/* LLM Translation Toggle */}
+            <button
+              onClick={() => setLlmTranslationEnabled(!llmTranslationEnabled)}
+              className={`px-3 py-1.5 text-xs font-black rounded-lg border transition-all shadow-lg shadow-black/20 ${
+                llmTranslationEnabled
+                  ? 'bg-purple-600 border-purple-500 text-white hover:bg-purple-500'
+                  : 'bg-gray-800 border-gray-600 text-gray-400 hover:bg-gray-700'
+              }`}
+              title={llmTranslationEnabled ? 'LLM переклад увімкнено (натисни щоб вимкнути)' : 'LLM переклад вимкнено (тільки Ghost/Chrome)'}
+            >
+              {llmTranslationEnabled ? 'LLM ✓' : 'LLM ✗'}
             </button>
         </div>
 
