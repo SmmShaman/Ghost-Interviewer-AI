@@ -187,7 +187,8 @@ export function useStreamingMode(
         try {
             // SIMPLE: Translate only new words (no context)
             // This gives CONSISTENT results - same input = same output
-            const words = await localTranslator.translatePhrase(newWords);
+            // Using translatePhraseChunked for built-in caching - repeated phrases return instantly
+            const words = await localTranslator.translatePhraseChunked(newWords);
             const translation = words.map(w => w.ghostTranslation).join(' ');
 
             // Remember what we translated to prevent duplicates
