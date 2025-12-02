@@ -77,17 +77,15 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // SLIDING WINDOW DISPLAY: Frozen zone + Active zone
-    const llmWords = accumulatedLLMTranslation ? accumulatedLLMTranslation.split(/\s+/) : [];
-    const frozenWords = frozenTranslation ? frozenTranslation.split(/\s+/) : [];
-    const activeLLMTranslation = llmWords.slice(frozenWords.length).join(' ');
-    const ghostWords = accumulatedGhostTranslation ? accumulatedGhostTranslation.split(/\s+/) : [];
-    const activeGhostTranslation = ghostWords.slice(frozenWords.length).join(' ');
-    const activeTranslation = activeLLMTranslation || activeGhostTranslation;
-    const displayTranslation = frozenTranslation
-        ? `${frozenTranslation} ${activeTranslation}`.trim()
-        : (accumulatedLLMTranslation || accumulatedGhostTranslation);
-    const translationType = accumulatedLLMTranslation ? 'llm' : 'ghost';
+    // SINGLE SOURCE OF TRUTH: Ghost translation only (no switching!)
+    // LLM is used for intent detection, analysis, strategy, NOT for display
+    // This eliminates race condition and "jumping" text
+
+    // Display ONLY Ghost translation - consistent, no flickering
+    const displayTranslation = accumulatedGhostTranslation;
+
+    // Always show as Ghost (since we only display Ghost now)
+    const translationType = 'ghost';
 
     // Format duration
     const formatDuration = (ms: number): string => {

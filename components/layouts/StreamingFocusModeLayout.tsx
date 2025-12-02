@@ -69,26 +69,15 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // SLIDING WINDOW DISPLAY: Frozen zone + Active zone
-    // Frozen zone: LLM-translated text that won't change
-    // Active zone: Latest text that may still be updated by Ghost/LLM
+    // SINGLE SOURCE OF TRUTH: Ghost translation only (no switching!)
+    // LLM is used for intent detection and answer generation, NOT for display
+    // This eliminates race condition and "jumping" text
 
-    // Get active part of LLM translation (words after frozen)
-    const llmWords = accumulatedLLMTranslation ? accumulatedLLMTranslation.split(/\s+/) : [];
-    const frozenWords = frozenTranslation ? frozenTranslation.split(/\s+/) : [];
-    const activeLLMTranslation = llmWords.slice(frozenWords.length).join(' ');
+    // Display ONLY Ghost translation - consistent, no flickering
+    const displayTranslation = accumulatedGhostTranslation;
 
-    // Get active part of Ghost translation
-    const ghostWords = accumulatedGhostTranslation ? accumulatedGhostTranslation.split(/\s+/) : [];
-    const activeGhostTranslation = ghostWords.slice(frozenWords.length).join(' ');
-
-    // Display: Frozen + (LLM active || Ghost active)
-    const activeTranslation = activeLLMTranslation || activeGhostTranslation;
-    const displayTranslation = frozenTranslation
-        ? `${frozenTranslation} ${activeTranslation}`.trim()
-        : (accumulatedLLMTranslation || accumulatedGhostTranslation);
-
-    const translationType = accumulatedLLMTranslation ? 'llm' : 'ghost';
+    // Always show as Ghost (since we only display Ghost now)
+    const translationType = 'ghost';
 
     // Format duration
     const formatDuration = (ms: number): string => {
