@@ -163,21 +163,18 @@ export function useStreamingMode(
     }, [state.isListening, state.sessionStartTime]);
 
     // === GHOST TRANSLATION ===
+    // STABLE APPROACH: Translate ONLY new words, append to existing translation
+    // This eliminates flickering caused by context-aware translation inconsistency
     const executeGhostTranslation = useCallback(async (newWords: string, fullText: string) => {
         setState(prev => ({ ...prev, isProcessingGhost: true }));
 
         try {
-            // Get context (last N words before new words)
-            const allWords = fullText.split(/\s+/);
-            const newWordCount = newWords.split(/\s+/).length;
-            const contextStartIdx = Math.max(0, allWords.length - newWordCount - opts.ghostContextWords);
-            const contextEndIdx = allWords.length - newWordCount;
-            const contextWords = allWords.slice(contextStartIdx, contextEndIdx);
-            const contextText = contextWords.join(' ');
+            // SIMPLE: Translate only new words (no context)
+            // This gives CONSISTENT results - same input = same output
+            const words = await localTranslator.translatePhrase(newWords);
+            const translation = words.map(w => w.ghostTranslation).join(' ');
 
-            // Translate with context
-            const translation = await localTranslator.translateWithContext(newWords, contextText);
-
+            // APPEND ONLY: Never modify existing translation
             setState(prev => ({
                 ...prev,
                 ghostTranslation: prev.ghostTranslation
@@ -581,7 +578,14 @@ export function useStreamingMode(
             originalTextRef.current.trim() &&
             lastAnswerTextRef.current !== originalTextRef.current) {
             console.log('🎯 [StopSession] Triggering final answer generation');
-            executeAnswerGeneration();
+            // Wrap in try-catch to prevent uncaught AbortError
+            try {
+                executeAnswerGeneration();
+            } catch (e: any) {
+                if (e.name !== 'AbortError') {
+                    console.error('Answer generation error:', e);
+                }
+            }
         }
 
         console.log('🛑 [StreamingMode] Session stopped');
