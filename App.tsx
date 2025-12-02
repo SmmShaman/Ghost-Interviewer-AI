@@ -1535,6 +1535,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 frozenTranslation={streamingMode.state.frozenTranslation}
+                 frozenWordCount={streamingMode.state.frozenWordCount}
                  interimText={streamingMode.state.interimText}
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
@@ -1569,6 +1571,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 frozenTranslation={streamingMode.state.frozenTranslation}
+                 frozenWordCount={streamingMode.state.frozenWordCount}
                  interimText={streamingMode.state.interimText}
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
@@ -1604,6 +1608,8 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 frozenTranslation={streamingMode.state.frozenTranslation}
+                 frozenWordCount={streamingMode.state.frozenWordCount}
                  interimText={streamingMode.state.interimText}
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}

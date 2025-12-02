@@ -21,6 +21,10 @@ export interface StreamingState {
     interimGhostTranslation: string; // Translation of interim text
     llmTranslation: string;
 
+    // FROZEN ZONE: LLM-translated text that won't change anymore
+    frozenTranslation: string;    // Finalized translation (LLM quality)
+    frozenWordCount: number;      // How many original words are in frozen zone
+
     // Statistics
     wordCount: number;
     sessionStartTime: number;
@@ -94,6 +98,8 @@ export function useStreamingMode(
         ghostTranslation: '',
         interimGhostTranslation: '',
         llmTranslation: '',
+        frozenTranslation: '',
+        frozenWordCount: 0,
         wordCount: 0,
         sessionStartTime: 0,
         sessionDuration: 0,
@@ -227,9 +233,31 @@ export function useStreamingMode(
             const isCompanyInfo = result.intent.speechType === 'INFO';
             const newCompanyInfo = isCompanyInfo ? result.translation : null;
 
+            // SLIDING WINDOW: Freeze old part of translation
+            // Keep last 50 words "active", freeze the rest
+            const ACTIVE_WINDOW_WORDS = 50;
+            const translationWords = result.translation.split(/\s+/);
+            const originalWords = currentOriginalText.split(/\s+/);
+
+            // Calculate freeze point: freeze everything except last ACTIVE_WINDOW_WORDS
+            const freezeWordCount = Math.max(0, originalWords.length - ACTIVE_WINDOW_WORDS);
+            const freezeTranslationWordCount = Math.max(0, translationWords.length - ACTIVE_WINDOW_WORDS);
+
+            const newFrozenTranslation = translationWords.slice(0, freezeTranslationWordCount).join(' ');
+            const activeTranslation = translationWords.slice(freezeTranslationWordCount).join(' ');
+
+            console.log(`🧊 [LLM] Freezing ${freezeTranslationWordCount} words, active: ${translationWords.length - freezeTranslationWordCount} words`);
+
             setState(prev => ({
                 ...prev,
                 llmTranslation: result.translation,
+                // Only update frozen if we have more frozen content than before
+                frozenTranslation: newFrozenTranslation.length > prev.frozenTranslation.length
+                    ? newFrozenTranslation
+                    : prev.frozenTranslation,
+                frozenWordCount: freezeWordCount > prev.frozenWordCount
+                    ? freezeWordCount
+                    : prev.frozenWordCount,
                 containsQuestion: result.intent.containsQuestion,
                 questionConfidence: result.intent.questionConfidence,
                 speechType: result.intent.speechType,
@@ -468,6 +496,8 @@ export function useStreamingMode(
             ghostTranslation: '',
             interimGhostTranslation: '',
             llmTranslation: '',
+            frozenTranslation: '',
+            frozenWordCount: 0,
             wordCount: 0,
             sessionStartTime: Date.now(),
             sessionDuration: 0,
@@ -608,6 +638,8 @@ export function useStreamingMode(
             ghostTranslation: '',
             interimGhostTranslation: '',
             llmTranslation: '',
+            frozenTranslation: '',
+            frozenWordCount: 0,
             wordCount: 0,
             sessionStartTime: 0,
             sessionDuration: 0,
