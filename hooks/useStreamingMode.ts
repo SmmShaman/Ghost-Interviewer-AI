@@ -162,10 +162,26 @@ export function useStreamingMode(
         };
     }, [state.isListening, state.sessionStartTime]);
 
+    // Track last translated text to prevent duplicates
+    const lastTranslatedTextRef = useRef<string>('');
+
     // === GHOST TRANSLATION ===
     // STABLE APPROACH: Translate ONLY new words, append to existing translation
     // This eliminates flickering caused by context-aware translation inconsistency
     const executeGhostTranslation = useCallback(async (newWords: string, fullText: string) => {
+        // DUPLICATE CHECK: Skip if we already translated this text
+        if (lastTranslatedTextRef.current === newWords) {
+            console.log(`⚠️ [Ghost] Skipping duplicate translation: "${newWords.substring(0, 30)}..."`);
+            return;
+        }
+
+        // Also check if this text was already translated (contained in previous)
+        if (lastTranslatedTextRef.current && newWords.length > 10 &&
+            lastTranslatedTextRef.current.includes(newWords)) {
+            console.log(`⚠️ [Ghost] Skipping already-translated text: "${newWords.substring(0, 30)}..."`);
+            return;
+        }
+
         setState(prev => ({ ...prev, isProcessingGhost: true }));
 
         try {
@@ -174,14 +190,26 @@ export function useStreamingMode(
             const words = await localTranslator.translatePhrase(newWords);
             const translation = words.map(w => w.ghostTranslation).join(' ');
 
-            // APPEND ONLY: Never modify existing translation
-            setState(prev => ({
-                ...prev,
-                ghostTranslation: prev.ghostTranslation
-                    ? `${prev.ghostTranslation} ${translation}`
-                    : translation,
-                isProcessingGhost: false
-            }));
+            // Remember what we translated to prevent duplicates
+            lastTranslatedTextRef.current = newWords;
+
+            // DUPLICATE CHECK for translation result
+            setState(prev => {
+                // Check if this translation is already at the end
+                if (prev.ghostTranslation && prev.ghostTranslation.endsWith(translation)) {
+                    console.log(`⚠️ [Ghost] Translation already appended, skipping`);
+                    return { ...prev, isProcessingGhost: false };
+                }
+
+                // APPEND ONLY: Never modify existing translation
+                return {
+                    ...prev,
+                    ghostTranslation: prev.ghostTranslation
+                        ? `${prev.ghostTranslation} ${translation}`
+                        : translation,
+                    isProcessingGhost: false
+                };
+            });
 
             opts.onGhostUpdate(translation);
         } catch (e) {
@@ -407,11 +435,27 @@ export function useStreamingMode(
 
     /**
      * Add new words to the accumulator
+     * Includes duplicate detection to prevent text repetition after session restart
      */
     const addWords = useCallback((newWords: string) => {
         if (!newWords.trim()) return;
 
         const trimmedNew = newWords.trim();
+
+        // DUPLICATE DETECTION: Check if these words are already at the end of originalText
+        // This prevents re-adding the same text after session restart
+        const currentOriginal = originalTextRef.current;
+        if (currentOriginal && currentOriginal.endsWith(trimmedNew)) {
+            console.log(`⚠️ [addWords] Skipping duplicate: "${trimmedNew.substring(0, 30)}..."`);
+            return;
+        }
+
+        // Also check if the new text is a substring of what we already have
+        // This catches cases where Speech API sends overlapping results
+        if (currentOriginal && currentOriginal.includes(trimmedNew) && trimmedNew.length > 10) {
+            console.log(`⚠️ [addWords] Skipping already-included text: "${trimmedNew.substring(0, 30)}..."`);
+            return;
+        }
 
         // Update state AND keep refs in sync
         setState(prev => {
@@ -667,6 +711,7 @@ export function useStreamingMode(
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
         lastAnswerTextRef.current = '';
+        lastTranslatedTextRef.current = '';  // Reset duplicate tracking
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
