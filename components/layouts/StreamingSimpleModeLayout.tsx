@@ -27,6 +27,10 @@ interface StreamingSimpleModeLayoutProps {
     accumulatedGhostTranslation: string;  // Ghost переклад (миттєвий)
     accumulatedLLMTranslation: string;    // LLM переклад (якісний)
 
+    // FROZEN ZONE: Already translated by LLM, won't change
+    frozenTranslation?: string;
+    frozenWordCount?: number;
+
     // Interim (real-time, not finalized yet)
     interimText?: string;             // Interim original text
     interimGhostTranslation?: string; // Interim ghost translation
@@ -49,6 +53,8 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
     accumulatedLLMTranslation,
+    frozenTranslation = '',
+    frozenWordCount = 0,
     interimText = '',
     interimGhostTranslation = '',
     isListening,
@@ -59,11 +65,22 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // Determine which translation to show
-    // Priority: LLM (if available and preferLLM) > Ghost
-    const displayTranslation = preferLLM && accumulatedLLMTranslation
-        ? accumulatedLLMTranslation
-        : accumulatedGhostTranslation;
+    // SLIDING WINDOW DISPLAY: Frozen zone + Active zone
+    const llmWords = accumulatedLLMTranslation ? accumulatedLLMTranslation.split(/\s+/) : [];
+    const frozenWords = frozenTranslation ? frozenTranslation.split(/\s+/) : [];
+    const activeLLMTranslation = llmWords.slice(frozenWords.length).join(' ');
+    const ghostWords = accumulatedGhostTranslation ? accumulatedGhostTranslation.split(/\s+/) : [];
+    const activeGhostTranslation = ghostWords.slice(frozenWords.length).join(' ');
+
+    // Determine which translation to show for active zone
+    const activeTranslation = (preferLLM && activeLLMTranslation)
+        ? activeLLMTranslation
+        : activeGhostTranslation;
+
+    // Combine frozen + active
+    const displayTranslation = frozenTranslation
+        ? `${frozenTranslation} ${activeTranslation}`.trim()
+        : (preferLLM && accumulatedLLMTranslation ? accumulatedLLMTranslation : accumulatedGhostTranslation);
 
     const translationType = preferLLM && accumulatedLLMTranslation ? 'llm' : 'ghost';
 

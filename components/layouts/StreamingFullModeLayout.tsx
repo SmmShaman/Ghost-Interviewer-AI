@@ -23,6 +23,10 @@ interface StreamingFullModeLayoutProps {
     accumulatedGhostTranslation: string;
     accumulatedLLMTranslation: string;
 
+    // FROZEN ZONE: Already translated by LLM, won't change
+    frozenTranslation?: string;
+    frozenWordCount?: number;
+
     // Interim (real-time, not finalized yet)
     interimText?: string;
     interimGhostTranslation?: string;
@@ -55,6 +59,8 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
     accumulatedLLMTranslation,
+    frozenTranslation = '',
+    frozenWordCount = 0,
     interimText = '',
     interimGhostTranslation = '',
     isListening,
@@ -71,8 +77,16 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // Determine which translation to show (prefer LLM if available)
-    const displayTranslation = accumulatedLLMTranslation || accumulatedGhostTranslation;
+    // SLIDING WINDOW DISPLAY: Frozen zone + Active zone
+    const llmWords = accumulatedLLMTranslation ? accumulatedLLMTranslation.split(/\s+/) : [];
+    const frozenWords = frozenTranslation ? frozenTranslation.split(/\s+/) : [];
+    const activeLLMTranslation = llmWords.slice(frozenWords.length).join(' ');
+    const ghostWords = accumulatedGhostTranslation ? accumulatedGhostTranslation.split(/\s+/) : [];
+    const activeGhostTranslation = ghostWords.slice(frozenWords.length).join(' ');
+    const activeTranslation = activeLLMTranslation || activeGhostTranslation;
+    const displayTranslation = frozenTranslation
+        ? `${frozenTranslation} ${activeTranslation}`.trim()
+        : (accumulatedLLMTranslation || accumulatedGhostTranslation);
     const translationType = accumulatedLLMTranslation ? 'llm' : 'ghost';
 
     // Format duration

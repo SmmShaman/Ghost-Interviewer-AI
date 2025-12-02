@@ -23,6 +23,10 @@ interface StreamingFocusModeLayoutProps {
     accumulatedGhostTranslation: string;
     accumulatedLLMTranslation: string;
 
+    // FROZEN ZONE: Already translated by LLM, won't change
+    frozenTranslation?: string;
+    frozenWordCount?: number;
+
     // Interim (real-time, not finalized yet)
     interimText?: string;
     interimGhostTranslation?: string;
@@ -50,6 +54,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
     accumulatedLLMTranslation,
+    frozenTranslation = '',
+    frozenWordCount = 0,
     interimText = '',
     interimGhostTranslation = '',
     isListening,
@@ -63,8 +69,25 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // Determine which translation to show (prefer LLM if available)
-    const displayTranslation = accumulatedLLMTranslation || accumulatedGhostTranslation;
+    // SLIDING WINDOW DISPLAY: Frozen zone + Active zone
+    // Frozen zone: LLM-translated text that won't change
+    // Active zone: Latest text that may still be updated by Ghost/LLM
+
+    // Get active part of LLM translation (words after frozen)
+    const llmWords = accumulatedLLMTranslation ? accumulatedLLMTranslation.split(/\s+/) : [];
+    const frozenWords = frozenTranslation ? frozenTranslation.split(/\s+/) : [];
+    const activeLLMTranslation = llmWords.slice(frozenWords.length).join(' ');
+
+    // Get active part of Ghost translation
+    const ghostWords = accumulatedGhostTranslation ? accumulatedGhostTranslation.split(/\s+/) : [];
+    const activeGhostTranslation = ghostWords.slice(frozenWords.length).join(' ');
+
+    // Display: Frozen + (LLM active || Ghost active)
+    const activeTranslation = activeLLMTranslation || activeGhostTranslation;
+    const displayTranslation = frozenTranslation
+        ? `${frozenTranslation} ${activeTranslation}`.trim()
+        : (accumulatedLLMTranslation || accumulatedGhostTranslation);
+
     const translationType = accumulatedLLMTranslation ? 'llm' : 'ghost';
 
     // Format duration
