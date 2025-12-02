@@ -122,6 +122,8 @@ const App: React.FC = () => {
   const lastFullTextRef = useRef<string>(""); // Last full text from API for delta calculation
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCommittingRef = useRef<boolean>(false); // Mutex for commit operation
+  const forcedFinalizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Force-finalize interim every 1.5s
+  const lastInterimTextRef = useRef<string>(""); // Track interim for forced finalization
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
@@ -906,6 +908,12 @@ const App: React.FC = () => {
                     streamingModeRef.current?.addWords(newFinalWords.join(' '));
                     committedWordCountRef.current = finalWords.length;
                     console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING: Added ${newFinalWords.length} words`);
+
+                    // Clear forced finalization timer - we got real finals
+                    if (forcedFinalizationTimerRef.current) {
+                        clearTimeout(forcedFinalizationTimerRef.current);
+                        forcedFinalizationTimerRef.current = null;
+                    }
                 }
             }
 
@@ -915,6 +923,33 @@ const App: React.FC = () => {
 
             // Update legacy interim display (for compatibility)
             setInterimTranscript(currentInterim);
+
+            // FORCED FINALIZATION: If interim sits too long without finals, force-commit it
+            // This prevents losing words during continuous speech without pauses
+            if (currentInterim.trim()) {
+                lastInterimTextRef.current = currentInterim;
+
+                // Reset/start forced finalization timer (1.5 seconds)
+                if (forcedFinalizationTimerRef.current) {
+                    clearTimeout(forcedFinalizationTimerRef.current);
+                }
+
+                forcedFinalizationTimerRef.current = setTimeout(() => {
+                    const interimToFinalize = lastInterimTextRef.current;
+                    if (interimToFinalize.trim() && shouldBeListening.current) {
+                        const interimWords = interimToFinalize.trim().split(/\s+/);
+                        // Force-finalize all interim words
+                        console.log(`⏰ [FORCED] Finalizing ${interimWords.length} interim words after 1.5s timeout`);
+                        streamingModeRef.current?.addWords(interimToFinalize.trim());
+                        committedWordCountRef.current += interimWords.length;
+                        lastInterimTextRef.current = '';
+                        streamingModeRef.current?.setInterimText(''); // Clear interim display
+                        setInterimTranscript('');
+                    }
+                    forcedFinalizationTimerRef.current = null;
+                }, 1500);
+            }
+
             return; // Skip block-based logic
         }
 
@@ -1156,7 +1191,12 @@ const App: React.FC = () => {
       // Reset delta tracking refs
       committedWordCountRef.current = 0;
       lastFullTextRef.current = "";
+      lastInterimTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (forcedFinalizationTimerRef.current) {
+          clearTimeout(forcedFinalizationTimerRef.current);
+          forcedFinalizationTimerRef.current = null;
+      }
 
       // STREAMING MODE: Stop session and finalize translation (all modes)
       if (useStreamingUI) {

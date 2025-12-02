@@ -165,6 +165,9 @@ export function useStreamingMode(
     // Track last translated text to prevent duplicates
     const lastTranslatedTextRef = useRef<string>('');
 
+    // ACCUMULATOR: Collect words during debounce period to prevent losing rapid finals
+    const pendingWordsRef = useRef<string[]>([]);
+
     // === GHOST TRANSLATION ===
     // STABLE APPROACH: Translate ONLY new words, append to existing translation
     // This eliminates flickering caused by context-aware translation inconsistency
@@ -476,14 +479,23 @@ export function useStreamingMode(
             };
         });
 
+        // ACCUMULATE words for debounce (prevents losing rapid finals)
+        pendingWordsRef.current.push(trimmedNew);
+
         // Debounce ghost translation (100ms)
         if (ghostDebounceTimerRef.current) {
             clearTimeout(ghostDebounceTimerRef.current);
         }
 
-        // Use ref to get current original text (avoids stale closure)
+        // Translate ALL accumulated words when debounce fires
         ghostDebounceTimerRef.current = setTimeout(() => {
-            executeGhostTranslation(trimmedNew, originalTextRef.current);
+            const allPendingWords = pendingWordsRef.current.join(' ');
+            pendingWordsRef.current = []; // Clear accumulator
+
+            if (allPendingWords.trim()) {
+                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words`);
+                executeGhostTranslation(allPendingWords, originalTextRef.current);
+            }
         }, 100);
 
         // Schedule LLM translation
@@ -563,6 +575,7 @@ export function useStreamingMode(
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
         lastAnswerTextRef.current = ''; // Reset answer text tracker
+        pendingWordsRef.current = []; // Clear pending words accumulator
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -713,6 +726,7 @@ export function useStreamingMode(
         wordCountRef.current = 0;
         lastAnswerTextRef.current = '';
         lastTranslatedTextRef.current = '';  // Reset duplicate tracking
+        pendingWordsRef.current = []; // Clear pending words accumulator
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
