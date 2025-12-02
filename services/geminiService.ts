@@ -342,6 +342,10 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
     const decoder = new TextDecoder("utf-8");
     let fullText = "";
 
+    // BATCHING: Reduce UI updates from 100+/sec to ~10/sec
+    let lastUpdate = 0;
+    const UPDATE_INTERVAL = 100; // ms
+
     try {
         while (true) {
             // Check if aborted before reading
@@ -376,9 +380,14 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
                         const content = data.choices?.[0]?.delta?.content || "";
                         if (content) {
                             fullText += content;
-                            parseAndEmit(fullText, onUpdate);
-                            // Also pass raw full text for intent parsing
-                            onUpdate({ _rawChunk: content, _fullRawText: fullText });
+
+                            // BATCHING: Only update UI every 100ms for smooth display
+                            const now = Date.now();
+                            if (now - lastUpdate >= UPDATE_INTERVAL) {
+                                parseAndEmit(fullText, onUpdate);
+                                onUpdate({ _rawChunk: content, _fullRawText: fullText });
+                                lastUpdate = now;
+                            }
                         }
                     } catch (e) {
                         // ignore parse errors for partial chunks
@@ -386,6 +395,10 @@ async function processStream(response: Response, onUpdate: (data: any) => void, 
                 }
             }
         }
+
+        // FINAL UPDATE: Ensure all content is emitted
+        parseAndEmit(fullText, onUpdate);
+        onUpdate({ _rawChunk: '', _fullRawText: fullText });
     } finally {
         // Ensure reader is released safely
         try {
