@@ -249,7 +249,8 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                 {(translationText || interimTranslation) ? (
                     <div className="space-y-4">
                         {/* Translation Text - MAIN FOCUS (Direct DOM updates) */}
-                        <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`}>
+                        {/* Using white-space: pre-line to render \n as line breaks */}
+                        <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`} style={{ whiteSpace: 'pre-line' }}>
                             {/* Finalized text - solid color (ref for direct DOM) */}
                             <span ref={translationRef} className={colors.text}></span>
                             {/* Interim text - grey, italic with gradient fade (ref for direct DOM) */}
@@ -285,7 +286,7 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                                 <div className={`text-[10px] ${colors.originalLabel} uppercase tracking-wider mb-2`}>
                                     Оригінал
                                 </div>
-                                <div className={`text-sm leading-relaxed italic`}>
+                                <div className={`text-sm leading-relaxed italic`} style={{ whiteSpace: 'pre-line' }}>
                                     {/* Finalized original - slightly visible (ref for direct DOM) */}
                                     <span ref={originalRef} className={colors.originalText}></span>
                                     {/* Interim original - faded grey (ref for direct DOM) */}

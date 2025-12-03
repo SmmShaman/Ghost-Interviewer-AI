@@ -1693,7 +1693,7 @@ const App: React.FC = () => {
                               {context.targetLanguage === 'Norwegian' ? 'NO' : context.targetLanguage.substring(0, 2).toUpperCase()}
                           </span>
                       </div>
-                      <div className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-24 overflow-y-auto">
+                      <div className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-24 overflow-y-auto" style={{ whiteSpace: 'pre-line' }}>
                           <span>{streamingMode.state.originalText}</span>
                           {streamingMode.state.interimText && (
                               <span className="text-gray-500 italic ml-1">{streamingMode.state.interimText}</span>
