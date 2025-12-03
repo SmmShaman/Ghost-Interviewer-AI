@@ -102,6 +102,7 @@ const App: React.FC = () => {
   // Refs
   const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const bottomPanelRef = useRef<HTMLDivElement>(null); // For auto-scroll in bottom original text panel
   const shouldBeListening = useRef(false); 
   const isUserSpeakingRef = useRef(false); // Ref for instant access in callback
   const translationTimeoutRef = useRef<any>(null); // Ref for debounce
@@ -296,6 +297,13 @@ const App: React.FC = () => {
         }));
     }
   }, [uiLang]);
+
+  // Auto-scroll bottom panel (original text) to show latest content
+  useEffect(() => {
+    if (bottomPanelRef.current) {
+      bottomPanelRef.current.scrollTop = bottomPanelRef.current.scrollHeight;
+    }
+  }, [streamingMode.state.originalText, streamingMode.state.interimText]);
 
   // ----------------------------------------------------------------------
   // AI QUEUE PROCESSOR (SEQUENTIAL)
@@ -1693,7 +1701,11 @@ const App: React.FC = () => {
                               {context.targetLanguage === 'Norwegian' ? 'NO' : context.targetLanguage.substring(0, 2).toUpperCase()}
                           </span>
                       </div>
-                      <div className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-36 overflow-y-auto" style={{ whiteSpace: 'pre-line' }}>
+                      <div
+                          ref={bottomPanelRef}
+                          className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-36 overflow-y-auto"
+                          style={{ whiteSpace: 'pre-line' }}
+                      >
                           <span>{streamingMode.state.originalText}</span>
                           {streamingMode.state.interimText && (
                               <span className="text-gray-500 italic ml-1">{streamingMode.state.interimText}</span>
