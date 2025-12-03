@@ -165,20 +165,48 @@ export function useStreamingMode(
     // Track the first word of current sentence for question detection
     const currentSentenceStartRef = useRef<string>('');
     const currentSentenceWordCountRef = useRef<number>(0);
+    // Track current sentence text for end-of-sentence ? detection
+    const currentSentenceTextRef = useRef<string>('');
+    // Track LLM's question detection (updated asynchronously)
+    const llmQuestionDetectedRef = useRef<boolean>(false);
 
     /**
-     * Determine punctuation mark based on sentence start word
+     * Determine punctuation mark based on multiple detection methods:
+     * 1. Check if original text ends with '?' (speech recognition captured it)
+     * 2. Check if LLM detected a question (contextual analysis)
+     * 3. Check if sentence starts with question word (heuristic)
+     *
      * Returns '?' for questions, '.' for statements
      */
-    const getPunctuationMark = useCallback((sentenceStart: string, wordCount: number): string => {
+    const getPunctuationMark = useCallback((sentenceStart: string, wordCount: number, sentenceText: string = ''): string => {
         // Not enough words for punctuation
         if (wordCount < MIN_WORDS_FOR_PUNCTUATION) return '';
 
-        // Check if starts with question word
-        const firstWord = sentenceStart.toLowerCase().trim();
-        const isQuestion = QUESTION_WORDS.some(qw => firstWord === qw || firstWord.startsWith(qw + ' '));
+        // METHOD 1: Check if original text already ends with '?'
+        // Speech recognition might have captured the question intonation
+        const trimmedSentence = sentenceText.trim();
+        if (trimmedSentence.endsWith('?')) {
+            console.log(`❓ [Punctuation] Original text ends with '?' → adding ?`);
+            return '?';
+        }
 
-        return isQuestion ? '?' : '.';
+        // METHOD 2: Check LLM intent detection
+        // LLM analyzed the context and determined it's a question
+        if (llmQuestionDetectedRef.current) {
+            console.log(`❓ [Punctuation] LLM detected question → adding ?`);
+            return '?';
+        }
+
+        // METHOD 3: Heuristic - check if starts with question word
+        const firstWord = sentenceStart.toLowerCase().trim();
+        const isQuestionWord = QUESTION_WORDS.some(qw => firstWord === qw || firstWord.startsWith(qw + ' '));
+        if (isQuestionWord) {
+            console.log(`❓ [Punctuation] Starts with question word "${firstWord}" → adding ?`);
+            return '?';
+        }
+
+        // Default: statement with period
+        return '.';
     }, []);
 
     // Keep context ref updated
@@ -334,6 +362,12 @@ export function useStreamingMode(
             const activeTranslation = translationWords.slice(freezeTranslationWordCount).join(' ');
 
             console.log(`🧊 [LLM] Freezing ${freezeTranslationWordCount} words, active: ${translationWords.length - freezeTranslationWordCount} words`);
+
+            // UPDATE LLM QUESTION REF: Store question detection for punctuation
+            if (result.intent.containsQuestion && result.intent.questionConfidence >= 70) {
+                llmQuestionDetectedRef.current = true;
+                console.log(`🧠 [LLM] Question detected with ${result.intent.questionConfidence}% confidence → stored for punctuation`);
+            }
 
             setState(prev => ({
                 ...prev,
@@ -531,27 +565,32 @@ export function useStreamingMode(
         if (shouldAddParagraphBreak) {
             punctuationMark = getPunctuationMark(
                 currentSentenceStartRef.current,
-                currentSentenceWordCountRef.current
+                currentSentenceWordCountRef.current,
+                currentSentenceTextRef.current  // Pass full sentence for ? detection
             );
             console.log(`📝 [addWords] Adding paragraph break (${timeSinceLastWord}ms pause) with "${punctuationMark || 'no'}" punctuation`);
             // Set flags for Ghost translation to also add paragraph break and punctuation
             pendingParagraphBreakRef.current = true;
             pendingPunctuationRef.current = punctuationMark;
+            // Reset LLM question detection for new sentence
+            llmQuestionDetectedRef.current = false;
         }
 
         // METRICS: Record words received
         const newWordCount = trimmedNew.split(/\s+/).length;
         metricsCollector.recordWordsReceived(newWordCount);
 
-        // SENTENCE TRACKING: Track first word of new sentence
+        // SENTENCE TRACKING: Track first word and full text of current sentence
         if (!currentSentenceStartRef.current || shouldAddParagraphBreak) {
-            // Starting a new sentence - capture the first word(s)
+            // Starting a new sentence - capture the first word(s) and full text
             currentSentenceStartRef.current = trimmedNew.split(/\s+/)[0] || '';
             currentSentenceWordCountRef.current = newWordCount;
+            currentSentenceTextRef.current = trimmedNew;
             console.log(`📝 [Sentence] New sentence starting with: "${currentSentenceStartRef.current}"`);
         } else {
-            // Continuing current sentence - increment word count
+            // Continuing current sentence - increment word count and append text
             currentSentenceWordCountRef.current += newWordCount;
+            currentSentenceTextRef.current = currentSentenceTextRef.current + ' ' + trimmedNew;
         }
 
         // Update state AND keep refs in sync
@@ -752,6 +791,8 @@ export function useStreamingMode(
         pendingPunctuationRef.current = ''; // Clear pending punctuation
         currentSentenceStartRef.current = ''; // Reset sentence tracking
         currentSentenceWordCountRef.current = 0;
+        currentSentenceTextRef.current = ''; // Reset sentence text
+        llmQuestionDetectedRef.current = false; // Reset LLM question detection
 
         // METRICS: Start metrics session
         metricsCollector.startSession();
@@ -797,7 +838,8 @@ export function useStreamingMode(
         // FINAL PUNCTUATION: Add punctuation at end of session if needed
         const finalPunctuation = getPunctuationMark(
             currentSentenceStartRef.current,
-            currentSentenceWordCountRef.current
+            currentSentenceWordCountRef.current,
+            currentSentenceTextRef.current  // Pass full sentence for ? detection
         );
 
         // Clear interim text on stop and add final punctuation
@@ -944,6 +986,8 @@ export function useStreamingMode(
         pendingPunctuationRef.current = ''; // Clear pending punctuation
         currentSentenceStartRef.current = ''; // Reset sentence tracking
         currentSentenceWordCountRef.current = 0;
+        currentSentenceTextRef.current = ''; // Reset sentence text
+        llmQuestionDetectedRef.current = false; // Reset LLM question detection
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
