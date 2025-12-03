@@ -1,0 +1,451 @@
+{
+  "meta": {
+    "version": "1.0",
+    "description": "IT термінологія для перекладу NO→UK в контексті технічних інтерв'ю",
+    "categories": ["programming", "devops", "cloud", "renewable_energy", "agile", "database", "security"]
+  },
+  "terms": [
+    {
+      "term": "backend",
+      "uk": "бекенд",
+      "category": "programming",
+      "inflections": {
+        "nominative": "бекенд",
+        "genitive": "бекенду",
+        "dative": "бекенду",
+        "accusative": "бекенд",
+        "instrumental": "бекендом",
+        "locative": "бекенді"
+      }
+    },
+    {
+      "term": "frontend",
+      "uk": "фронтенд",
+      "category": "programming",
+      "inflections": {
+        "nominative": "фронтенд",
+        "genitive": "фронтенду",
+        "dative": "фронтенду",
+        "accusative": "фронтенд",
+        "instrumental": "фронтендом",
+        "locative": "фронтенді"
+      }
+    },
+    {
+      "term": "fullstack",
+      "uk": "фулстек",
+      "category": "programming"
+    },
+    {
+      "term": "deployment",
+      "uk": "деплоймент",
+      "category": "devops",
+      "inflections": {
+        "nominative": "деплоймент",
+        "genitive": "деплойменту",
+        "dative": "деплойменту",
+        "accusative": "деплоймент",
+        "instrumental": "деплойментом",
+        "locative": "деплойменті"
+      }
+    },
+    {
+      "term": "pull request",
+      "uk": "пул-реквест",
+      "category": "programming"
+    },
+    {
+      "term": "code review",
+      "uk": "код-рев'ю",
+      "category": "programming"
+    },
+    {
+      "term": "merge",
+      "uk": "мердж",
+      "category": "programming"
+    },
+    {
+      "term": "commit",
+      "uk": "коміт",
+      "category": "programming"
+    },
+    {
+      "term": "branch",
+      "uk": "бранч",
+      "category": "programming"
+    },
+    {
+      "term": "repository",
+      "uk": "репозиторій",
+      "category": "programming"
+    },
+    {
+      "term": "framework",
+      "uk": "фреймворк",
+      "category": "programming",
+      "inflections": {
+        "nominative": "фреймворк",
+        "genitive": "фреймворку",
+        "dative": "фреймворку",
+        "accusative": "фреймворк",
+        "instrumental": "фреймворком",
+        "locative": "фреймворку"
+      }
+    },
+    {
+      "term": "library",
+      "uk": "бібліотека",
+      "category": "programming"
+    },
+    {
+      "term": "API",
+      "uk": "API",
+      "category": "programming"
+    },
+    {
+      "term": "REST",
+      "uk": "REST",
+      "category": "programming"
+    },
+    {
+      "term": "GraphQL",
+      "uk": "GraphQL",
+      "category": "programming"
+    },
+    {
+      "term": "microservices",
+      "uk": "мікросервіси",
+      "category": "architecture"
+    },
+    {
+      "term": "monolith",
+      "uk": "моноліт",
+      "category": "architecture"
+    },
+    {
+      "term": "container",
+      "uk": "контейнер",
+      "category": "devops"
+    },
+    {
+      "term": "Docker",
+      "uk": "Docker",
+      "category": "devops"
+    },
+    {
+      "term": "Kubernetes",
+      "uk": "Kubernetes",
+      "category": "devops"
+    },
+    {
+      "term": "CI/CD",
+      "uk": "CI/CD",
+      "category": "devops"
+    },
+    {
+      "term": "pipeline",
+      "uk": "пайплайн",
+      "category": "devops",
+      "inflections": {
+        "nominative": "пайплайн",
+        "genitive": "пайплайну",
+        "dative": "пайплайну",
+        "accusative": "пайплайн",
+        "instrumental": "пайплайном",
+        "locative": "пайплайні"
+      }
+    },
+    {
+      "term": "cloud",
+      "uk": "хмара",
+      "category": "cloud"
+    },
+    {
+      "term": "AWS",
+      "uk": "AWS",
+      "category": "cloud"
+    },
+    {
+      "term": "Azure",
+      "uk": "Azure",
+      "category": "cloud"
+    },
+    {
+      "term": "GCP",
+      "uk": "GCP",
+      "category": "cloud"
+    },
+    {
+      "term": "serverless",
+      "uk": "серверлес",
+      "category": "cloud"
+    },
+    {
+      "term": "lambda",
+      "uk": "лямбда",
+      "category": "cloud"
+    },
+    {
+      "term": "database",
+      "uk": "база даних",
+      "category": "database"
+    },
+    {
+      "term": "SQL",
+      "uk": "SQL",
+      "category": "database"
+    },
+    {
+      "term": "NoSQL",
+      "uk": "NoSQL",
+      "category": "database"
+    },
+    {
+      "term": "query",
+      "uk": "запит",
+      "category": "database"
+    },
+    {
+      "term": "index",
+      "uk": "індекс",
+      "category": "database"
+    },
+    {
+      "term": "cache",
+      "uk": "кеш",
+      "category": "programming"
+    },
+    {
+      "term": "Redis",
+      "uk": "Redis",
+      "category": "database"
+    },
+    {
+      "term": "testing",
+      "uk": "тестування",
+      "category": "programming"
+    },
+    {
+      "term": "unit test",
+      "uk": "юніт-тест",
+      "category": "programming"
+    },
+    {
+      "term": "integration test",
+      "uk": "інтеграційний тест",
+      "category": "programming"
+    },
+    {
+      "term": "TDD",
+      "uk": "TDD",
+      "category": "programming"
+    },
+    {
+      "term": "debugging",
+      "uk": "дебаггінг",
+      "category": "programming"
+    },
+    {
+      "term": "refactoring",
+      "uk": "рефакторинг",
+      "category": "programming"
+    },
+    {
+      "term": "sprint",
+      "uk": "спринт",
+      "category": "agile",
+      "inflections": {
+        "nominative": "спринт",
+        "genitive": "спринту",
+        "dative": "спринту",
+        "accusative": "спринт",
+        "instrumental": "спринтом",
+        "locative": "спринті"
+      }
+    },
+    {
+      "term": "scrum",
+      "uk": "скрам",
+      "category": "agile"
+    },
+    {
+      "term": "kanban",
+      "uk": "канбан",
+      "category": "agile"
+    },
+    {
+      "term": "standup",
+      "uk": "стендап",
+      "category": "agile"
+    },
+    {
+      "term": "retrospective",
+      "uk": "ретроспектива",
+      "category": "agile"
+    },
+    {
+      "term": "backlog",
+      "uk": "беклог",
+      "category": "agile"
+    },
+    {
+      "term": "ticket",
+      "uk": "тікет",
+      "category": "agile"
+    },
+    {
+      "term": "Jira",
+      "uk": "Jira",
+      "category": "agile"
+    },
+    {
+      "term": "authentication",
+      "uk": "автентифікація",
+      "category": "security"
+    },
+    {
+      "term": "authorization",
+      "uk": "авторизація",
+      "category": "security"
+    },
+    {
+      "term": "OAuth",
+      "uk": "OAuth",
+      "category": "security"
+    },
+    {
+      "term": "JWT",
+      "uk": "JWT",
+      "category": "security"
+    },
+    {
+      "term": "encryption",
+      "uk": "шифрування",
+      "category": "security"
+    },
+    {
+      "term": "solar",
+      "uk": "сонячний",
+      "category": "renewable_energy"
+    },
+    {
+      "term": "wind power",
+      "uk": "вітрова енергія",
+      "category": "renewable_energy"
+    },
+    {
+      "term": "renewable energy",
+      "uk": "відновлювана енергія",
+      "category": "renewable_energy"
+    },
+    {
+      "term": "sustainability",
+      "uk": "сталий розвиток",
+      "category": "renewable_energy"
+    },
+    {
+      "term": "green tech",
+      "uk": "зелені технології",
+      "category": "renewable_energy"
+    },
+    {
+      "term": "TypeScript",
+      "uk": "TypeScript",
+      "category": "programming"
+    },
+    {
+      "term": "JavaScript",
+      "uk": "JavaScript",
+      "category": "programming"
+    },
+    {
+      "term": "Python",
+      "uk": "Python",
+      "category": "programming"
+    },
+    {
+      "term": "React",
+      "uk": "React",
+      "category": "programming"
+    },
+    {
+      "term": "Node.js",
+      "uk": "Node.js",
+      "category": "programming"
+    },
+    {
+      "term": "async",
+      "uk": "асинхронний",
+      "category": "programming"
+    },
+    {
+      "term": "callback",
+      "uk": "колбек",
+      "category": "programming"
+    },
+    {
+      "term": "promise",
+      "uk": "проміс",
+      "category": "programming"
+    },
+    {
+      "term": "middleware",
+      "uk": "мідлвер",
+      "category": "programming"
+    },
+    {
+      "term": "endpoint",
+      "uk": "ендпоінт",
+      "category": "programming"
+    },
+    {
+      "term": "payload",
+      "uk": "пейлоад",
+      "category": "programming"
+    },
+    {
+      "term": "webhook",
+      "uk": "вебхук",
+      "category": "programming"
+    },
+    {
+      "term": "socket",
+      "uk": "сокет",
+      "category": "programming"
+    },
+    {
+      "term": "streaming",
+      "uk": "стрімінг",
+      "category": "programming"
+    },
+    {
+      "term": "machine learning",
+      "uk": "машинне навчання",
+      "category": "programming"
+    },
+    {
+      "term": "AI",
+      "uk": "ШІ",
+      "category": "programming"
+    },
+    {
+      "term": "LLM",
+      "uk": "LLM",
+      "category": "programming"
+    }
+  ],
+  "prepositionCases": {
+    "з": "instrumental",
+    "із": "instrumental",
+    "зі": "instrumental",
+    "про": "accusative",
+    "на": "locative",
+    "в": "locative",
+    "у": "locative",
+    "до": "genitive",
+    "від": "genitive",
+    "для": "genitive",
+    "без": "genitive",
+    "через": "accusative"
+  }
+}

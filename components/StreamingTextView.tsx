@@ -25,6 +25,9 @@ interface StreamingTextViewProps {
     interimTranslation?: string;  // Interim translation (grey, at end)
     interimOriginal?: string;     // Interim original (grey, at end)
 
+    // Hold-N indicator (shows "..." when words are being held)
+    isHoldingWords?: boolean;     // True when Hold-N is active
+
     // Стан
     isActive: boolean;            // Чи йде запис
     isProcessing?: boolean;       // Чи обробляє LLM
@@ -50,6 +53,7 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
     originalText = '',
     interimTranslation = '',
     interimOriginal = '',
+    isHoldingWords = false,
     isActive,
     isProcessing = false,
     variant = 'ghost',
@@ -235,11 +239,12 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                 </div>
             </div>
 
-            {/* Main Content Area - Scrollable */}
+            {/* Main Content Area - Scrollable with scroll anchoring */}
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
+                style={{ overflowAnchor: 'auto' }}
             >
                 {(translationText || interimTranslation) ? (
                     <div className="space-y-4">
@@ -258,7 +263,18 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                                     display: interimTranslation ? 'inline' : 'none'
                                 }}
                             ></span>
-                            {showCursor && isActive && (
+                            {/* Hold-N indicator: shows "..." when words are being held back */}
+                            {isHoldingWords && isActive && (
+                                <span
+                                    className="inline-block ml-1 text-gray-500 animate-pulse"
+                                    style={{
+                                        letterSpacing: '0.1em',
+                                        animation: 'pulse 1.5s ease-in-out infinite'
+                                    }}
+                                    title="Обробка останніх слів..."
+                                >...</span>
+                            )}
+                            {showCursor && isActive && !isHoldingWords && (
                                 <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
                             )}
                         </div>
