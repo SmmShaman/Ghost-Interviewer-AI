@@ -3,6 +3,7 @@
 import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
 import { glossaryProcessor } from './glossaryProcessor';
 import { pivotTranslator } from './pivotTranslator';
+import { confidenceFilter } from './confidenceFilter';
 
 // CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
 env.allowLocalModels = false;
@@ -74,6 +75,10 @@ class LocalTranslator {
     // PIVOT TRANSLATION: NO → EN → UK (better quality)
     private usePivot: boolean = true;  // Enable pivot by default
     private pivotInitialized: boolean = false;
+
+    // CONFIDENCE FILTERING: Reject low-quality translations
+    private useConfidenceFilter: boolean = true;
+    private lastConfidenceScore: number = 100;
 
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
 
@@ -583,11 +588,12 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
-            // POST-PROCESSING: Apply IT glossary
+            // POST-PROCESSING: Apply IT glossary + confidence filter
             const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            const filteredResult = this.applyConfidenceFilter(text, processedResult);
             return [{
                 original: text,
-                ghostTranslation: processedResult,
+                ghostTranslation: filteredResult,
                 status: 'ghost'
             }];
         }
@@ -597,10 +603,12 @@ class LocalTranslator {
             try {
                 if (pivotTranslator.isReady()) {
                     const pivotResult = await pivotTranslator.translate(text);
+                    // POST-PROCESSING: Apply IT glossary + confidence filter
                     const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
+                    const filteredResult = this.applyConfidenceFilter(text, processedResult);
                     return [{
                         original: text,
-                        ghostTranslation: processedResult,
+                        ghostTranslation: filteredResult,
                         status: 'ghost'
                     }];
                 }
@@ -637,12 +645,13 @@ class LocalTranslator {
 
             if (!translatedText) translatedText = "⚠️";
 
-            // POST-PROCESSING: Apply IT glossary
+            // POST-PROCESSING: Apply IT glossary + confidence filter
             const processedText = glossaryProcessor.processTranslation(translatedText);
+            const filteredText = this.applyConfidenceFilter(text, processedText);
 
             return [{
                 original: text,
-                ghostTranslation: processedText,
+                ghostTranslation: filteredText,
                 status: 'ghost'
             }];
 
@@ -665,8 +674,47 @@ class LocalTranslator {
             usePivot: this.usePivot,
             pivotReady: pivotTranslator.isReady(),
             pivotNoToEnReady: pivotStatus.noToEnReady,
-            pivotEnToUkReady: pivotStatus.enToUkReady
+            pivotEnToUkReady: pivotStatus.enToUkReady,
+            // Confidence status
+            useConfidenceFilter: this.useConfidenceFilter,
+            lastConfidenceScore: this.lastConfidenceScore
         };
+    }
+
+    /**
+     * Apply confidence filter to translation result
+     * Returns filtered text and updates lastConfidenceScore
+     */
+    private applyConfidenceFilter(original: string, translation: string): string {
+        if (!this.useConfidenceFilter) {
+            return translation;
+        }
+
+        const result = confidenceFilter.calculate(original, translation);
+        this.lastConfidenceScore = result.confidence;
+
+        if (!result.isAcceptable) {
+            console.log(`⚠️ [Confidence] Low quality (${result.confidence}%): ${result.reasons.join(', ')}`);
+            // Return translation anyway but log warning
+            // In future, could show visual indicator or retry
+        }
+
+        return translation;
+    }
+
+    /**
+     * Get last confidence score
+     */
+    public getLastConfidenceScore(): number {
+        return this.lastConfidenceScore;
+    }
+
+    /**
+     * Enable or disable confidence filtering
+     */
+    public setConfidenceFilterEnabled(enabled: boolean): void {
+        this.useConfidenceFilter = enabled;
+        console.log(`📊 [Confidence] Filter ${enabled ? 'Enabled' : 'Disabled'}`);
     }
 
     // Check if using native Chrome API (for UI display)
