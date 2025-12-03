@@ -5,15 +5,16 @@
  * Текст росте вниз, нові слова з'являються плавно.
  *
  * ОСОБЛИВОСТІ:
+ * - DIRECT DOM: Текст оновлюється через ref.textContent (bypass React reconciliation)
+ * - requestAnimationFrame для батчингу оновлень
  * - Один текстовий контейнер замість списку карток
  * - Переклад великим шрифтом (основний фокус)
  * - Оригінал маленьким шрифтом знизу
  * - Автоматичний scroll вниз
  * - Пульсуючий курсор показує активність
- * - Плавна анімація появи нових слів
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
 
 interface StreamingTextViewProps {
     // Текст для відображення
@@ -23,6 +24,9 @@ interface StreamingTextViewProps {
     // Interim text (real-time, not finalized - shown in grey)
     interimTranslation?: string;  // Interim translation (grey, at end)
     interimOriginal?: string;     // Interim original (grey, at end)
+
+    // Hold-N indicator (shows "..." when words are being held)
+    isHoldingWords?: boolean;     // True when Hold-N is active
 
     // Стан
     isActive: boolean;            // Чи йде запис
@@ -49,6 +53,7 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
     originalText = '',
     interimTranslation = '',
     interimOriginal = '',
+    isHoldingWords = false,
     isActive,
     isProcessing = false,
     variant = 'ghost',
@@ -61,6 +66,67 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+
+    // DIRECT DOM refs for streaming text (bypass React reconciliation)
+    const translationRef = useRef<HTMLSpanElement>(null);
+    const interimTranslationRef = useRef<HTMLSpanElement>(null);
+    const originalRef = useRef<HTMLSpanElement>(null);
+    const interimOriginalRef = useRef<HTMLSpanElement>(null);
+
+    // RAF batching ref
+    const rafRef = useRef<number | null>(null);
+    const pendingUpdateRef = useRef<{
+        translation?: string;
+        interimTranslation?: string;
+        original?: string;
+        interimOriginal?: string;
+    } | null>(null);
+
+    // DIRECT DOM UPDATE: Batch updates using requestAnimationFrame
+    useLayoutEffect(() => {
+        // Store pending update
+        pendingUpdateRef.current = {
+            translation: translationText,
+            interimTranslation,
+            original: originalText,
+            interimOriginal
+        };
+
+        // Cancel previous RAF if exists
+        if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current);
+        }
+
+        // Schedule DOM update
+        rafRef.current = requestAnimationFrame(() => {
+            const update = pendingUpdateRef.current;
+            if (!update) return;
+
+            // Direct DOM updates - bypass React
+            if (translationRef.current && translationRef.current.textContent !== update.translation) {
+                translationRef.current.textContent = update.translation || '';
+            }
+            if (interimTranslationRef.current) {
+                interimTranslationRef.current.textContent = update.interimTranslation || '';
+                interimTranslationRef.current.style.display = update.interimTranslation ? 'inline' : 'none';
+            }
+            if (originalRef.current && originalRef.current.textContent !== update.original) {
+                originalRef.current.textContent = update.original || '';
+            }
+            if (interimOriginalRef.current) {
+                interimOriginalRef.current.textContent = update.interimOriginal || '';
+                interimOriginalRef.current.style.display = update.interimOriginal ? 'inline' : 'none';
+            }
+
+            pendingUpdateRef.current = null;
+        });
+
+        return () => {
+            if (rafRef.current) {
+                cancelAnimationFrame(rafRef.current);
+            }
+        };
+    }, [translationText, interimTranslation, originalText, interimOriginal]);
 
     // Color schemes
     const colorSchemes = {
@@ -173,23 +239,42 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                 </div>
             </div>
 
-            {/* Main Content Area - Scrollable */}
+            {/* Main Content Area - Scrollable with scroll anchoring */}
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
+                style={{ overflowAnchor: 'auto' }}
             >
                 {(translationText || interimTranslation) ? (
                     <div className="space-y-4">
-                        {/* Translation Text - MAIN FOCUS */}
+                        {/* Translation Text - MAIN FOCUS (Direct DOM updates) */}
                         <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`}>
-                            {/* Finalized text - solid color */}
-                            <span className={colors.text}>{translationText}</span>
-                            {/* Interim text - grey, italic (real-time, not yet finalized) */}
-                            {interimTranslation && (
-                                <span className="text-gray-400 italic ml-1">{interimTranslation}</span>
+                            {/* Finalized text - solid color (ref for direct DOM) */}
+                            <span ref={translationRef} className={colors.text}></span>
+                            {/* Interim text - grey, italic with gradient fade (ref for direct DOM) */}
+                            <span
+                                ref={interimTranslationRef}
+                                className="text-gray-400 italic ml-1"
+                                style={{
+                                    background: 'linear-gradient(90deg, rgba(156,163,175,0.8) 0%, rgba(156,163,175,0.4) 100%)',
+                                    WebkitBackgroundClip: 'text',
+                                    WebkitTextFillColor: 'transparent',
+                                    display: interimTranslation ? 'inline' : 'none'
+                                }}
+                            ></span>
+                            {/* Hold-N indicator: shows "..." when words are being held back */}
+                            {isHoldingWords && isActive && (
+                                <span
+                                    className="inline-block ml-1 text-gray-500 animate-pulse"
+                                    style={{
+                                        letterSpacing: '0.1em',
+                                        animation: 'pulse 1.5s ease-in-out infinite'
+                                    }}
+                                    title="Обробка останніх слів..."
+                                >...</span>
                             )}
-                            {showCursor && isActive && (
+                            {showCursor && isActive && !isHoldingWords && (
                                 <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
                             )}
                         </div>
@@ -201,12 +286,14 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                                     Оригінал
                                 </div>
                                 <div className={`text-sm leading-relaxed italic`}>
-                                    {/* Finalized original - slightly visible */}
-                                    <span className={colors.originalText}>{originalText}</span>
-                                    {/* Interim original - very faint grey */}
-                                    {interimOriginal && (
-                                        <span className="text-gray-500/60 ml-1">{interimOriginal}</span>
-                                    )}
+                                    {/* Finalized original - slightly visible (ref for direct DOM) */}
+                                    <span ref={originalRef} className={colors.originalText}></span>
+                                    {/* Interim original - faded grey (ref for direct DOM) */}
+                                    <span
+                                        ref={interimOriginalRef}
+                                        className="text-gray-500/60 ml-1"
+                                        style={{ display: interimOriginal ? 'inline' : 'none' }}
+                                    ></span>
                                 </div>
                             </div>
                         )}

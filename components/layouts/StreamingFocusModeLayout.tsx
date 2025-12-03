@@ -16,6 +16,7 @@
 
 import React from 'react';
 import StreamingTextView from '../StreamingTextView';
+import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingFocusModeLayoutProps {
     // Накопичений стан перекладу
@@ -79,6 +80,19 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     // Always show as Ghost (since we only display Ghost now)
     const translationType = 'ghost';
 
+    // Get translation method for indicator
+    const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
+        const status = localTranslator.getStatus();
+        if (status.useChromeAPI) {
+            return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
+        }
+        if (status.pivotReady && status.usePivot) {
+            return { label: 'Pivot NO→EN→UK', bgClass: 'bg-purple-400', textClass: 'text-purple-400' };
+        }
+        return { label: 'Direct', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
+    };
+    const methodInfo = getTranslationMethodLabel();
+
     // Format duration
     const formatDuration = (ms: number): string => {
         const seconds = Math.floor(ms / 1000);
@@ -113,6 +127,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                         variant={translationType === 'llm' ? 'llm' : 'ghost'}
                         showOriginal={false}
                         showCursor={isListening}
+                        isHoldingWords={!!interimText}
                         accentColor={containsQuestion ? 'amber' : 'cyan'}
                         title={getSpeechTypeLabel()}
                         minHeight="400px"
@@ -240,11 +255,11 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3">
-                    {/* Translation source indicator */}
+                    {/* Translation method indicator */}
                     <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${translationType === 'llm' ? 'bg-emerald-400' : 'bg-cyan-400'}`}></span>
-                        <span className={`text-xs ${translationType === 'llm' ? 'text-emerald-400' : 'text-cyan-400'}`}>
-                            {translationType === 'llm' ? 'LLM' : 'Ghost'}
+                        <span className={`w-2 h-2 rounded-full ${methodInfo.bgClass}`}></span>
+                        <span className={`text-xs ${methodInfo.textClass}`}>
+                            {methodInfo.label}
                         </span>
                     </div>
 

@@ -1,6 +1,9 @@
 
 
 import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
+import { glossaryProcessor } from './glossaryProcessor';
+import { pivotTranslator } from './pivotTranslator';
+import { confidenceFilter } from './confidenceFilter';
 
 // CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
 env.allowLocalModels = false;
@@ -68,6 +71,14 @@ class LocalTranslator {
     private chunkCache: Map<string, string> = new Map();
     private static readonly CHUNK_SIZE = 2; // Reduced from 4 to 2 for faster progressive updates
     private static readonly MAX_CACHE_SIZE = 100;
+
+    // PIVOT TRANSLATION: NO → EN → UK (better quality)
+    private usePivot: boolean = true;  // Enable pivot by default
+    private pivotInitialized: boolean = false;
+
+    // CONFIDENCE FILTERING: Reject low-quality translations
+    private useConfidenceFilter: boolean = true;
+    private lastConfidenceScore: number = 100;
 
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
 
@@ -469,15 +480,47 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
-            if (onProgress) onProgress(chromeResult);
+            // POST-PROCESSING: Apply IT glossary
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            if (onProgress) onProgress(processedResult);
             return [{
                 original: text,
-                ghostTranslation: chromeResult,
+                ghostTranslation: processedResult,
                 status: 'ghost'
             }];
         }
 
-        // === PRIORITY 2: Fallback to Transformers.js ===
+        // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
+        if (this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk') {
+            try {
+                // Initialize pivot if not done yet
+                if (!this.pivotInitialized) {
+                    console.log('🔄 [Pivot] Pre-initializing pivot translator...');
+                    pivotTranslator.initialize().then(() => {
+                        this.pivotInitialized = true;
+                    }).catch(e => {
+                        console.warn('⚠️ [Pivot] Init failed, will use direct:', e);
+                    });
+                }
+
+                // Use pivot if ready
+                if (pivotTranslator.isReady()) {
+                    const pivotResult = await pivotTranslator.translate(text);
+                    const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
+                    if (onProgress) onProgress(processedResult);
+                    return [{
+                        original: text,
+                        ghostTranslation: processedResult,
+                        status: 'ghost'
+                    }];
+                }
+            } catch (e) {
+                console.warn('⚠️ [Pivot] Translation failed, falling back to direct:', e);
+                // Continue to direct translation
+            }
+        }
+
+        // === PRIORITY 3: Fallback to Direct Transformers.js ===
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{
@@ -525,15 +568,18 @@ class LocalTranslator {
 
         const fullTranslation = translations.join(' ');
 
+        // POST-PROCESSING: Apply IT glossary for correct terminology
+        const processedTranslation = glossaryProcessor.processTranslation(fullTranslation);
+
         return [{
             original: text,
-            ghostTranslation: fullTranslation,
+            ghostTranslation: processedTranslation,
             status: 'ghost'
         }];
     }
 
     // Full phrase translation (used for finalized blocks)
-    // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
+    // Priority: 1. Chrome API (instant) → 2. Pivot (NO→EN→UK) → 3. Direct Transformers.js
     async translatePhrase(text: string): Promise<TranslatedWord[]> {
         if (!text || !text.trim()) {
             return [];
@@ -542,14 +588,37 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
+            // POST-PROCESSING: Apply IT glossary + confidence filter
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            const filteredResult = this.applyConfidenceFilter(text, processedResult);
             return [{
                 original: text,
-                ghostTranslation: chromeResult,
+                ghostTranslation: filteredResult,
                 status: 'ghost'
             }];
         }
 
-        // === PRIORITY 2: Fallback to Transformers.js ===
+        // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
+        if (this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk') {
+            try {
+                if (pivotTranslator.isReady()) {
+                    const pivotResult = await pivotTranslator.translate(text);
+                    // POST-PROCESSING: Apply IT glossary + confidence filter
+                    const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
+                    const filteredResult = this.applyConfidenceFilter(text, processedResult);
+                    return [{
+                        original: text,
+                        ghostTranslation: filteredResult,
+                        status: 'ghost'
+                    }];
+                }
+            } catch (e) {
+                console.warn('⚠️ [Pivot] Translation failed in translatePhrase:', e);
+                // Continue to direct translation
+            }
+        }
+
+        // === PRIORITY 3: Fallback to Direct Transformers.js ===
         if (!this.translator) {
              if (!this.isLoading) this.initialize();
              return [{
@@ -576,9 +645,13 @@ class LocalTranslator {
 
             if (!translatedText) translatedText = "⚠️";
 
+            // POST-PROCESSING: Apply IT glossary + confidence filter
+            const processedText = glossaryProcessor.processTranslation(translatedText);
+            const filteredText = this.applyConfidenceFilter(text, processedText);
+
             return [{
                 original: text,
-                ghostTranslation: translatedText,
+                ghostTranslation: filteredText,
                 status: 'ghost'
             }];
 
@@ -589,19 +662,97 @@ class LocalTranslator {
     }
 
     public getStatus() {
+        const pivotStatus = pivotTranslator.getStatus();
         return {
             isLoading: this.isLoading,
-            isReady: !!this.translator || !!this.chromeTranslator,
+            isReady: !!this.translator || !!this.chromeTranslator || pivotTranslator.isReady(),
             useChromeAPI: this.chromeTranslatorAvailable === true,
             chromeChecked: this.chromeTranslatorAvailable !== null,
             device: this.activeDevice, // 'webgpu' | 'wasm' | null
-            modelType: this.currentModelType
+            modelType: this.currentModelType,
+            // Pivot status
+            usePivot: this.usePivot,
+            pivotReady: pivotTranslator.isReady(),
+            pivotNoToEnReady: pivotStatus.noToEnReady,
+            pivotEnToUkReady: pivotStatus.enToUkReady,
+            // Confidence status
+            useConfidenceFilter: this.useConfidenceFilter,
+            lastConfidenceScore: this.lastConfidenceScore
         };
+    }
+
+    /**
+     * Apply confidence filter to translation result
+     * Returns filtered text and updates lastConfidenceScore
+     */
+    private applyConfidenceFilter(original: string, translation: string): string {
+        if (!this.useConfidenceFilter) {
+            return translation;
+        }
+
+        const result = confidenceFilter.calculate(original, translation);
+        this.lastConfidenceScore = result.confidence;
+
+        if (!result.isAcceptable) {
+            console.log(`⚠️ [Confidence] Low quality (${result.confidence}%): ${result.reasons.join(', ')}`);
+            // Return translation anyway but log warning
+            // In future, could show visual indicator or retry
+        }
+
+        return translation;
+    }
+
+    /**
+     * Get last confidence score
+     */
+    public getLastConfidenceScore(): number {
+        return this.lastConfidenceScore;
+    }
+
+    /**
+     * Enable or disable confidence filtering
+     */
+    public setConfidenceFilterEnabled(enabled: boolean): void {
+        this.useConfidenceFilter = enabled;
+        console.log(`📊 [Confidence] Filter ${enabled ? 'Enabled' : 'Disabled'}`);
     }
 
     // Check if using native Chrome API (for UI display)
     public isUsingChromeAPI(): boolean {
         return this.chromeTranslatorAvailable === true;
+    }
+
+    // ========== PIVOT CONTROL ==========
+
+    /**
+     * Enable or disable pivot translation
+     */
+    public setPivotEnabled(enabled: boolean): void {
+        this.usePivot = enabled;
+        console.log(`🔄 [Pivot] ${enabled ? 'Enabled' : 'Disabled'}`);
+    }
+
+    /**
+     * Check if pivot is enabled
+     */
+    public isPivotEnabled(): boolean {
+        return this.usePivot;
+    }
+
+    /**
+     * Check if pivot is ready to use
+     */
+    public isPivotReady(): boolean {
+        return pivotTranslator.isReady();
+    }
+
+    /**
+     * Initialize pivot translator
+     */
+    public async initPivot(onProgress?: (stage: string, progress: number) => void): Promise<boolean> {
+        const result = await pivotTranslator.initialize(onProgress);
+        this.pivotInitialized = result;
+        return result;
     }
 
     // ========== CONTEXT-AWARE TRANSLATION (NEW) ==========

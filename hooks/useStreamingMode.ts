@@ -12,6 +12,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext } from '../types';
 import { localTranslator } from '../services/localTranslator';
 import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
+import { metricsCollector } from '../services/metricsCollector';
 
 export interface StreamingState {
     // Text content
@@ -134,6 +135,17 @@ export function useStreamingMode(
     const lastAnswerTextRef = useRef<string>(''); // Track text that was last used to generate answer (avoid duplicates)
     const scheduleAnswerGenerationRef = useRef<() => void>(() => {}); // Ref for answer scheduling to avoid circular deps
 
+    // INTERIM OPTIMIZATION: Cache prefix translation to avoid re-translating stable text
+    const interimCacheRef = useRef<{
+        originalPrefix: string;      // Original text prefix that was translated
+        translatedPrefix: string;    // Cached translation of the prefix
+        prefixWordCount: number;     // Number of words in the cached prefix
+    }>({ originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 });
+
+    // HOLD-N CONFIG: Don't show last N words of interim (they change most often)
+    const HOLD_N = 2;
+    const TRANSLATE_LAST_N = 7; // Only translate last N words, use cache for the rest
+
     // Keep context ref updated
     useEffect(() => {
         contextRef.current = context;
@@ -204,6 +216,10 @@ export function useStreamingMode(
                     console.log(`⚠️ [Ghost] Translation already appended, skipping`);
                     return { ...prev, isProcessingGhost: false };
                 }
+
+                // METRICS: Record words translated
+                const translatedWordCount = translation.split(/\s+/).length;
+                metricsCollector.recordWordsTranslated(translatedWordCount);
 
                 // APPEND ONLY: Never modify existing translation
                 return {
@@ -461,6 +477,10 @@ export function useStreamingMode(
             return;
         }
 
+        // METRICS: Record words received
+        const wordCount = trimmedNew.split(/\s+/).length;
+        metricsCollector.recordWordsReceived(wordCount);
+
         // Update state AND keep refs in sync
         setState(prev => {
             const newOriginal = prev.originalText
@@ -504,33 +524,99 @@ export function useStreamingMode(
 
     /**
      * Set interim text (real-time, not yet finalized)
-     * This provides smooth subtitle-like display
+     * OPTIMIZED with Hold-N and prefix caching:
+     * - Hold-N: Don't show last N words (they change most often)
+     * - Cache: Only translate last TRANSLATE_LAST_N words, use cached prefix
      */
     const setInterimText = useCallback((interimText: string) => {
-        // Update interim text immediately for smooth display
+        const allWords = interimText.trim().split(/\s+/).filter(w => w.length > 0);
+
+        // HOLD-N: Hide last N words from display (they're most unstable)
+        const displayWords = allWords.length > HOLD_N
+            ? allWords.slice(0, -HOLD_N)
+            : [];
+        const displayText = displayWords.join(' ');
+
+        // Update interim text with Hold-N applied
         setState(prev => ({
             ...prev,
-            interimText
+            interimText: displayText
         }));
 
-        // Debounce interim translation (50ms - faster than final)
+        // Debounce interim translation (100ms - slower to reduce flicker)
         if (interimGhostTimerRef.current) {
             clearTimeout(interimGhostTimerRef.current);
         }
 
-        if (interimText.trim() && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
+        if (displayText.trim() && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
             interimGhostTimerRef.current = setTimeout(async () => {
                 try {
-                    const words = await localTranslator.translatePhraseChunked(interimText);
-                    const translation = words.map(w => w.ghostTranslation).join(' ');
+                    const wordsToTranslate = displayText.split(/\s+/);
+                    const totalWords = wordsToTranslate.length;
+
+                    // OPTIMIZATION: Check if we can use cached prefix
+                    const cache = interimCacheRef.current;
+                    const cacheHit = cache.prefixWordCount > 0 &&
+                                     totalWords > cache.prefixWordCount &&
+                                     displayText.startsWith(cache.originalPrefix);
+
+                    let finalTranslation: string;
+
+                    if (cacheHit && totalWords > TRANSLATE_LAST_N) {
+                        // Use cached prefix, translate only new words
+                        const newWordsCount = totalWords - cache.prefixWordCount;
+                        const wordsToActuallyTranslate = Math.min(newWordsCount + 2, TRANSLATE_LAST_N); // +2 for context
+                        const newText = wordsToTranslate.slice(-wordsToActuallyTranslate).join(' ');
+
+                        const translated = await localTranslator.translatePhraseChunked(newText);
+                        const newTranslation = translated.map(w => w.ghostTranslation).join(' ');
+
+                        // Combine: cached prefix + new translation
+                        finalTranslation = cache.translatedPrefix + ' ' + newTranslation;
+
+                        console.log(`🚀 [Interim] Cache HIT: ${cache.prefixWordCount} cached + ${wordsToActuallyTranslate} new words`);
+                    } else {
+                        // No cache or cache miss - translate from beginning
+                        // But only translate last TRANSLATE_LAST_N words for very long text
+                        if (totalWords > TRANSLATE_LAST_N * 2) {
+                            // Split: cache the stable prefix, translate only recent
+                            const prefixWordCount = totalWords - TRANSLATE_LAST_N;
+                            const prefixText = wordsToTranslate.slice(0, prefixWordCount).join(' ');
+                            const suffixText = wordsToTranslate.slice(prefixWordCount).join(' ');
+
+                            // Translate prefix once and cache
+                            const prefixTranslated = await localTranslator.translatePhraseChunked(prefixText);
+                            const prefixTranslation = prefixTranslated.map(w => w.ghostTranslation).join(' ');
+
+                            // Translate suffix
+                            const suffixTranslated = await localTranslator.translatePhraseChunked(suffixText);
+                            const suffixTranslation = suffixTranslated.map(w => w.ghostTranslation).join(' ');
+
+                            finalTranslation = prefixTranslation + ' ' + suffixTranslation;
+
+                            // Update cache
+                            interimCacheRef.current = {
+                                originalPrefix: prefixText,
+                                translatedPrefix: prefixTranslation,
+                                prefixWordCount: prefixWordCount
+                            };
+
+                            console.log(`📝 [Interim] Cache MISS: Created new cache with ${prefixWordCount} words`);
+                        } else {
+                            // Short text - translate all
+                            const translated = await localTranslator.translatePhraseChunked(displayText);
+                            finalTranslation = translated.map(w => w.ghostTranslation).join(' ');
+                        }
+                    }
+
                     setState(prev => ({
                         ...prev,
-                        interimGhostTranslation: translation
+                        interimGhostTranslation: finalTranslation.trim()
                     }));
                 } catch (e) {
                     // Ignore translation errors for interim text
                 }
-            }, 50);
+            }, 100); // Increased from 50ms to 100ms for stability
         } else {
             setState(prev => ({
                 ...prev,
@@ -576,6 +662,10 @@ export function useStreamingMode(
         wordCountRef.current = 0;
         lastAnswerTextRef.current = ''; // Reset answer text tracker
         pendingWordsRef.current = []; // Clear pending words accumulator
+        interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
+
+        // METRICS: Start metrics session
+        metricsCollector.startSession();
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -645,6 +735,10 @@ export function useStreamingMode(
                 }
             }
         }
+
+        // METRICS: Stop and log session metrics
+        metricsCollector.stopSession();
+        metricsCollector.logMetrics();
 
         console.log('🛑 [StreamingMode] Session stopped');
     }, [executeLLMTranslation, executeAnswerGeneration]);
@@ -727,6 +821,7 @@ export function useStreamingMode(
         lastAnswerTextRef.current = '';
         lastTranslatedTextRef.current = '';  // Reset duplicate tracking
         pendingWordsRef.current = []; // Clear pending words accumulator
+        interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
