@@ -70,7 +70,7 @@ const renderColoredParagraphs = (text: string, interimText: string = '') => {
                 return (
                     <React.Fragment key={index}>
                         <span className={colorClass}>{paragraph}</span>
-                        {index < paragraphs.length - 1 && <br /><br />}
+                        {index < paragraphs.length - 1 && (<><br /><br /></>)}
                     </React.Fragment>
                 );
             })}
