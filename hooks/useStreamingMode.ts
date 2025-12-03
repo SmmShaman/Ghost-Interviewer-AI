@@ -134,6 +134,8 @@ export function useStreamingMode(
     const wordCountRef = useRef<number>(0); // Track word count for async operations
     const lastAnswerTextRef = useRef<string>(''); // Track text that was last used to generate answer (avoid duplicates)
     const scheduleAnswerGenerationRef = useRef<() => void>(() => {}); // Ref for answer scheduling to avoid circular deps
+    const lastWordAddedTimeRef = useRef<number>(Date.now()); // Track time of last word addition for paragraph breaks
+    const PARAGRAPH_PAUSE_MS = 1500; // Pause duration to trigger paragraph break (1.5 seconds)
 
     // INTERIM OPTIMIZATION: Cache prefix translation to avoid re-translating stable text
     const interimCacheRef = useRef<{
@@ -145,6 +147,9 @@ export function useStreamingMode(
     // HOLD-N CONFIG: Don't show last N words of interim (they change most often)
     const HOLD_N = 2;
     const TRANSLATE_LAST_N = 7; // Only translate last N words, use cache for the rest
+
+    // PARAGRAPH MARKER: Used to create visual line breaks between speech blocks
+    const PARAGRAPH_MARKER = '\n\n';
 
     // Keep context ref updated
     useEffect(() => {
@@ -179,11 +184,13 @@ export function useStreamingMode(
 
     // ACCUMULATOR: Collect words during debounce period to prevent losing rapid finals
     const pendingWordsRef = useRef<string[]>([]);
+    // Track if next translation should be preceded by paragraph break
+    const pendingParagraphBreakRef = useRef<boolean>(false);
 
     // === GHOST TRANSLATION ===
     // STABLE APPROACH: Translate ONLY new words, append to existing translation
     // This eliminates flickering caused by context-aware translation inconsistency
-    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string) => {
+    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string, addParagraphBreak: boolean = false) => {
         // DUPLICATE CHECK: Skip if we already translated this text
         if (lastTranslatedTextRef.current === newWords) {
             console.log(`⚠️ [Ghost] Skipping duplicate translation: "${newWords.substring(0, 30)}..."`);
@@ -222,10 +229,12 @@ export function useStreamingMode(
                 metricsCollector.recordWordsTranslated(translatedWordCount);
 
                 // APPEND ONLY: Never modify existing translation
+                // Add paragraph break if flagged (when there was a pause)
+                const separator = addParagraphBreak ? PARAGRAPH_MARKER : ' ';
                 return {
                     ...prev,
                     ghostTranslation: prev.ghostTranslation
-                        ? `${prev.ghostTranslation} ${translation}`
+                        ? `${prev.ghostTranslation}${separator}${translation}`
                         : translation,
                     isProcessingGhost: false
                 };
@@ -456,6 +465,7 @@ export function useStreamingMode(
     /**
      * Add new words to the accumulator
      * Includes duplicate detection to prevent text repetition after session restart
+     * Adds paragraph breaks when there's a significant pause (1.5s+)
      */
     const addWords = useCallback((newWords: string) => {
         if (!newWords.trim()) return;
@@ -477,14 +487,28 @@ export function useStreamingMode(
             return;
         }
 
+        // PARAGRAPH BREAK: Check if there was a significant pause since last word
+        const now = Date.now();
+        const timeSinceLastWord = now - lastWordAddedTimeRef.current;
+        const shouldAddParagraphBreak = currentOriginal && timeSinceLastWord >= PARAGRAPH_PAUSE_MS;
+        lastWordAddedTimeRef.current = now;
+
+        if (shouldAddParagraphBreak) {
+            console.log(`📝 [addWords] Adding paragraph break (${timeSinceLastWord}ms pause)`);
+            // Set flag for Ghost translation to also add paragraph break
+            pendingParagraphBreakRef.current = true;
+        }
+
         // METRICS: Record words received
         const wordCount = trimmedNew.split(/\s+/).length;
         metricsCollector.recordWordsReceived(wordCount);
 
         // Update state AND keep refs in sync
         setState(prev => {
+            // Add paragraph marker if there was a pause
+            const separator = shouldAddParagraphBreak ? PARAGRAPH_MARKER : ' ';
             const newOriginal = prev.originalText
-                ? `${prev.originalText} ${trimmedNew}`
+                ? `${prev.originalText}${separator}${trimmedNew}`
                 : trimmedNew;
             const newWordCount = newOriginal.split(/\s+/).length;
 
@@ -512,9 +536,13 @@ export function useStreamingMode(
             const allPendingWords = pendingWordsRef.current.join(' ');
             pendingWordsRef.current = []; // Clear accumulator
 
+            // Capture and reset paragraph break flag
+            const addParagraphBreak = pendingParagraphBreakRef.current;
+            pendingParagraphBreakRef.current = false;
+
             if (allPendingWords.trim()) {
-                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words`);
-                executeGhostTranslation(allPendingWords, originalTextRef.current);
+                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words${addParagraphBreak ? ' (with paragraph break)' : ''}`);
+                executeGhostTranslation(allPendingWords, originalTextRef.current, addParagraphBreak);
             }
         }, 100);
 
@@ -663,6 +691,8 @@ export function useStreamingMode(
         lastAnswerTextRef.current = ''; // Reset answer text tracker
         pendingWordsRef.current = []; // Clear pending words accumulator
         interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
+        lastWordAddedTimeRef.current = Date.now(); // Reset paragraph break timer
+        pendingParagraphBreakRef.current = false; // Clear pending paragraph break flag
 
         // METRICS: Start metrics session
         metricsCollector.startSession();
@@ -822,6 +852,8 @@ export function useStreamingMode(
         lastTranslatedTextRef.current = '';  // Reset duplicate tracking
         pendingWordsRef.current = []; // Clear pending words accumulator
         interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
+        lastWordAddedTimeRef.current = Date.now(); // Reset paragraph break timer
+        pendingParagraphBreakRef.current = false; // Clear pending paragraph break flag
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
