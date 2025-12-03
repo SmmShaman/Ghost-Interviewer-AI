@@ -247,42 +247,59 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                 style={{ overflowAnchor: 'auto' }}
             >
                 {(translationText || interimTranslation) ? (
-                    <div className="space-y-4">
-                        {/* Translation Text - MAIN FOCUS (Direct DOM updates) */}
-                        {/* Using white-space: pre-line to render \n as line breaks */}
-                        <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`} style={{ whiteSpace: 'pre-line' }}>
-                            {/* Finalized text - solid color (ref for direct DOM) */}
-                            <span ref={translationRef} className={colors.text}></span>
-                            {/* Interim text - RED, smaller with gradient fade (ref for direct DOM) */}
-                            <span
-                                ref={interimTranslationRef}
-                                className="text-red-400 italic ml-1 text-base md:text-lg"
-                                style={{
-                                    background: 'linear-gradient(90deg, rgba(248,113,113,0.9) 0%, rgba(248,113,113,0.5) 100%)',
-                                    WebkitBackgroundClip: 'text',
-                                    WebkitTextFillColor: 'transparent',
-                                    display: interimTranslation ? 'inline' : 'none'
-                                }}
-                            ></span>
-                            {/* Hold-N indicator: shows "..." when words are being held back */}
-                            {isHoldingWords && isActive && (
+                    <div className="flex flex-col h-full">
+                        {/* Finalized Translation Text - scrollable area */}
+                        <div className="flex-1 overflow-y-auto" style={{ whiteSpace: 'pre-line' }}>
+                            <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`}>
+                                {/* Finalized text - solid color (ref for direct DOM) */}
+                                <span ref={translationRef} className={colors.text}></span>
+                            </div>
+                        </div>
+
+                        {/* FIXED HEIGHT INTERIM ZONE - Reserved for 2 lines, prevents jumping */}
+                        <div
+                            className="shrink-0 border-t border-gray-700/30 pt-2 mt-2"
+                            style={{
+                                minHeight: '4.5rem',  /* Fixed height for ~2 lines */
+                                maxHeight: '4.5rem'
+                            }}
+                        >
+                            <div className={`text-base md:text-lg leading-relaxed font-medium overflow-hidden`} style={{ whiteSpace: 'pre-line' }}>
+                                {/* Interim text - RED with gradient fade */}
                                 <span
-                                    className="inline-block ml-1 text-gray-500 animate-pulse"
+                                    ref={interimTranslationRef}
+                                    className="text-red-400 italic"
                                     style={{
-                                        letterSpacing: '0.1em',
-                                        animation: 'pulse 1.5s ease-in-out infinite'
+                                        background: 'linear-gradient(90deg, rgba(248,113,113,0.9) 0%, rgba(248,113,113,0.5) 100%)',
+                                        WebkitBackgroundClip: 'text',
+                                        WebkitTextFillColor: 'transparent',
+                                        display: interimTranslation ? 'inline' : 'none'
                                     }}
-                                    title="Обробка останніх слів..."
-                                >...</span>
-                            )}
-                            {showCursor && isActive && !isHoldingWords && (
-                                <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
-                            )}
+                                ></span>
+                                {/* Hold-N indicator: shows "..." when words are being held back */}
+                                {isHoldingWords && isActive && (
+                                    <span
+                                        className="inline-block ml-1 text-gray-500 animate-pulse"
+                                        style={{
+                                            letterSpacing: '0.1em',
+                                            animation: 'pulse 1.5s ease-in-out infinite'
+                                        }}
+                                        title="Обробка останніх слів..."
+                                    >...</span>
+                                )}
+                                {showCursor && isActive && !isHoldingWords && (
+                                    <span className={`inline-block ml-1 ${colors.cursor} animate-pulse`}>▊</span>
+                                )}
+                                {/* Placeholder when no interim - keeps height reserved */}
+                                {!interimTranslation && !isHoldingWords && isActive && (
+                                    <span className="text-gray-600 italic">очікую...</span>
+                                )}
+                            </div>
                         </div>
 
                         {/* Original Text - Secondary, smaller */}
                         {showOriginal && (originalText || interimOriginal) && (
-                            <div className="pt-4 border-t border-gray-800/50">
+                            <div className="pt-4 border-t border-gray-800/50 shrink-0">
                                 <div className={`text-[10px] ${colors.originalLabel} uppercase tracking-wider mb-2`}>
                                     Оригінал
                                 </div>
