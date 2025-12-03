@@ -151,6 +151,36 @@ export function useStreamingMode(
     // PARAGRAPH MARKER: Used to create visual line breaks between speech blocks
     const PARAGRAPH_MARKER = '\n\n';
 
+    // PUNCTUATION CONFIG: Auto-add periods and question marks
+    const MIN_WORDS_FOR_PUNCTUATION = 3; // Minimum words before adding punctuation
+
+    // Norwegian question words (case-insensitive)
+    const QUESTION_WORDS = [
+        'hva', 'hvorfor', 'hvordan', 'når', 'hvor', 'hvem', 'hvilken', 'hvilke',
+        'er', 'har', 'kan', 'vil', 'skal', 'må', 'bør', // Verbs that start questions
+        'what', 'why', 'how', 'when', 'where', 'who', 'which', // English
+        'do', 'does', 'did', 'is', 'are', 'was', 'were', 'have', 'has', 'can', 'could', 'will', 'would'
+    ];
+
+    // Track the first word of current sentence for question detection
+    const currentSentenceStartRef = useRef<string>('');
+    const currentSentenceWordCountRef = useRef<number>(0);
+
+    /**
+     * Determine punctuation mark based on sentence start word
+     * Returns '?' for questions, '.' for statements
+     */
+    const getPunctuationMark = useCallback((sentenceStart: string, wordCount: number): string => {
+        // Not enough words for punctuation
+        if (wordCount < MIN_WORDS_FOR_PUNCTUATION) return '';
+
+        // Check if starts with question word
+        const firstWord = sentenceStart.toLowerCase().trim();
+        const isQuestion = QUESTION_WORDS.some(qw => firstWord === qw || firstWord.startsWith(qw + ' '));
+
+        return isQuestion ? '?' : '.';
+    }, []);
+
     // Keep context ref updated
     useEffect(() => {
         contextRef.current = context;
@@ -186,11 +216,13 @@ export function useStreamingMode(
     const pendingWordsRef = useRef<string[]>([]);
     // Track if next translation should be preceded by paragraph break
     const pendingParagraphBreakRef = useRef<boolean>(false);
+    // Track punctuation to add before paragraph break
+    const pendingPunctuationRef = useRef<string>('');
 
     // === GHOST TRANSLATION ===
     // STABLE APPROACH: Translate ONLY new words, append to existing translation
     // This eliminates flickering caused by context-aware translation inconsistency
-    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string, addParagraphBreak: boolean = false) => {
+    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string, addParagraphBreak: boolean = false, punctuation: string = '') => {
         // DUPLICATE CHECK: Skip if we already translated this text
         if (lastTranslatedTextRef.current === newWords) {
             console.log(`⚠️ [Ghost] Skipping duplicate translation: "${newWords.substring(0, 30)}..."`);
@@ -230,7 +262,8 @@ export function useStreamingMode(
 
                 // APPEND ONLY: Never modify existing translation
                 // Add paragraph break if flagged (when there was a pause)
-                const separator = addParagraphBreak ? PARAGRAPH_MARKER : ' ';
+                // Include punctuation before paragraph marker
+                const separator = addParagraphBreak ? (punctuation + PARAGRAPH_MARKER) : ' ';
                 return {
                     ...prev,
                     ghostTranslation: prev.ghostTranslation
@@ -493,20 +526,41 @@ export function useStreamingMode(
         const shouldAddParagraphBreak = currentOriginal && timeSinceLastWord >= PARAGRAPH_PAUSE_MS;
         lastWordAddedTimeRef.current = now;
 
+        // PUNCTUATION: Determine what punctuation to add before paragraph break
+        let punctuationMark = '';
         if (shouldAddParagraphBreak) {
-            console.log(`📝 [addWords] Adding paragraph break (${timeSinceLastWord}ms pause)`);
-            // Set flag for Ghost translation to also add paragraph break
+            punctuationMark = getPunctuationMark(
+                currentSentenceStartRef.current,
+                currentSentenceWordCountRef.current
+            );
+            console.log(`📝 [addWords] Adding paragraph break (${timeSinceLastWord}ms pause) with "${punctuationMark || 'no'}" punctuation`);
+            // Set flags for Ghost translation to also add paragraph break and punctuation
             pendingParagraphBreakRef.current = true;
+            pendingPunctuationRef.current = punctuationMark;
         }
 
         // METRICS: Record words received
-        const wordCount = trimmedNew.split(/\s+/).length;
-        metricsCollector.recordWordsReceived(wordCount);
+        const newWordCount = trimmedNew.split(/\s+/).length;
+        metricsCollector.recordWordsReceived(newWordCount);
+
+        // SENTENCE TRACKING: Track first word of new sentence
+        if (!currentSentenceStartRef.current || shouldAddParagraphBreak) {
+            // Starting a new sentence - capture the first word(s)
+            currentSentenceStartRef.current = trimmedNew.split(/\s+/)[0] || '';
+            currentSentenceWordCountRef.current = newWordCount;
+            console.log(`📝 [Sentence] New sentence starting with: "${currentSentenceStartRef.current}"`);
+        } else {
+            // Continuing current sentence - increment word count
+            currentSentenceWordCountRef.current += newWordCount;
+        }
 
         // Update state AND keep refs in sync
         setState(prev => {
-            // Add paragraph marker if there was a pause
-            const separator = shouldAddParagraphBreak ? PARAGRAPH_MARKER : ' ';
+            // Build separator: punctuation (if any) + paragraph marker (if pause)
+            let separator = ' ';
+            if (shouldAddParagraphBreak) {
+                separator = punctuationMark + PARAGRAPH_MARKER;
+            }
             const newOriginal = prev.originalText
                 ? `${prev.originalText}${separator}${trimmedNew}`
                 : trimmedNew;
@@ -536,13 +590,15 @@ export function useStreamingMode(
             const allPendingWords = pendingWordsRef.current.join(' ');
             pendingWordsRef.current = []; // Clear accumulator
 
-            // Capture and reset paragraph break flag
+            // Capture and reset paragraph break and punctuation flags
             const addParagraphBreak = pendingParagraphBreakRef.current;
+            const punctuation = pendingPunctuationRef.current;
             pendingParagraphBreakRef.current = false;
+            pendingPunctuationRef.current = '';
 
             if (allPendingWords.trim()) {
-                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words${addParagraphBreak ? ' (with paragraph break)' : ''}`);
-                executeGhostTranslation(allPendingWords, originalTextRef.current, addParagraphBreak);
+                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words${addParagraphBreak ? ` (with "${punctuation}" + paragraph break)` : ''}`);
+                executeGhostTranslation(allPendingWords, originalTextRef.current, addParagraphBreak, punctuation);
             }
         }, 100);
 
@@ -693,6 +749,9 @@ export function useStreamingMode(
         interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
         lastWordAddedTimeRef.current = Date.now(); // Reset paragraph break timer
         pendingParagraphBreakRef.current = false; // Clear pending paragraph break flag
+        pendingPunctuationRef.current = ''; // Clear pending punctuation
+        currentSentenceStartRef.current = ''; // Reset sentence tracking
+        currentSentenceWordCountRef.current = 0;
 
         // METRICS: Start metrics session
         metricsCollector.startSession();
@@ -735,8 +794,36 @@ export function useStreamingMode(
         // NOTE: Don't abort answer generation on stop - let it complete
         // User might want to see the answer after stopping recording
 
-        // Clear interim text on stop
-        setState(prev => ({ ...prev, isListening: false, interimText: '', interimGhostTranslation: '' }));
+        // FINAL PUNCTUATION: Add punctuation at end of session if needed
+        const finalPunctuation = getPunctuationMark(
+            currentSentenceStartRef.current,
+            currentSentenceWordCountRef.current
+        );
+
+        // Clear interim text on stop and add final punctuation
+        setState(prev => {
+            let updatedOriginal = prev.originalText;
+            let updatedGhost = prev.ghostTranslation;
+
+            // Add final punctuation if text doesn't already end with punctuation
+            if (finalPunctuation && updatedOriginal && !/[.?!]$/.test(updatedOriginal.trim())) {
+                updatedOriginal = updatedOriginal.trim() + finalPunctuation;
+                console.log(`📝 [StopSession] Added final "${finalPunctuation}" to original text`);
+            }
+            if (finalPunctuation && updatedGhost && !/[.?!]$/.test(updatedGhost.trim())) {
+                updatedGhost = updatedGhost.trim() + finalPunctuation;
+                console.log(`📝 [StopSession] Added final "${finalPunctuation}" to ghost translation`);
+            }
+
+            return {
+                ...prev,
+                isListening: false,
+                interimText: '',
+                interimGhostTranslation: '',
+                originalText: updatedOriginal,
+                ghostTranslation: updatedGhost
+            };
+        });
 
         // Final LLM translation (if there's untranslated content)
         try {
@@ -854,6 +941,9 @@ export function useStreamingMode(
         interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
         lastWordAddedTimeRef.current = Date.now(); // Reset paragraph break timer
         pendingParagraphBreakRef.current = false; // Clear pending paragraph break flag
+        pendingPunctuationRef.current = ''; // Clear pending punctuation
+        currentSentenceStartRef.current = ''; // Reset sentence tracking
+        currentSentenceWordCountRef.current = 0;
 
         console.log('🔄 [StreamingMode] Reset (including company info)');
     }, []);
