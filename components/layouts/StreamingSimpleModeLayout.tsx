@@ -107,7 +107,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     };
 
     return (
-        <div className="max-w-4xl mx-auto h-full flex flex-col">
+        <div className="max-w-[90%] mx-auto h-full flex flex-col">
             {/* Main Translation View */}
             <div className="flex-1">
                 <StreamingTextView

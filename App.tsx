@@ -1683,7 +1683,7 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* BOTTOM PANEL: Original Norwegian Text */}
+      {/* BOTTOM PANEL: Original Norwegian Text (6 lines max) */}
       {useStreamingUI && (streamingMode.state.originalText || streamingMode.state.interimText) && (
           <div className="shrink-0 border-t border-gray-800 bg-gray-900/80 backdrop-blur-sm">
               <div className="px-4 md:px-8 py-3">
@@ -1693,7 +1693,7 @@ const App: React.FC = () => {
                               {context.targetLanguage === 'Norwegian' ? 'NO' : context.targetLanguage.substring(0, 2).toUpperCase()}
                           </span>
                       </div>
-                      <div className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-24 overflow-y-auto" style={{ whiteSpace: 'pre-line' }}>
+                      <div className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-36 overflow-y-auto" style={{ whiteSpace: 'pre-line' }}>
                           <span>{streamingMode.state.originalText}</span>
                           {streamingMode.state.interimText && (
                               <span className="text-gray-500 italic ml-1">{streamingMode.state.interimText}</span>

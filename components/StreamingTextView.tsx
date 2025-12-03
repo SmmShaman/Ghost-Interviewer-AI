@@ -253,12 +253,12 @@ const StreamingTextView: React.FC<StreamingTextViewProps> = ({
                         <div className={`text-lg md:text-xl lg:text-2xl leading-relaxed font-medium`} style={{ whiteSpace: 'pre-line' }}>
                             {/* Finalized text - solid color (ref for direct DOM) */}
                             <span ref={translationRef} className={colors.text}></span>
-                            {/* Interim text - grey, italic with gradient fade (ref for direct DOM) */}
+                            {/* Interim text - RED, smaller with gradient fade (ref for direct DOM) */}
                             <span
                                 ref={interimTranslationRef}
-                                className="text-gray-400 italic ml-1"
+                                className="text-red-400 italic ml-1 text-base md:text-lg"
                                 style={{
-                                    background: 'linear-gradient(90deg, rgba(156,163,175,0.8) 0%, rgba(156,163,175,0.4) 100%)',
+                                    background: 'linear-gradient(90deg, rgba(248,113,113,0.9) 0%, rgba(248,113,113,0.5) 100%)',
                                     WebkitBackgroundClip: 'text',
                                     WebkitTextFillColor: 'transparent',
                                     display: interimTranslation ? 'inline' : 'none'
