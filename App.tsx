@@ -1536,6 +1536,44 @@ const App: React.FC = () => {
             >
               {llmTranslationEnabled ? 'LLM ✓' : 'LLM ✗'}
             </button>
+
+            {/* LLM Model Selector - only visible when LLM is enabled */}
+            {llmTranslationEnabled && (
+              <div className="flex items-center gap-1 bg-gray-900/50 rounded-lg border border-gray-700 p-0.5">
+                <button
+                  onClick={() => {
+                    console.log(`\n${'='.repeat(60)}`);
+                    console.log(`🔄 [MODEL SWITCH] Groq (Llama 3.3 70B)`);
+                    console.log(`${'='.repeat(60)}\n`);
+                    setContext(prev => ({ ...prev, llmProvider: 'groq' }));
+                  }}
+                  className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all ${
+                    context.llmProvider === 'groq'
+                      ? 'bg-orange-500 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  }`}
+                  title="Groq - Llama 3.3 70B (швидкий, безкоштовний)"
+                >
+                  GROQ
+                </button>
+                <button
+                  onClick={() => {
+                    console.log(`\n${'='.repeat(60)}`);
+                    console.log(`🔄 [MODEL SWITCH] Azure OpenAI (GPT-4)`);
+                    console.log(`${'='.repeat(60)}\n`);
+                    setContext(prev => ({ ...prev, llmProvider: 'azure' }));
+                  }}
+                  className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all ${
+                    context.llmProvider === 'azure'
+                      ? 'bg-blue-500 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  }`}
+                  title="Azure OpenAI - GPT-4 (якісний, потрібен API ключ)"
+                >
+                  AZURE
+                </button>
+              </div>
+            )}
         </div>
 
         <div className="flex items-center gap-3">
