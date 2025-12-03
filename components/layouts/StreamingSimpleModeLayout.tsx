@@ -93,16 +93,34 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     } else if (hasFrozenContent) {
         // LLM enabled with frozen content - use frozen + Ghost for active zone
         // This keeps old text stable while showing new text responsively
-        const ghostWords = accumulatedGhostTranslation.split(/\s+/);
-        const activeGhostWords = ghostWords.slice(frozenWordCount);
-        const activeGhostText = activeGhostWords.join(' ');
+
+        // IMPORTANT: Preserve line breaks (\n\n) when extracting active zone
+        // Split by words but track positions to preserve structure
+        const ghostText = accumulatedGhostTranslation;
+
+        // Find the position after frozenWordCount words, preserving line breaks
+        let wordCount = 0;
+        let cutPosition = 0;
+        const wordRegex = /\S+/g;
+        let match;
+
+        while ((match = wordRegex.exec(ghostText)) !== null) {
+            wordCount++;
+            if (wordCount >= frozenWordCount) {
+                cutPosition = match.index + match[0].length;
+                break;
+            }
+        }
+
+        // Get active text preserving line breaks
+        const activeGhostText = ghostText.substring(cutPosition).trim();
 
         displayTranslation = activeGhostText
-            ? `${frozenTranslation} ${activeGhostText}`
+            ? `${frozenTranslation}\n\n${activeGhostText}`
             : frozenTranslation;
         translationType = 'hybrid';
 
-        console.log(`🧊 [Display] HYBRID: ${frozenWordCount} frozen words + ${activeGhostWords.length} active Ghost words`);
+        console.log(`🧊 [Display] HYBRID: ${frozenWordCount} frozen words | Active: "${activeGhostText.substring(0, 50)}..."`);
     } else if (hasLLMContent) {
         // LLM enabled but no frozen yet - show LLM translation
         displayTranslation = accumulatedLLMTranslation;
