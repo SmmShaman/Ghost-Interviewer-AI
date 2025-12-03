@@ -43,10 +43,17 @@ Ghost Interviewer AI is a real-time interview assistance application that:
 │   └── Icons.tsx               # SVG icon components
 ├── services/
 │   ├── geminiService.ts        # Cloud LLM integration (Azure/Groq API calls)
-│   ├── localTranslator.ts      # Local translation service (Opus/NLLB models)
+│   ├── localTranslator.ts      # Local translation service (multi-method)
+│   ├── pivotTranslator.ts      # Two-step translation NO→EN→UK
+│   ├── glossaryProcessor.ts    # IT terminology with morphology
+│   ├── confidenceFilter.ts     # Translation quality heuristics
+│   ├── metricsCollector.ts     # Performance metrics tracking
 │   └── knowledgeSearch.ts      # TF-IDF search for Knowledge Base
+├── data/
+│   └── it-glossary.json        # 160+ IT terms with Ukrainian inflections
 ├── hooks/
-│   └── useProgressiveTranslation.ts  # Hook for progressive translation states
+│   ├── useProgressiveTranslation.ts  # Hook for progressive translation states
+│   └── useStreamingMode.ts     # Streaming translation with Hold-N
 ├── package.json                # Dependencies and scripts
 ├── tsconfig.json               # TypeScript configuration
 ├── vite.config.ts              # Vite build configuration
@@ -391,17 +398,21 @@ const BLOCK_CONFIG = {
 
 ### Translation Service (services/localTranslator.ts)
 
-Translation uses a priority-based fallback system:
+Translation uses a priority-based fallback system with integrated post-processing:
 
 ```
+Priority Chain:
 1. Chrome Translator API (Chrome 138+) → Instant, native, no download
-2. Transformers.js + WebGPU → 4-5x faster than WASM
-3. Transformers.js + WASM → Universal fallback
+2. Pivot Translation (NO→EN→UK)        → Two-step for better quality
+3. Direct Translation (Opus/NLLB)       → Single model, universal fallback
+
+Post-processing Pipeline:
+Translation → Glossary Processor → Confidence Filter → Output
 ```
 
 **Models:**
 - **Opus**: `goldcc/opus-mt-no-uk-int8` - Fast, quantized, 56MB
-- **NLLB**: `Xenova/nllb-200-distilled-600M` - Higher quality, 600MB
+- **NLLB**: `Xenova/nllb-200-distilled-600M` - Higher quality, 600MB, multilingual
 
 **Chrome Translator API (Chrome 138+):**
 ```typescript
@@ -428,8 +439,156 @@ await pipeline('translation', modelId, { device });
 localTranslator.translatePhraseChunked(text)  // For interim (cached chunks)
 localTranslator.translatePhrase(text)          // For finalized blocks
 localTranslator.isUsingChromeAPI()             // Check if using native API
-localTranslator.getStatus()                    // { isReady, useChromeAPI, ... }
+localTranslator.getStatus()                    // { isReady, useChromeAPI, pivotReady, usePivot, ... }
 ```
+
+### Pivot Translation Architecture (services/pivotTranslator.ts)
+
+Two-step translation pipeline for Norwegian → Ukrainian via English intermediate:
+
+```
+Norwegian (NO) → [NLLB Model] → English (EN) → [Opus Model] → Ukrainian (UK)
+```
+
+**Why Pivot?**
+- Direct NO→UK models have limited training data
+- English as intermediate leverages higher-quality translation paths
+- NO→EN and EN→UK both have excellent model support
+
+**Implementation:**
+```typescript
+class PivotTranslator {
+    // Step 1: Norwegian → English (using NLLB multilingual)
+    private async translateNoToEn(text: string): Promise<string> {
+        // Uses Xenova/nllb-200-distilled-600M
+        // Flores-200 codes: nob_Latn → eng_Latn
+    }
+
+    // Step 2: English → Ukrainian (using Opus specialized model)
+    private async translateEnToUk(text: string): Promise<string> {
+        // Uses Xenova/opus-mt-en-uk
+        // Direct bilingual model, higher quality
+    }
+
+    // Combined translation
+    async translate(norwegianText: string): Promise<PivotResult> {
+        const englishText = await this.translateNoToEn(norwegianText);
+        const ukrainianText = await this.translateEnToUk(englishText);
+        return { originalText, englishText, ukrainianText, method: 'pivot', timings };
+    }
+}
+```
+
+**Caching:**
+- English intermediate results are cached
+- Avoids re-translating NO→EN for repeated phrases
+- Cache key: normalized Norwegian text
+
+**Status:**
+```typescript
+pivotTranslator.isReady()       // Both models loaded
+pivotTranslator.getStatus()     // { noToEnReady, enToUkReady, isReady }
+pivotTranslator.initialize()    // Load both models
+```
+
+### IT Glossary with Morphology (services/glossaryProcessor.ts)
+
+Post-processing layer that ensures correct Ukrainian translations of IT terminology:
+
+**Problem:** Generic translation models often mistranslate IT terms:
+- "framework" → "каркас" (wrong) vs "фреймворк" (correct)
+- "deploy" → "розгорнути" (correct but often wrong case)
+- "API" → "АПІ" (should stay as "API")
+
+**Solution:** Pattern-based replacement with Ukrainian morphological inflections.
+
+**Glossary Structure (data/it-glossary.json):**
+```json
+{
+  "terms": [
+    {
+      "en": "framework",
+      "uk": "фреймворк",
+      "inflections": {
+        "nominative": "фреймворк",
+        "genitive": "фреймворку",
+        "dative": "фреймворку",
+        "accusative": "фреймворк",
+        "instrumental": "фреймворком",
+        "locative": "фреймворку"
+      },
+      "wrongTranslations": ["каркас", "рамка", "структура"]
+    }
+  ]
+}
+```
+
+**Categories (160+ terms):**
+- **Core**: framework, API, backend, frontend, database
+- **DevOps**: deploy, CI/CD, container, Kubernetes, Docker
+- **Interview**: technical interview, code review, whiteboard
+- **Frontend**: React, component, state, props, hooks
+- **Architecture**: microservices, serverless, event-driven
+
+**Processing Flow:**
+```typescript
+// After translation, fix IT terms
+const processedText = glossaryProcessor.processTranslation(rawTranslation);
+
+// Example:
+// Input:  "Ми використовуємо каркас React"
+// Output: "Ми використовуємо фреймворк React"
+```
+
+**Key methods:**
+```typescript
+glossaryProcessor.processTranslation(text)  // Fix IT terms in text
+glossaryProcessor.loadGlossary(path)        // Load glossary JSON
+glossaryProcessor.getStats()                // { termsLoaded, patternsGenerated }
+```
+
+### Confidence Filtering (services/confidenceFilter.ts)
+
+Heuristic-based quality assessment for translations (since ML models don't provide confidence scores):
+
+**Heuristics:**
+1. **Length ratio** - Translation should be 0.6-1.8x original length
+2. **Word count ratio** - Similar word count (0.3-2.5x)
+3. **Repetition detection** - Max 50% same word
+4. **Ukrainian character check** - Must contain Cyrillic for UK translations
+5. **Error markers** - Detect ❌, ⚠️, ⏳ placeholders
+
+**Scoring:**
+```typescript
+interface ConfidenceResult {
+    confidence: number;      // 0-100
+    isAcceptable: boolean;   // confidence >= 50
+    reasons: string[];       // Why confidence is low
+}
+
+// Example usage
+const result = calculateConfidence(original, translation);
+// { confidence: 85, isAcceptable: true, reasons: [] }
+
+// Low quality example
+const badResult = calculateConfidence("Hello world", "Привіт");
+// { confidence: 45, isAcceptable: false, reasons: ["Too short (ratio: 0.35)"] }
+```
+
+**Configuration:**
+```typescript
+const CONFIG = {
+    MIN_CONFIDENCE_THRESHOLD: 50,  // Below this = low quality
+    OPTIMAL_LENGTH_RATIO_MIN: 0.6,
+    OPTIMAL_LENGTH_RATIO_MAX: 1.8,
+    MAX_REPETITION_RATIO: 0.5,     // Max % of same word
+};
+```
+
+**Behavior:**
+- Logs warnings for low confidence translations
+- Returns translation anyway (doesn't block)
+- Metrics collector tracks confidence scores
 
 ## Styling Conventions
 
@@ -526,10 +685,25 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 - No automated tests currently in the codebase
 - Manual testing recommended with:
   - Different languages
-  - All three view modes
+  - All three view modes (SIMPLE/FOCUS/FULL)
   - Both model types (Opus/NLLB)
   - Both LLM providers (Azure/Groq)
   - Stereo audio mode
+  - Translation methods:
+    - Chrome Translator API (Chrome 138+)
+    - Pivot translation (NO→EN→UK)
+    - Direct translation (fallback)
+  - Streaming optimizations:
+    - Hold-N indicator appears during interim
+    - Text doesn't "jump" on corrections
+    - Long sentences auto-finalize after 1.5s
+    - No words lost during rapid speech
+  - IT glossary:
+    - Technical terms translated correctly
+    - Morphological inflections match context
+  - Confidence filtering:
+    - Low confidence warnings in console
+    - Metrics show confidence scores
 
 ## Security Considerations
 
@@ -560,6 +734,12 @@ Parsing logic is in `parseAndEmit()` in `geminiService.ts`.
 - **WebGPU**: Requires GPU, 4-5x faster than WASM
 - **Chunk caching**: Repeated phrases are cached, only new chunks translated
 - **Delta tracking**: Only NEW words processed, prevents duplicate commits
+- **Pivot caching**: English intermediate results cached for repeated phrases
+- **Hold-N (N=2)**: Hides last 2 interim words to reduce visible corrections
+- **Debounce accumulation**: Ref-based word collection prevents word loss
+- **Direct DOM**: requestAnimationFrame updates bypass React reconciliation
+- **Forced finalization**: 1.5s timer commits text during continuous speech
+- **Glossary patterns**: Pre-compiled regex patterns for fast IT term replacement
 
 ## Landing Page & Session Management
 
@@ -711,3 +891,195 @@ if (isSimpleMode) {
 ```
 
 This skips all context (Resume, Job, KB) and only requests translation.
+
+## Streaming Mode Optimizations (hooks/useStreamingMode.ts)
+
+Advanced real-time translation with multiple optimization techniques:
+
+### Hold-N (N=2) - Word Hiding
+
+Hides the last N words from interim display to reduce visible corrections:
+
+```typescript
+const HOLD_N = 2;  // Hide last 2 words
+
+// Example:
+// Speech: "Kan du fortelle meg om din erfaring"
+// Interim shows: "Kan du fortelle meg om din" (hides "erfaring")
+// After finalization: Full text appears
+```
+
+**Why Hold-N?**
+- Speech recognition often corrects recent words
+- Hiding last 2 words prevents visible "jumping"
+- Creates smoother reading experience
+
+**UI Indicator:**
+- When words are being held, `isHoldingWords` prop is true
+- Layouts show "..." or pulsing indicator
+
+### Debounce Accumulation (pendingWordsRef)
+
+Prevents word loss during rapid speech recognition updates:
+
+```typescript
+const pendingWordsRef = useRef<string[]>([]);
+
+// On speech update:
+pendingWordsRef.current.push(...newWords);
+
+// On debounce timer:
+const wordsToProcess = [...pendingWordsRef.current];
+pendingWordsRef.current = [];
+processWords(wordsToProcess);
+```
+
+**Problem Solved:**
+- Web Speech API fires rapidly during speech
+- React state updates can miss words
+- Ref accumulation ensures no words are lost
+
+### Forced Finalization (1.5s Timer)
+
+Forces text commit during continuous speech:
+
+```typescript
+const FORCED_FINALIZATION_MS = 1500;
+
+// Timer resets on each new word
+// If no new words for 1.5s, force finalize current interim
+useEffect(() => {
+    const timer = setTimeout(() => {
+        if (interimText) {
+            finalizeCurrentBlock();
+        }
+    }, FORCED_FINALIZATION_MS);
+    return () => clearTimeout(timer);
+}, [interimText]);
+```
+
+**Triggers:**
+- 1.5s silence during speech
+- 12+ words in current block
+- Sentence-ending punctuation detected
+
+### Direct DOM Rendering
+
+Uses refs + requestAnimationFrame instead of React state for smoother updates:
+
+```typescript
+const translationRef = useRef<HTMLDivElement>(null);
+
+// Update DOM directly, bypassing React reconciliation
+const updateTranslation = (text: string) => {
+    if (translationRef.current) {
+        requestAnimationFrame(() => {
+            translationRef.current!.textContent = text;
+        });
+    }
+};
+```
+
+**Benefits:**
+- No React re-render on every word
+- 60fps smooth text updates
+- Reduced CPU usage during speech
+
+### Scroll Anchoring
+
+Keeps translation in view as text grows:
+
+```typescript
+const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+    if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+}, [translationText]);
+```
+
+## Metrics Collection (services/metricsCollector.ts)
+
+Performance tracking for translation pipeline:
+
+### Collected Metrics
+
+```typescript
+interface TranslationMetrics {
+    // Timing
+    translationTimeMs: number;     // Time to translate
+    totalProcessingTimeMs: number; // End-to-end time
+
+    // Quality
+    confidenceScore: number;       // From confidence filter
+    wordCount: number;
+    characterCount: number;
+
+    // Method used
+    translationMethod: 'chrome' | 'pivot' | 'direct';
+    modelUsed: string;
+
+    // Errors
+    errors: string[];
+    retryCount: number;
+}
+```
+
+### Aggregated Statistics
+
+```typescript
+metricsCollector.getStats(): {
+    totalTranslations: number;
+    averageTimeMs: number;
+    averageConfidence: number;
+    methodBreakdown: { chrome: number; pivot: number; direct: number };
+    errorRate: number;
+}
+```
+
+### Integration Points
+
+```typescript
+// In useStreamingMode.ts
+import { metricsCollector } from '../services/metricsCollector';
+
+// Track each translation
+const startTime = performance.now();
+const result = await localTranslator.translatePhrase(text);
+const endTime = performance.now();
+
+metricsCollector.record({
+    translationTimeMs: endTime - startTime,
+    wordCount: text.split(/\s+/).length,
+    translationMethod: localTranslator.getStatus().useChromeAPI ? 'chrome' : 'direct',
+    // ...
+});
+```
+
+## Translation Method UI Indicator
+
+All three layout components display the current translation method:
+
+```typescript
+const getTranslationMethodLabel = () => {
+    const status = localTranslator.getStatus();
+    if (status.useChromeAPI) {
+        return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
+    }
+    if (status.pivotReady && status.usePivot) {
+        return { label: 'Pivot NO→EN→UK', bgClass: 'bg-purple-400', textClass: 'text-purple-400' };
+    }
+    return { label: 'Direct', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
+};
+```
+
+**Colors:**
+- **Blue**: Chrome Translator API (native, instant)
+- **Purple**: Pivot Translation (NO→EN→UK)
+- **Cyan**: Direct Translation (single model)
+
+**Location:**
+- SIMPLE mode: Bottom stats bar
+- FOCUS mode: Bottom stats bar
+- FULL mode: Answer section header
