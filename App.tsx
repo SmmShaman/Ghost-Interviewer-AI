@@ -1519,7 +1519,14 @@ const App: React.FC = () => {
             </button>
             {/* LLM Translation Toggle */}
             <button
-              onClick={() => setLlmTranslationEnabled(!llmTranslationEnabled)}
+              onClick={() => {
+                const newValue = !llmTranslationEnabled;
+                console.log(`\n${'='.repeat(60)}`);
+                console.log(`🔄 [LLM TOGGLE] ${newValue ? '✅ УВІМКНЕНО' : '❌ ВИМКНЕНО'}`);
+                console.log(`   Режим: ${newValue ? 'Ghost + LLM (якісний переклад)' : 'Тільки Ghost/Chrome (швидкий переклад)'}`);
+                console.log(`${'='.repeat(60)}\n`);
+                setLlmTranslationEnabled(newValue);
+              }}
               className={`px-3 py-1.5 text-xs font-black rounded-lg border transition-all shadow-lg shadow-black/20 ${
                 llmTranslationEnabled
                   ? 'bg-purple-600 border-purple-500 text-white hover:bg-purple-500'
