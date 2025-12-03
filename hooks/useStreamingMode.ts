@@ -301,6 +301,13 @@ export function useStreamingMode(
                 };
             });
 
+            // === GHOST LOG ===
+            console.log(`\n${'─'.repeat(50)}`);
+            console.log(`👻 [GHOST ПЕРЕКЛАД] Завершено`);
+            console.log(`   📝 Вхід: "${newWords.substring(0, 100)}${newWords.length > 100 ? '...' : ''}"`);
+            console.log(`   🇺🇦 Вихід: "${translation.substring(0, 100)}${translation.length > 100 ? '...' : ''}"`);
+            console.log(`${'─'.repeat(50)}\n`);
+
             opts.onGhostUpdate(translation);
         } catch (e) {
             console.error('Ghost translation error:', e);
@@ -312,7 +319,11 @@ export function useStreamingMode(
     const executeLLMTranslation = useCallback(async () => {
         // Skip if LLM translation is disabled
         if (!opts.llmTranslationEnabled) {
-            console.log('🚫 [LLM] Translation disabled - using Ghost only');
+            console.log(`\n${'─'.repeat(50)}`);
+            console.log(`🚫 [LLM] ВИМКНЕНО - використовується тільки Ghost`);
+            console.log(`   📝 Оригінал: "${originalTextRef.current.substring(0, 80)}..."`);
+            console.log(`   👻 Ghost переклад: "${llmTranslationRef.current ? 'є' : 'немає'}"`);
+            console.log(`${'─'.repeat(50)}\n`);
             return;
         }
 
@@ -362,6 +373,19 @@ export function useStreamingMode(
             const activeTranslation = translationWords.slice(freezeTranslationWordCount).join(' ');
 
             console.log(`🧊 [LLM] Freezing ${freezeTranslationWordCount} words, active: ${translationWords.length - freezeTranslationWordCount} words`);
+
+            // === COMPARISON LOG: Ghost vs LLM ===
+            console.log(`\n${'═'.repeat(60)}`);
+            console.log(`📊 [ПОРІВНЯННЯ ПЕРЕКЛАДУ] LLM УВІМКНЕНО`);
+            console.log(`${'─'.repeat(60)}`);
+            console.log(`📝 ОРИГІНАЛ (${originalWords.length} слів):`);
+            console.log(`   "${currentOriginalText.substring(0, 200)}${currentOriginalText.length > 200 ? '...' : ''}"`);
+            console.log(`${'─'.repeat(60)}`);
+            console.log(`🤖 LLM ПЕРЕКЛАД (тип: ${result.intent.speechType}):`);
+            console.log(`   "${result.translation.substring(0, 200)}${result.translation.length > 200 ? '...' : ''}"`);
+            console.log(`${'─'.repeat(60)}`);
+            console.log(`❓ Питання виявлено: ${result.intent.containsQuestion ? `ТАК (${result.intent.questionConfidence}% впевненість)` : 'НІ'}`);
+            console.log(`${'═'.repeat(60)}\n`);
 
             // UPDATE LLM QUESTION REF: Store question detection for punctuation
             if (result.intent.containsQuestion && result.intent.questionConfidence >= 70) {
