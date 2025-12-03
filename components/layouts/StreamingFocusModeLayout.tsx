@@ -14,8 +14,7 @@
  * └────────────────────────────────┴──────────────────────────────┘
  */
 
-import React from 'react';
-import StreamingTextView from '../StreamingTextView';
+import React, { useEffect, useRef } from 'react';
 import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingFocusModeLayoutProps {
@@ -51,6 +50,38 @@ interface StreamingFocusModeLayoutProps {
     sessionDuration?: number;
 }
 
+/**
+ * Render text with paragraph-aware coloring
+ * Questions (ending with ?) are highlighted in amber
+ * Statements are rendered in cyan/white
+ */
+const renderColoredParagraphs = (text: string, interimText: string = '') => {
+    if (!text && !interimText) return null;
+
+    // Split by paragraph markers
+    const paragraphs = text.split('\n\n').filter(p => p.trim());
+
+    return (
+        <>
+            {paragraphs.map((paragraph, index) => {
+                const isQuestion = paragraph.trim().endsWith('?');
+                const colorClass = isQuestion ? 'text-amber-300' : 'text-cyan-100';
+
+                return (
+                    <React.Fragment key={index}>
+                        <span className={colorClass}>{paragraph}</span>
+                        {index < paragraphs.length - 1 && <br /><br />}
+                    </React.Fragment>
+                );
+            })}
+            {/* Interim text - grey, italic */}
+            {interimText && (
+                <span className="text-gray-400 italic ml-1">{interimText}</span>
+            )}
+        </>
+    );
+};
+
 const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     accumulatedOriginal,
     accumulatedGhostTranslation,
@@ -70,15 +101,17 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // SINGLE SOURCE OF TRUTH: Ghost translation only (no switching!)
-    // LLM is used for intent detection and answer generation, NOT for display
-    // This eliminates race condition and "jumping" text
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Auto-scroll to bottom
+    useEffect(() => {
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+    }, [accumulatedGhostTranslation, interimGhostTranslation]);
 
     // Display ONLY Ghost translation - consistent, no flickering
     const displayTranslation = accumulatedGhostTranslation;
-
-    // Always show as Ghost (since we only display Ghost now)
-    const translationType = 'ghost';
 
     // Get translation method for indicator
     const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
@@ -112,37 +145,91 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         }
     };
 
+    // Count questions in text
+    const questionCount = (displayTranslation.match(/\?/g) || []).length;
+
     return (
         <div className="max-w-[1600px] mx-auto h-full flex flex-col">
             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                {/* COLUMN 1: Translation (Streaming) */}
+                {/* COLUMN 1: Translation (Streaming) with paragraph-aware coloring */}
                 <div className="flex flex-col h-full">
-                    <StreamingTextView
-                        translationText={displayTranslation}
-                        originalText={accumulatedOriginal}
-                        interimTranslation={interimGhostTranslation}
-                        interimOriginal={interimText}
-                        isActive={isListening}
-                        isProcessing={isProcessingLLM}
-                        variant={translationType === 'llm' ? 'llm' : 'ghost'}
-                        showOriginal={false}
-                        showCursor={isListening}
-                        isHoldingWords={!!interimText}
-                        accentColor={containsQuestion ? 'amber' : 'cyan'}
-                        title={getSpeechTypeLabel()}
-                        minHeight="400px"
-                        maxHeight="calc(100vh - 14rem)"
-                    />
-
-                    {/* Question detection indicator */}
-                    {containsQuestion && questionConfidence > 50 && (
-                        <div className="mt-2 px-4 py-2 bg-amber-900/30 border border-amber-500/30 rounded-lg flex items-center gap-3">
-                            <div className="w-3 h-3 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
-                            <span className="text-sm text-amber-300 font-medium">
-                                Виявлено питання ({questionConfidence}% впевненість)
-                            </span>
+                    <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl flex flex-col overflow-hidden" style={{ minHeight: '400px', maxHeight: 'calc(100vh - 14rem)' }}>
+                        {/* Header */}
+                        <div className="px-4 py-2.5 bg-cyan-950/30 border-b border-cyan-500/10 flex items-center justify-between sticky top-0 backdrop-blur z-10">
+                            <div className="flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full bg-cyan-400 ${isListening ? 'animate-pulse shadow-[0_0_8px_rgba(34,211,238,0.8)]' : ''}`}></span>
+                                <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest">
+                                    Переклад
+                                </span>
+                                {questionCount > 0 && (
+                                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded">
+                                        {questionCount} питань
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {isProcessingLLM && (
+                                    <div className="flex gap-0.5">
+                                        <div className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
+                                        <div className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '100ms'}}></div>
+                                        <div className="w-1 h-3 bg-cyan-400 rounded-full animate-pulse" style={{animationDelay: '200ms'}}></div>
+                                    </div>
+                                )}
+                                {wordCount > 0 && (
+                                    <span className="text-[10px] font-mono text-cyan-300 bg-black/20 px-2 py-0.5 rounded">
+                                        {wordCount} слів
+                                    </span>
+                                )}
+                            </div>
                         </div>
-                    )}
+
+                        {/* Main Content - Custom paragraph rendering */}
+                        <div
+                            ref={containerRef}
+                            className="flex-1 overflow-y-auto p-4 md:p-6"
+                        >
+                            {(displayTranslation || interimGhostTranslation) ? (
+                                <div className="text-lg md:text-xl lg:text-2xl leading-relaxed font-medium" style={{ whiteSpace: 'pre-line' }}>
+                                    {renderColoredParagraphs(displayTranslation, interimGhostTranslation)}
+                                    {isListening && !interimGhostTranslation && (
+                                        <span className="inline-block ml-1 text-cyan-400 animate-pulse">▊</span>
+                                    )}
+                                </div>
+                            ) : (
+                                /* Empty State */
+                                <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                                    <div className="w-16 h-16 rounded-full bg-cyan-900/10 border border-cyan-500 flex items-center justify-center mb-4">
+                                        <svg className="w-8 h-8 text-cyan-300 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                        </svg>
+                                    </div>
+                                    <div className="text-sm text-cyan-300 opacity-70 mb-2">
+                                        {isListening ? 'Слухаю...' : 'Очікую запис'}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                        {isListening
+                                            ? 'Текст з\'явиться тут миттєво'
+                                            : 'Натисніть мікрофон щоб почати'
+                                        }
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Legend */}
+                        {displayTranslation && (
+                            <div className="px-4 py-2 bg-cyan-950/30 border-t border-cyan-500/10 flex items-center gap-4 text-[10px]">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                                    <span className="text-cyan-400">Розповідь</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                                    <span className="text-amber-400">Питання</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* COLUMN 2: Answer (Sticky) */}
