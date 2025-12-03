@@ -16,6 +16,7 @@
 
 import React from 'react';
 import StreamingTextView from '../StreamingTextView';
+import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingFullModeLayoutProps {
     // Накопичений стан перекладу
@@ -86,6 +87,19 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
 
     // Always show as Ghost (since we only display Ghost now)
     const translationType = 'ghost';
+
+    // Get translation method for indicator
+    const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
+        const status = localTranslator.getStatus();
+        if (status.useChromeAPI) {
+            return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
+        }
+        if (status.pivotReady && status.usePivot) {
+            return { label: 'Pivot NO→EN→UK', bgClass: 'bg-purple-400', textClass: 'text-purple-400' };
+        }
+        return { label: 'Direct', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
+    };
+    const methodInfo = getTranslationMethodLabel();
 
     // Format duration
     const formatDuration = (ms: number): string => {
@@ -255,6 +269,11 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
                             {sessionDuration > 0 && (
                                 <span className="text-gray-500">{formatDuration(sessionDuration)}</span>
                             )}
+                            {/* Translation method indicator */}
+                            <div className="flex items-center gap-1">
+                                <span className={`w-1.5 h-1.5 rounded-full ${methodInfo.bgClass}`}></span>
+                                <span className={`${methodInfo.textClass}`}>{methodInfo.label}</span>
+                            </div>
                             {isListening && (
                                 <div className="flex items-center gap-1 text-red-400">
                                     <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
