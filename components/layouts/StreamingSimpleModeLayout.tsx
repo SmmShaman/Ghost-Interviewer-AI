@@ -70,29 +70,65 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // SMART DISPLAY: Show LLM when enabled and available, otherwise Ghost
-    // LLM gives better quality but takes longer to arrive
-    // Ghost is instant but lower quality
+    // SMART DISPLAY with FROZEN ZONE support
+    // Frozen translation = stable text that won't change (from LLM)
+    // Active translation = text still being refined
 
     // Decision logic:
-    // 1. If LLM is disabled → always Ghost
-    // 2. If LLM is enabled AND has content → show LLM
-    // 3. If LLM is enabled but no content yet → show Ghost as fallback
+    // 1. If LLM disabled → always Ghost (append-only, naturally stable)
+    // 2. If LLM enabled → use frozenTranslation (stable) + Ghost for new text
+    //    This combines LLM quality for old text with Ghost responsiveness for new text
+
     const hasLLMContent = llmTranslationEnabled && accumulatedLLMTranslation && accumulatedLLMTranslation.trim().length > 0;
-    const displayTranslation = hasLLMContent ? accumulatedLLMTranslation : accumulatedGhostTranslation;
-    const translationType = hasLLMContent ? 'llm' : 'ghost';
+    const hasFrozenContent = frozenTranslation && frozenTranslation.trim().length > 0;
+
+    // Calculate display translation with frozen zone support
+    let displayTranslation: string;
+    let translationType: 'llm' | 'ghost' | 'hybrid';
+
+    if (!llmTranslationEnabled) {
+        // LLM disabled - use Ghost only (stable, append-only)
+        displayTranslation = accumulatedGhostTranslation;
+        translationType = 'ghost';
+    } else if (hasFrozenContent) {
+        // LLM enabled with frozen content - use frozen + Ghost for active zone
+        // This keeps old text stable while showing new text responsively
+        const ghostWords = accumulatedGhostTranslation.split(/\s+/);
+        const activeGhostWords = ghostWords.slice(frozenWordCount);
+        const activeGhostText = activeGhostWords.join(' ');
+
+        displayTranslation = activeGhostText
+            ? `${frozenTranslation} ${activeGhostText}`
+            : frozenTranslation;
+        translationType = 'hybrid';
+
+        console.log(`🧊 [Display] HYBRID: ${frozenWordCount} frozen words + ${activeGhostWords.length} active Ghost words`);
+    } else if (hasLLMContent) {
+        // LLM enabled but no frozen yet - show LLM translation
+        displayTranslation = accumulatedLLMTranslation;
+        translationType = 'llm';
+    } else {
+        // LLM enabled but no LLM content yet - fallback to Ghost
+        displayTranslation = accumulatedGhostTranslation;
+        translationType = 'ghost';
+    }
 
     // Log when source changes (for debugging)
-    console.log(`🖥️ [Display] Source: ${translationType.toUpperCase()} | LLM enabled: ${llmTranslationEnabled} | LLM content: ${accumulatedLLMTranslation?.length || 0} chars`);
+    console.log(`🖥️ [Display] Source: ${translationType.toUpperCase()} | LLM enabled: ${llmTranslationEnabled} | Frozen: ${hasFrozenContent ? frozenWordCount + ' words' : 'none'}`);
 
     // Get translation method for indicator
     const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
-        // If showing LLM translation, indicate that
-        if (hasLLMContent) {
+        // Hybrid mode - frozen LLM + active Ghost
+        if (translationType === 'hybrid') {
+            return { label: `LLM+Ghost (${frozenWordCount} замор.)`, bgClass: 'bg-emerald-500', textClass: 'text-emerald-400' };
+        }
+
+        // Pure LLM
+        if (translationType === 'llm') {
             return { label: 'LLM (якісний)', bgClass: 'bg-purple-500', textClass: 'text-purple-400' };
         }
 
-        // Otherwise show Ghost method
+        // Ghost mode - show underlying method
         const status = localTranslator.getStatus();
         if (status.useChromeAPI) {
             return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
@@ -132,12 +168,12 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     interimOriginal={interimText}
                     isActive={isListening}
                     isProcessing={isProcessingLLM}
-                    variant={translationType === 'llm' ? 'llm' : 'ghost'}
+                    variant={translationType === 'ghost' ? 'ghost' : 'llm'}
                     showOriginal={showOriginal}
                     showCursor={isListening}
                     isHoldingWords={!!interimText}
-                    accentColor={translationType === 'llm' ? 'emerald' : 'cyan'}
-                    title={translationType === 'llm' ? 'LLM Переклад' : 'Миттєвий переклад'}
+                    accentColor={translationType === 'hybrid' ? 'emerald' : translationType === 'llm' ? 'emerald' : 'cyan'}
+                    title={translationType === 'hybrid' ? 'LLM + Ghost (стабільний)' : translationType === 'llm' ? 'LLM Переклад' : 'Миттєвий переклад'}
                     minHeight="400px"
                     maxHeight="calc(100vh - 16rem)"
                 />
