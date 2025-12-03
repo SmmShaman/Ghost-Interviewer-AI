@@ -12,6 +12,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext } from '../types';
 import { localTranslator } from '../services/localTranslator';
 import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
+import { metricsCollector } from '../services/metricsCollector';
 
 export interface StreamingState {
     // Text content
@@ -215,6 +216,10 @@ export function useStreamingMode(
                     console.log(`⚠️ [Ghost] Translation already appended, skipping`);
                     return { ...prev, isProcessingGhost: false };
                 }
+
+                // METRICS: Record words translated
+                const translatedWordCount = translation.split(/\s+/).length;
+                metricsCollector.recordWordsTranslated(translatedWordCount);
 
                 // APPEND ONLY: Never modify existing translation
                 return {
@@ -472,6 +477,10 @@ export function useStreamingMode(
             return;
         }
 
+        // METRICS: Record words received
+        const wordCount = trimmedNew.split(/\s+/).length;
+        metricsCollector.recordWordsReceived(wordCount);
+
         // Update state AND keep refs in sync
         setState(prev => {
             const newOriginal = prev.originalText
@@ -655,6 +664,9 @@ export function useStreamingMode(
         pendingWordsRef.current = []; // Clear pending words accumulator
         interimCacheRef.current = { originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 }; // Clear interim cache
 
+        // METRICS: Start metrics session
+        metricsCollector.startSession();
+
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
 
@@ -723,6 +735,10 @@ export function useStreamingMode(
                 }
             }
         }
+
+        // METRICS: Stop and log session metrics
+        metricsCollector.stopSession();
+        metricsCollector.logMetrics();
 
         console.log('🛑 [StreamingMode] Session stopped');
     }, [executeLLMTranslation, executeAnswerGeneration]);

@@ -122,6 +122,7 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
                         variant={translationType === 'llm' ? 'llm' : 'ghost'}
                         showOriginal={false}
                         showCursor={isListening}
+                        isHoldingWords={!!interimText}
                         accentColor={containsQuestion ? 'amber' : 'cyan'}
                         title={getSpeechTypeLabel()}
                         minHeight="300px"

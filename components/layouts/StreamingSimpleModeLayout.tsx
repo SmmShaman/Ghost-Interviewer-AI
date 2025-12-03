@@ -106,6 +106,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     variant={translationType === 'llm' ? 'llm' : 'ghost'}
                     showOriginal={showOriginal}
                     showCursor={isListening}
+                    isHoldingWords={!!interimText}
                     accentColor={translationType === 'llm' ? 'emerald' : 'cyan'}
                     title={translationType === 'llm' ? 'LLM Переклад' : 'Миттєвий переклад'}
                     minHeight="400px"

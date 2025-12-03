@@ -1,6 +1,7 @@
 
 
 import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
+import { glossaryProcessor } from './glossaryProcessor';
 
 // CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
 env.allowLocalModels = false;
@@ -469,10 +470,12 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
-            if (onProgress) onProgress(chromeResult);
+            // POST-PROCESSING: Apply IT glossary
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            if (onProgress) onProgress(processedResult);
             return [{
                 original: text,
-                ghostTranslation: chromeResult,
+                ghostTranslation: processedResult,
                 status: 'ghost'
             }];
         }
@@ -525,9 +528,12 @@ class LocalTranslator {
 
         const fullTranslation = translations.join(' ');
 
+        // POST-PROCESSING: Apply IT glossary for correct terminology
+        const processedTranslation = glossaryProcessor.processTranslation(fullTranslation);
+
         return [{
             original: text,
-            ghostTranslation: fullTranslation,
+            ghostTranslation: processedTranslation,
             status: 'ghost'
         }];
     }
@@ -542,9 +548,11 @@ class LocalTranslator {
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
+            // POST-PROCESSING: Apply IT glossary
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
             return [{
                 original: text,
-                ghostTranslation: chromeResult,
+                ghostTranslation: processedResult,
                 status: 'ghost'
             }];
         }
@@ -576,9 +584,12 @@ class LocalTranslator {
 
             if (!translatedText) translatedText = "⚠️";
 
+            // POST-PROCESSING: Apply IT glossary
+            const processedText = glossaryProcessor.processTranslation(translatedText);
+
             return [{
                 original: text,
-                ghostTranslation: translatedText,
+                ghostTranslation: processedText,
                 status: 'ghost'
             }];
 
