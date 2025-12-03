@@ -1596,6 +1596,7 @@ const App: React.FC = () => {
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
+                 llmTranslationEnabled={llmTranslationEnabled}
                  showOriginal={false}
                  showGhost={false}
                  preferLLM={true}

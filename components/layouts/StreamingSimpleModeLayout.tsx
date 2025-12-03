@@ -40,6 +40,9 @@ interface StreamingSimpleModeLayoutProps {
     isListening: boolean;
     isProcessingLLM: boolean;
 
+    // LLM Toggle - controls whether to display LLM translation
+    llmTranslationEnabled?: boolean;
+
     // Налаштування
     showOriginal?: boolean;
     showGhost?: boolean;              // Показувати Ghost або LLM
@@ -60,24 +63,36 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     interimGhostTranslation = '',
     isListening,
     isProcessingLLM,
+    llmTranslationEnabled = false,
     showOriginal = true,
     showGhost = true,
     preferLLM = true,
     wordCount,
     sessionDuration = 0
 }) => {
-    // SINGLE SOURCE OF TRUTH: Ghost translation only (no switching!)
-    // LLM is used for intent detection, NOT for display
-    // This eliminates race condition and "jumping" text
+    // SMART DISPLAY: Show LLM when enabled and available, otherwise Ghost
+    // LLM gives better quality but takes longer to arrive
+    // Ghost is instant but lower quality
 
-    // Display ONLY Ghost translation - consistent, no flickering
-    const displayTranslation = accumulatedGhostTranslation;
+    // Decision logic:
+    // 1. If LLM is disabled → always Ghost
+    // 2. If LLM is enabled AND has content → show LLM
+    // 3. If LLM is enabled but no content yet → show Ghost as fallback
+    const hasLLMContent = llmTranslationEnabled && accumulatedLLMTranslation && accumulatedLLMTranslation.trim().length > 0;
+    const displayTranslation = hasLLMContent ? accumulatedLLMTranslation : accumulatedGhostTranslation;
+    const translationType = hasLLMContent ? 'llm' : 'ghost';
 
-    // Always show as Ghost (since we only display Ghost now)
-    const translationType = 'ghost';
+    // Log when source changes (for debugging)
+    console.log(`🖥️ [Display] Source: ${translationType.toUpperCase()} | LLM enabled: ${llmTranslationEnabled} | LLM content: ${accumulatedLLMTranslation?.length || 0} chars`);
 
     // Get translation method for indicator
     const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
+        // If showing LLM translation, indicate that
+        if (hasLLMContent) {
+            return { label: 'LLM (якісний)', bgClass: 'bg-purple-500', textClass: 'text-purple-400' };
+        }
+
+        // Otherwise show Ghost method
         const status = localTranslator.getStatus();
         if (status.useChromeAPI) {
             return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
@@ -85,7 +100,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         if (status.pivotReady && status.usePivot) {
             return { label: 'Pivot NO→EN→UK', bgClass: 'bg-purple-400', textClass: 'text-purple-400' };
         }
-        return { label: 'Direct', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
+        return { label: 'Ghost (швидкий)', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
     };
     const methodInfo = getTranslationMethodLabel();
 
