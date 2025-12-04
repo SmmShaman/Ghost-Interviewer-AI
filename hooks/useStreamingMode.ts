@@ -602,18 +602,31 @@ export function useStreamingMode(
         }
 
         // Check 2: Word-level overlap detection
-        // Prevents adding text that significantly overlaps with what we already have
+        // Only skip if new text is MOSTLY a duplicate (not just starting with same words)
         if (currentOriginal) {
-            const newWords = trimmedNew.split(/\s+/);
+            const newWordsArray = trimmedNew.split(/\s+/);
+            const newWordCount = newWordsArray.length;
             const lastOriginalWords = currentOriginal.split(/\s+/).slice(-30); // Last 30 words
+            const lastOriginalText = lastOriginalWords.join(' ');
 
-            // Check if first 3+ words of new text match anywhere in last 30 words of original
-            if (newWords.length >= 3) {
-                const firstThreeWords = newWords.slice(0, 3).join(' ');
-                const lastOriginalText = lastOriginalWords.join(' ');
-                if (lastOriginalText.includes(firstThreeWords)) {
-                    console.log(`⚠️ [addWords] Skipping overlap (first 3 words "${firstThreeWords}" found in recent text)`);
+            // Find how many leading words of new text exist in recent original
+            let overlapWordCount = 0;
+            for (let i = Math.min(newWordCount, 10); i >= 3; i--) {
+                const firstNWords = newWordsArray.slice(0, i).join(' ');
+                if (lastOriginalText.includes(firstNWords)) {
+                    overlapWordCount = i;
+                    break;
+                }
+            }
+
+            // Only block if overlap is > 50% of new text (i.e., mostly duplicate)
+            if (overlapWordCount > 0) {
+                const overlapRatio = overlapWordCount / newWordCount;
+                if (overlapRatio > 0.5) {
+                    console.log(`⚠️ [addWords] Skipping overlap (${overlapWordCount}/${newWordCount} words = ${Math.round(overlapRatio * 100)}% overlap)`);
                     return;
+                } else {
+                    console.log(`✅ [addWords] Allowing text despite ${overlapWordCount} overlapping words (only ${Math.round(overlapRatio * 100)}% of ${newWordCount} words)`);
                 }
             }
 
