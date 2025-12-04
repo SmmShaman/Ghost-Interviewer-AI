@@ -750,9 +750,10 @@ export function useStreamingMode(
         const allWords = interimText.trim().split(/\s+/).filter(w => w.length > 0);
 
         // HOLD-N: Hide last N words from display (they're most unstable)
+        // BUT if we have too few words, show all of them (better than nothing)
         const displayWords = allWords.length > HOLD_N
             ? allWords.slice(0, -HOLD_N)
-            : [];
+            : allWords;  // Show all words if we can't hide N
         const displayText = displayWords.join(' ');
 
         // Update interim text with Hold-N applied
