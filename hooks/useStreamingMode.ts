@@ -361,18 +361,16 @@ export function useStreamingMode(
 
             // SLIDING WINDOW: Freeze old part of translation
             // Keep last 50 words "active", freeze the rest
+            // IMPORTANT: Never REPLACE frozen text, only APPEND to it!
             const ACTIVE_WINDOW_WORDS = 50;
             const translationWords = result.translation.split(/\s+/);
             const originalWords = currentOriginalText.split(/\s+/);
 
             // Calculate freeze point: freeze everything except last ACTIVE_WINDOW_WORDS
-            const freezeWordCount = Math.max(0, originalWords.length - ACTIVE_WINDOW_WORDS);
-            const freezeTranslationWordCount = Math.max(0, translationWords.length - ACTIVE_WINDOW_WORDS);
+            const newFreezeWordCount = Math.max(0, originalWords.length - ACTIVE_WINDOW_WORDS);
+            const newFreezeTranslationWordCount = Math.max(0, translationWords.length - ACTIVE_WINDOW_WORDS);
 
-            const newFrozenTranslation = translationWords.slice(0, freezeTranslationWordCount).join(' ');
-            const activeTranslation = translationWords.slice(freezeTranslationWordCount).join(' ');
-
-            console.log(`🧊 [LLM] Freezing ${freezeTranslationWordCount} words, active: ${translationWords.length - freezeTranslationWordCount} words`);
+            console.log(`🧊 [LLM] Freeze calculation: ${newFreezeTranslationWordCount} words to freeze, ${translationWords.length - newFreezeTranslationWordCount} active`);
 
             // === COMPARISON LOG: Ghost vs LLM ===
             console.log(`\n${'═'.repeat(60)}`);
@@ -393,25 +391,55 @@ export function useStreamingMode(
                 console.log(`🧠 [LLM] Question detected with ${result.intent.questionConfidence}% confidence → stored for punctuation`);
             }
 
-            setState(prev => ({
-                ...prev,
-                llmTranslation: result.translation,
-                // Only update frozen if we have more frozen content than before
-                frozenTranslation: newFrozenTranslation.length > prev.frozenTranslation.length
-                    ? newFrozenTranslation
-                    : prev.frozenTranslation,
-                frozenWordCount: freezeWordCount > prev.frozenWordCount
-                    ? freezeWordCount
-                    : prev.frozenWordCount,
-                containsQuestion: result.intent.containsQuestion,
-                questionConfidence: result.intent.questionConfidence,
-                speechType: result.intent.speechType,
-                // Accumulate company info when detected
-                extractedCompanyInfo: newCompanyInfo
-                    ? [...prev.extractedCompanyInfo, newCompanyInfo]
-                    : prev.extractedCompanyInfo,
-                isProcessingLLM: false
-            }));
+            setState(prev => {
+                // FROZEN ZONE FIX: Never replace, only append new frozen content
+                // 1. Keep existing frozen translation intact
+                // 2. Only add NEW words that are now being frozen (not previously frozen)
+                let updatedFrozenTranslation = prev.frozenTranslation;
+                let updatedFrozenWordCount = prev.frozenWordCount;
+
+                if (newFreezeWordCount > prev.frozenWordCount) {
+                    // There are new words to freeze
+                    // Calculate how many NEW translation words to add to frozen zone
+                    const prevFrozenTranslationWords = prev.frozenTranslation.split(/\s+/).filter(w => w).length;
+                    const newWordsToFreeze = newFreezeTranslationWordCount - prevFrozenTranslationWords;
+
+                    if (newWordsToFreeze > 0) {
+                        // Get the NEW words from translation (starting after previously frozen words)
+                        const newFrozenWords = translationWords.slice(prevFrozenTranslationWords, newFreezeTranslationWordCount);
+                        const newFrozenPart = newFrozenWords.join(' ');
+
+                        // APPEND to existing frozen translation (with paragraph break to preserve structure)
+                        if (prev.frozenTranslation && newFrozenPart) {
+                            updatedFrozenTranslation = prev.frozenTranslation + '\n\n' + newFrozenPart;
+                        } else if (newFrozenPart) {
+                            updatedFrozenTranslation = newFrozenPart;
+                        }
+
+                        updatedFrozenWordCount = newFreezeWordCount;
+                        console.log(`🧊 [LLM] APPENDING ${newWordsToFreeze} new frozen words (total: ${newFreezeTranslationWordCount})`);
+                        console.log(`   OLD frozen: "${prev.frozenTranslation.substring(0, 50)}..."`);
+                        console.log(`   NEW part: "${newFrozenPart.substring(0, 50)}..."`);
+                    }
+                } else {
+                    console.log(`🧊 [LLM] No new words to freeze (current: ${prev.frozenWordCount}, needed: ${newFreezeWordCount})`);
+                }
+
+                return {
+                    ...prev,
+                    llmTranslation: result.translation,
+                    frozenTranslation: updatedFrozenTranslation,
+                    frozenWordCount: updatedFrozenWordCount,
+                    containsQuestion: result.intent.containsQuestion,
+                    questionConfidence: result.intent.questionConfidence,
+                    speechType: result.intent.speechType,
+                    // Accumulate company info when detected
+                    extractedCompanyInfo: newCompanyInfo
+                        ? [...prev.extractedCompanyInfo, newCompanyInfo]
+                        : prev.extractedCompanyInfo,
+                    isProcessingLLM: false
+                };
+            });
 
             opts.onLLMUpdate(result);
 
