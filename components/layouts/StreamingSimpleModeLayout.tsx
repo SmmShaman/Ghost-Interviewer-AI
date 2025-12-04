@@ -4,22 +4,27 @@
  * Нова потокова архітектура для SIMPLE режиму.
  * Замість блоків - один безперервний потік тексту як субтитри.
  *
- * LAYOUT:
+ * THREE-ZONE LAYOUT:
  * ┌─────────────────────────────────────────────────────────────┐
- * │                   ПЕРЕКЛАД (великий)                        │
+ * │  🧊 FROZEN ZONE (scrollable, white)                          │
  * │                                                              │
- * │  Текст перекладу що росте вниз як субтитри...               │
- * │  Нові слова з'являються плавно...▊                          │
+ * │  Стабільний текст LLM перекладу що вже не зміниться...      │
+ * │  Плавно скролиться вгору при додаванні нового frozen...     │
  * │                                                              │
- * │  ─────────────────────────────────────────────────          │
- * │  оригінал: Det ønsker sikkert ikke å vite...                │
+ * ├─────────────────────────────────────────────────────────────┤
+ * │  🔥 ACTIVE ZONE (fixed height, pale yellow)                  │
+ * │                                                              │
+ * │  Активний текст Ghost що ще не заморожений LLM...           │
+ * │                                                              │
+ * ├─────────────────────────────────────────────────────────────┤
+ * │  💬 INTERIM ZONE (fixed height, red)                         │
+ * │                                                              │
+ * │  Реальний час - слова що ще не фіналізовані...              │
  * │                                                              │
  * └─────────────────────────────────────────────────────────────┘
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Message } from '../../types';
-import StreamingTextView from '../StreamingTextView';
+import React, { useEffect, useRef } from 'react';
 import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingSimpleModeLayoutProps {
@@ -70,69 +75,66 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     wordCount,
     sessionDuration = 0
 }) => {
-    // SMART DISPLAY with FROZEN ZONE support
-    // Frozen translation = stable text that won't change (from LLM)
-    // Active translation = text still being refined
-
-    // Decision logic:
-    // 1. If LLM disabled → always Ghost (append-only, naturally stable)
-    // 2. If LLM enabled → use frozenTranslation (stable) + Ghost for new text
-    //    This combines LLM quality for old text with Ghost responsiveness for new text
+    // THREE-ZONE DISPLAY ARCHITECTURE
+    //
+    // Zone 1 (Frozen): Stable LLM-translated text - white, scrollable
+    // Zone 2 (Active): Ghost text not yet frozen by LLM - pale yellow, fixed height
+    // Zone 3 (Interim): Real-time speech recognition - red, fixed height
+    //
+    // This prevents visual jumping by keeping each zone independent
 
     const hasLLMContent = llmTranslationEnabled && accumulatedLLMTranslation && accumulatedLLMTranslation.trim().length > 0;
     const hasFrozenContent = frozenTranslation && frozenTranslation.trim().length > 0;
 
-    // Calculate display translation with frozen zone support
-    let displayTranslation: string;
+    // ZONE 1: Frozen translation (stable, from LLM)
+    const frozenZoneText = hasFrozenContent ? frozenTranslation : '';
+
+    // ZONE 2: Active translation (Ghost text not yet frozen by LLM)
+    let activeZoneText = '';
     let translationType: 'llm' | 'ghost' | 'hybrid';
 
     if (!llmTranslationEnabled) {
-        // LLM disabled - use Ghost only (stable, append-only)
-        displayTranslation = accumulatedGhostTranslation;
+        // LLM disabled - all Ghost goes to active zone
+        activeZoneText = accumulatedGhostTranslation;
         translationType = 'ghost';
     } else if (hasFrozenContent) {
-        // LLM enabled with frozen content - use frozen + Ghost for active zone
-        // This keeps old text stable while showing new text responsively
-
-        // IMPORTANT: Preserve line breaks (\n\n) when extracting active zone
-        // Split by words but track positions to preserve structure
+        // LLM enabled with frozen - calculate active zone from Ghost
         const ghostText = accumulatedGhostTranslation;
 
-        // Find the position after frozenWordCount words, preserving line breaks
-        let wordCount = 0;
+        // Find where frozen zone ends in Ghost text
+        let wordCountSoFar = 0;
         let cutPosition = 0;
         const wordRegex = /\S+/g;
         let match;
 
         while ((match = wordRegex.exec(ghostText)) !== null) {
-            wordCount++;
-            if (wordCount >= frozenWordCount) {
+            wordCountSoFar++;
+            if (wordCountSoFar >= frozenWordCount) {
                 cutPosition = match.index + match[0].length;
                 break;
             }
         }
 
-        // Get active text preserving line breaks
-        const activeGhostText = ghostText.substring(cutPosition).trim();
-
-        displayTranslation = activeGhostText
-            ? `${frozenTranslation}\n\n${activeGhostText}`
-            : frozenTranslation;
+        // Get active text (words after frozen zone)
+        activeZoneText = ghostText.substring(cutPosition).trim();
         translationType = 'hybrid';
 
-        console.log(`🧊 [Display] HYBRID: ${frozenWordCount} frozen words | Active: "${activeGhostText.substring(0, 50)}..."`);
+        console.log(`🧊 [3-Zone] Frozen: ${frozenWordCount} words | Active: "${activeZoneText.substring(0, 40)}..." (${activeZoneText.split(/\s+/).filter(w => w).length} words)`);
     } else if (hasLLMContent) {
-        // LLM enabled but no frozen yet - show LLM translation
-        displayTranslation = accumulatedLLMTranslation;
+        // LLM enabled but not frozen yet - show LLM in active zone temporarily
+        activeZoneText = accumulatedLLMTranslation;
         translationType = 'llm';
     } else {
-        // LLM enabled but no LLM content yet - fallback to Ghost
-        displayTranslation = accumulatedGhostTranslation;
+        // LLM enabled but no content - Ghost fallback
+        activeZoneText = accumulatedGhostTranslation;
         translationType = 'ghost';
     }
 
-    // Log when source changes (for debugging)
-    console.log(`🖥️ [Display] Source: ${translationType.toUpperCase()} | LLM enabled: ${llmTranslationEnabled} | Frozen: ${hasFrozenContent ? frozenWordCount + ' words' : 'none'}`);
+    // ZONE 3: Interim text (handled separately via props)
+    // Already passed as interimText and interimGhostTranslation
+
+    // Log zone states (for debugging)
+    console.log(`🖥️ [3-Zone] Type: ${translationType.toUpperCase()} | Frozen: ${frozenZoneText ? frozenWordCount + ' words' : 'empty'} | Active: ${activeZoneText.split(/\s+/).filter(w => w).length} words | Interim: ${interimGhostTranslation ? 'yes' : 'no'}`);
 
     // Get translation method for indicator
     const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
@@ -158,14 +160,20 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     };
     const methodInfo = getTranslationMethodLabel();
 
-    // Combine finalized + interim for smooth display
+    // Original text (for display at bottom)
     const fullOriginalWithInterim = interimText
         ? `${accumulatedOriginal} ${interimText}`.trim()
         : accumulatedOriginal;
 
-    const fullTranslationWithInterim = interimGhostTranslation
-        ? `${displayTranslation} ${interimGhostTranslation}`.trim()
-        : displayTranslation;
+    // Scroll container ref for frozen zone auto-scroll
+    const frozenContainerRef = useRef<HTMLDivElement>(null);
+
+    // Auto-scroll frozen zone to bottom when new content added
+    useEffect(() => {
+        if (frozenContainerRef.current && frozenZoneText) {
+            frozenContainerRef.current.scrollTop = frozenContainerRef.current.scrollHeight;
+        }
+    }, [frozenZoneText]);
 
     // Format duration
     const formatDuration = (ms: number): string => {
@@ -177,24 +185,140 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
     return (
         <div className="max-w-[90%] mx-auto h-full flex flex-col">
-            {/* Main Translation View */}
-            <div className="flex-1">
-                <StreamingTextView
-                    translationText={fullTranslationWithInterim}
-                    originalText={showOriginal ? fullOriginalWithInterim : ''}
-                    interimTranslation={interimGhostTranslation}
-                    interimOriginal={interimText}
-                    isActive={isListening}
-                    isProcessing={isProcessingLLM}
-                    variant={translationType === 'ghost' ? 'ghost' : 'llm'}
-                    showOriginal={showOriginal}
-                    showCursor={isListening}
-                    isHoldingWords={!!interimText}
-                    accentColor={translationType === 'hybrid' ? 'emerald' : translationType === 'llm' ? 'emerald' : 'cyan'}
-                    title={translationType === 'hybrid' ? 'LLM + Ghost (стабільний)' : translationType === 'llm' ? 'LLM Переклад' : 'Миттєвий переклад'}
-                    minHeight="400px"
-                    maxHeight="calc(100vh - 16rem)"
-                />
+            {/* THREE-ZONE TRANSLATION VIEW */}
+            <div className="flex-1 border-l-4 border-emerald-500 bg-emerald-900/10 rounded-lg shadow-xl flex flex-col overflow-hidden" style={{ minHeight: '400px', maxHeight: 'calc(100vh - 16rem)' }}>
+
+                {/* Header */}
+                <div className="px-4 py-2.5 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between sticky top-0 backdrop-blur z-10">
+                    <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full bg-emerald-400 ${isListening ? 'animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]' : ''}`}></span>
+                        <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">
+                            {translationType === 'hybrid' ? 'LLM + Ghost (3-зони)' : translationType === 'llm' ? 'LLM Переклад' : 'Миттєвий переклад'}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {isProcessingLLM && (
+                            <div className="flex gap-0.5">
+                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
+                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '100ms'}}></div>
+                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '200ms'}}></div>
+                            </div>
+                        )}
+                        {wordCount > 0 && (
+                            <span className="text-[10px] font-mono text-emerald-300 bg-black/20 px-2 py-0.5 rounded">
+                                {wordCount} слів
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                {/* ZONE 1: FROZEN (scrollable, white text) */}
+                <div
+                    ref={frozenContainerRef}
+                    className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
+                    style={{ overflowAnchor: 'auto' }}
+                >
+                    {frozenZoneText ? (
+                        <div
+                            className="text-lg md:text-xl lg:text-2xl leading-relaxed font-medium text-emerald-100"
+                            style={{ whiteSpace: 'pre-line' }}
+                        >
+                            {frozenZoneText}
+                        </div>
+                    ) : (
+                        /* Empty state for frozen zone */
+                        <div className="flex items-center justify-center h-full text-gray-500 text-sm italic">
+                            {llmTranslationEnabled
+                                ? 'Очікую на LLM переклад...'
+                                : 'LLM вимкнено'
+                            }
+                        </div>
+                    )}
+                </div>
+
+                {/* ZONE 2: ACTIVE (fixed height, pale yellow) - Ghost text not yet frozen */}
+                {(activeZoneText || (llmTranslationEnabled && !hasFrozenContent)) && (
+                    <div
+                        className="shrink-0 border-t border-yellow-500/30 bg-yellow-900/10 px-4 py-3"
+                        style={{
+                            minHeight: '5rem',
+                            maxHeight: '8rem',
+                            overflow: 'auto'
+                        }}
+                    >
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse"></span>
+                            <span className="text-[9px] text-yellow-400/80 uppercase tracking-wider font-semibold">
+                                Активний (ще не заморожено)
+                            </span>
+                            {activeZoneText && (
+                                <span className="text-[9px] text-yellow-400/60">
+                                    ({activeZoneText.split(/\s+/).filter(w => w).length} слів)
+                                </span>
+                            )}
+                        </div>
+                        <div
+                            className="text-base md:text-lg leading-relaxed font-medium text-yellow-200/90"
+                            style={{ whiteSpace: 'pre-line' }}
+                        >
+                            {activeZoneText || (
+                                <span className="text-yellow-400/50 italic">очікую Ghost переклад...</span>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* ZONE 3: INTERIM (fixed height, red) - Real-time speech */}
+                <div
+                    className="shrink-0 border-t border-red-500/30 bg-red-900/10 px-4 py-3"
+                    style={{
+                        minHeight: '4.5rem',
+                        maxHeight: '4.5rem'
+                    }}
+                >
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className={`w-1.5 h-1.5 rounded-full bg-red-400 ${isListening ? 'animate-pulse' : ''}`}></span>
+                        <span className="text-[9px] text-red-400/80 uppercase tracking-wider font-semibold">
+                            Interim (реальний час)
+                        </span>
+                    </div>
+                    <div className="text-base md:text-lg leading-relaxed font-medium overflow-hidden">
+                        {interimGhostTranslation ? (
+                            <span
+                                className="text-red-400 italic"
+                                style={{
+                                    background: 'linear-gradient(90deg, rgba(248,113,113,0.9) 0%, rgba(248,113,113,0.5) 100%)',
+                                    WebkitBackgroundClip: 'text',
+                                    WebkitTextFillColor: 'transparent'
+                                }}
+                            >
+                                {interimGhostTranslation}
+                            </span>
+                        ) : interimText ? (
+                            /* Show original interim if no translation yet */
+                            <span className="text-red-300/50 italic">{interimText}</span>
+                        ) : isListening ? (
+                            <span className="text-gray-600 italic">очікую...</span>
+                        ) : (
+                            <span className="text-gray-700 italic">мікрофон вимкнено</span>
+                        )}
+                        {isListening && (
+                            <span className="inline-block ml-1 text-red-400 animate-pulse">▊</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Original text (small, at the bottom) */}
+                {showOriginal && fullOriginalWithInterim && (
+                    <div className="shrink-0 px-4 py-2 bg-gray-900/50 border-t border-gray-800">
+                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+                            Оригінал
+                        </div>
+                        <div className="text-xs text-gray-400/70 italic leading-relaxed" style={{ whiteSpace: 'pre-line' }}>
+                            {fullOriginalWithInterim}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Bottom Stats Bar */}
@@ -205,6 +329,14 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                         <span className="text-gray-500 text-xs">Слів:</span>
                         <span className="text-white font-mono text-sm">{wordCount}</span>
                     </div>
+
+                    {/* Frozen word count */}
+                    {frozenWordCount > 0 && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-emerald-500 text-xs">🧊</span>
+                            <span className="text-emerald-400 font-mono text-sm">{frozenWordCount}</span>
+                        </div>
+                    )}
 
                     {/* Duration */}
                     {sessionDuration > 0 && (
@@ -241,33 +373,6 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     )}
                 </div>
             </div>
-
-            {/* Dual Translation View (optional - show both Ghost and LLM) */}
-            {showGhost && accumulatedGhostTranslation && accumulatedLLMTranslation && (
-                <div className="mt-4 grid grid-cols-2 gap-4">
-                    {/* Ghost (instant) */}
-                    <div className="bg-cyan-900/10 border border-cyan-500/30 rounded-lg p-4">
-                        <div className="text-[10px] text-cyan-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-                            Ghost (миттєвий)
-                        </div>
-                        <div className="text-sm text-cyan-100/80 leading-relaxed">
-                            {accumulatedGhostTranslation}
-                        </div>
-                    </div>
-
-                    {/* LLM (quality) */}
-                    <div className="bg-emerald-900/10 border border-emerald-500/30 rounded-lg p-4">
-                        <div className="text-[10px] text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            LLM (якісний)
-                        </div>
-                        <div className="text-sm text-emerald-100/80 leading-relaxed">
-                            {accumulatedLLMTranslation}
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
