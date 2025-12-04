@@ -593,18 +593,23 @@ export function useStreamingMode(
         const trimmedNew = newWords.trim();
 
         // DUPLICATE DETECTION: Check if these words are already at the end of originalText
-        // This prevents re-adding the same text after session restart
+        // This prevents re-adding the same text after forced finalization
+        // NOTE: Only check endsWith(), not includes() - speakers may repeat phrases legitimately
         const currentOriginal = originalTextRef.current;
         if (currentOriginal && currentOriginal.endsWith(trimmedNew)) {
-            console.log(`⚠️ [addWords] Skipping duplicate: "${trimmedNew.substring(0, 30)}..."`);
+            console.log(`⚠️ [addWords] Skipping duplicate (ends with): "${trimmedNew.substring(0, 30)}..."`);
             return;
         }
 
-        // Also check if the new text is a substring of what we already have
-        // This catches cases where Speech API sends overlapping results
-        if (currentOriginal && currentOriginal.includes(trimmedNew) && trimmedNew.length > 10) {
-            console.log(`⚠️ [addWords] Skipping already-included text: "${trimmedNew.substring(0, 30)}..."`);
-            return;
+        // Check if the LAST part of originalText matches the START of new text
+        // This catches overlapping results from forced finalization + API finals
+        if (currentOriginal && trimmedNew.length > 20) {
+            const last50Chars = currentOriginal.slice(-50);
+            const first30Chars = trimmedNew.substring(0, 30);
+            if (last50Chars.includes(first30Chars)) {
+                console.log(`⚠️ [addWords] Skipping overlap: last50="${last50Chars}" contains first30="${first30Chars}"`);
+                return;
+            }
         }
 
         // PARAGRAPH BREAK: Check if there was a significant pause since last word
