@@ -125,6 +125,7 @@ const App: React.FC = () => {
   const isCommittingRef = useRef<boolean>(false); // Mutex for commit operation
   const forcedFinalizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Force-finalize interim every 1.5s
   const lastInterimTextRef = useRef<string>(""); // Track interim for forced finalization
+  const forceCommittedInterimRef = useRef<number>(0); // Track force-finalized interim words (reset when API finalizes)
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
@@ -915,40 +916,70 @@ const App: React.FC = () => {
                 if (newFinalWords.length > 0) {
                     streamingModeRef.current?.addWords(newFinalWords.join(' '));
                     committedWordCountRef.current = finalWords.length;
-                    console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING: Added ${newFinalWords.length} words`);
+                    // IMPORTANT: Reset force-committed interim counter when API finalizes
+                    // This prevents delta tracking from getting out of sync
+                    forceCommittedInterimRef.current = 0;
+                    console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING: Added ${newFinalWords.length} words (reset interim tracker)`);
 
                     // Clear forced finalization timer - we got real finals
                     if (forcedFinalizationTimerRef.current) {
                         clearTimeout(forcedFinalizationTimerRef.current);
                         forcedFinalizationTimerRef.current = null;
                     }
+                } else if (finalWords.length > 0 && forceCommittedInterimRef.current > 0) {
+                    // FIX #2: API finalized words we already force-committed
+                    // Adjust forceCommittedInterimRef: words that moved from interim to final
+                    // are no longer in interim, so reduce our interim tracking accordingly
+                    const wordsMovedToFinal = finalWords.length - (committedWordCountRef.current - forceCommittedInterimRef.current);
+                    if (wordsMovedToFinal > 0) {
+                        const oldForceCommitted = forceCommittedInterimRef.current;
+                        forceCommittedInterimRef.current = Math.max(0, forceCommittedInterimRef.current - wordsMovedToFinal);
+                        committedWordCountRef.current = finalWords.length;
+                        console.log(`🔄 [API_CATCH_UP] ${wordsMovedToFinal} force-committed words moved to final. forceCommittedInterimRef: ${oldForceCommitted} → ${forceCommittedInterimRef.current}`);
+                    }
                 }
             }
 
-            // REAL-TIME INTERIM: Update interim text for smooth subtitle-like display
-            // This shows words IMMEDIATELY as they're spoken (before finalization)
-            streamingModeRef.current?.setInterimText(currentInterim);
+            // DELTA TRACKING for interim: Only count NEW interim words (after force-committed ones)
+            // This MUST be calculated BEFORE setInterimText to show only uncommitted words
+            const allInterimWords = currentInterim.trim().split(/\s+/).filter(w => w);
 
-            // Update legacy interim display (for compatibility)
-            setInterimTranscript(currentInterim);
+            // FIX #2b: Clamp forceCommittedInterimRef if interim "shrank" (safety check)
+            // This handles edge cases where API behavior differs from our expectations
+            const effectiveForceCommitted = Math.min(forceCommittedInterimRef.current, allInterimWords.length);
+            if (effectiveForceCommitted < forceCommittedInterimRef.current) {
+                console.log(`🔄 [INTERIM_SHRINK] Interim has ${allInterimWords.length} words but forceCommittedInterimRef was ${forceCommittedInterimRef.current}. Clamping to ${effectiveForceCommitted}`);
+                forceCommittedInterimRef.current = effectiveForceCommitted;
+            }
+
+            const newInterimWords = allInterimWords.slice(effectiveForceCommitted);
+            const newInterimWordCount = newInterimWords.length;
+            const newInterimText = newInterimWords.join(' ');
+
+            // REAL-TIME INTERIM: Update interim text for smooth subtitle-like display
+            // CRITICAL: Only show UNCOMMITTED interim words (after force-committed ones)
+            // Otherwise, words that were force-finalized will appear duplicated in interim zone
+            streamingModeRef.current?.setInterimText(newInterimText);
+
+            // Update legacy interim display (for compatibility) - also use uncommitted text
+            setInterimTranscript(newInterimText);
 
             // FORCED FINALIZATION: Two triggers to prevent text getting stuck in interim:
             // 1. MAX_INTERIM_WORDS: Force finalize when interim exceeds limit (for continuous speech)
             // 2. PAUSE_TIMEOUT: Force finalize after 1.5s pause (for natural speech)
             const MAX_INTERIM_WORDS = 15; // Force finalize at 15 interim words
-            const interimWordCount = currentInterim.trim().split(/\s+/).filter(w => w).length;
 
             if (currentInterim.trim()) {
                 lastInterimTextRef.current = currentInterim;
 
-                // TRIGGER 1: MAX WORDS - Force finalize immediately if too many interim words
+                // TRIGGER 1: MAX WORDS - Force finalize immediately if too many NEW interim words
                 // This handles continuous speech without pauses (like videos)
-                if (interimWordCount >= MAX_INTERIM_WORDS) {
-                    console.log(`📦 [MAX_WORDS] Force finalizing ${interimWordCount} interim words (limit: ${MAX_INTERIM_WORDS})`);
-                    streamingModeRef.current?.addWords(currentInterim.trim());
-                    // IMPORTANT: Track force-finalized words to prevent re-adding when API catches up
-                    // This is crucial - without this, duplicate text accumulates rapidly
-                    committedWordCountRef.current += interimWordCount;
+                if (newInterimWordCount >= MAX_INTERIM_WORDS) {
+                    console.log(`📦 [MAX_WORDS] Force finalizing ${newInterimWordCount} NEW interim words (total interim: ${allInterimWords.length}, already committed: ${forceCommittedInterimRef.current})`);
+                    streamingModeRef.current?.addWords(newInterimText);
+                    // Track force-finalized interim words for delta tracking
+                    forceCommittedInterimRef.current = allInterimWords.length;
+                    committedWordCountRef.current += newInterimWordCount;
                     lastInterimTextRef.current = '';
                     streamingModeRef.current?.setInterimText('');
                     setInterimTranscript('');
@@ -969,15 +1000,26 @@ const App: React.FC = () => {
                 forcedFinalizationTimerRef.current = setTimeout(() => {
                     const interimToFinalize = lastInterimTextRef.current;
                     if (interimToFinalize.trim() && shouldBeListening.current) {
-                        const interimWords = interimToFinalize.trim().split(/\s+/);
-                        // Force-finalize all interim words
-                        console.log(`⏰ [PAUSE] Finalizing ${interimWords.length} interim words after 1.5s pause`);
-                        streamingModeRef.current?.addWords(interimToFinalize.trim());
-                        // IMPORTANT: Track force-finalized words to prevent duplicates
-                        committedWordCountRef.current += interimWords.length;
-                        lastInterimTextRef.current = '';
-                        streamingModeRef.current?.setInterimText(''); // Clear interim display
-                        setInterimTranscript('');
+                        // DELTA TRACKING: Only finalize NEW interim words (after force-committed ones)
+                        const allInterimWords = interimToFinalize.trim().split(/\s+/).filter(w => w);
+
+                        // FIX #2b: Clamp forceCommittedInterimRef if interim shrank (same as in main loop)
+                        const effectiveForceCommitted = Math.min(forceCommittedInterimRef.current, allInterimWords.length);
+                        const newInterimWords = allInterimWords.slice(effectiveForceCommitted);
+
+                        if (newInterimWords.length > 0) {
+                            const newInterimText = newInterimWords.join(' ');
+                            console.log(`⏰ [PAUSE] Finalizing ${newInterimWords.length} NEW interim words after 1.5s pause (total: ${allInterimWords.length}, effective committed: ${effectiveForceCommitted})`);
+                            streamingModeRef.current?.addWords(newInterimText);
+                            // Update tracking refs
+                            forceCommittedInterimRef.current = allInterimWords.length;
+                            committedWordCountRef.current += newInterimWords.length;
+                            lastInterimTextRef.current = '';
+                            streamingModeRef.current?.setInterimText(''); // Clear interim display
+                            setInterimTranscript('');
+                        } else {
+                            console.log(`⏰ [PAUSE] No new interim words to finalize (all ${allInterimWords.length} already committed)`);
+                        }
                     }
                     forcedFinalizationTimerRef.current = null;
                 }, 1500);
