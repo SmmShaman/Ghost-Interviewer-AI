@@ -592,23 +592,38 @@ export function useStreamingMode(
 
         const trimmedNew = newWords.trim();
 
-        // DUPLICATE DETECTION: Check if these words are already at the end of originalText
-        // This prevents re-adding the same text after forced finalization
-        // NOTE: Only check endsWith(), not includes() - speakers may repeat phrases legitimately
+        // DUPLICATE DETECTION: Multiple checks to prevent text duplication
         const currentOriginal = originalTextRef.current;
+
+        // Check 1: Exact match at end
         if (currentOriginal && currentOriginal.endsWith(trimmedNew)) {
             console.log(`⚠️ [addWords] Skipping duplicate (ends with): "${trimmedNew.substring(0, 30)}..."`);
             return;
         }
 
-        // Check if the LAST part of originalText matches the START of new text
-        // This catches overlapping results from forced finalization + API finals
-        if (currentOriginal && trimmedNew.length > 20) {
-            const last50Chars = currentOriginal.slice(-50);
-            const first30Chars = trimmedNew.substring(0, 30);
-            if (last50Chars.includes(first30Chars)) {
-                console.log(`⚠️ [addWords] Skipping overlap: last50="${last50Chars}" contains first30="${first30Chars}"`);
-                return;
+        // Check 2: Word-level overlap detection
+        // Prevents adding text that significantly overlaps with what we already have
+        if (currentOriginal) {
+            const newWords = trimmedNew.split(/\s+/);
+            const lastOriginalWords = currentOriginal.split(/\s+/).slice(-30); // Last 30 words
+
+            // Check if first 3+ words of new text match anywhere in last 30 words of original
+            if (newWords.length >= 3) {
+                const firstThreeWords = newWords.slice(0, 3).join(' ');
+                const lastOriginalText = lastOriginalWords.join(' ');
+                if (lastOriginalText.includes(firstThreeWords)) {
+                    console.log(`⚠️ [addWords] Skipping overlap (first 3 words "${firstThreeWords}" found in recent text)`);
+                    return;
+                }
+            }
+
+            // Check if entire new text is very short and contained in last part
+            if (trimmedNew.length <= 50) {
+                const last100Chars = currentOriginal.slice(-100);
+                if (last100Chars.includes(trimmedNew)) {
+                    console.log(`⚠️ [addWords] Skipping short duplicate: "${trimmedNew.substring(0, 30)}..."`);
+                    return;
+                }
             }
         }
 
