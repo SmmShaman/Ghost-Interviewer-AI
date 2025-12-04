@@ -272,8 +272,8 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void, s
                     { role: "user", content: prompt }
                 ],
                 stream: true,
-                max_completion_tokens: 4096,  // Azure requires max_completion_tokens, not max_tokens
-                temperature: 0.6
+                max_completion_tokens: 4096  // Azure requires max_completion_tokens, not max_tokens
+                // Note: temperature not supported by gpt-5.1-codex-mini (only default=1)
             }),
             signal // Pass abort signal to fetch
         });
@@ -755,8 +755,8 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
         body: JSON.stringify({
             messages: [{ role: "user", content: sanitizedPrompt }],
             stream: true,
-            max_completion_tokens: 4096,  // Azure requires max_completion_tokens, not max_tokens
-            temperature: 0.6
+            max_completion_tokens: 4096  // Azure requires max_completion_tokens, not max_tokens
+            // Note: temperature not supported by gpt-5.1-codex-mini (only default=1)
         }),
         signal
     });
