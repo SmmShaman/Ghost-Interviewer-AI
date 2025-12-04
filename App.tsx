@@ -932,12 +932,34 @@ const App: React.FC = () => {
             // Update legacy interim display (for compatibility)
             setInterimTranscript(currentInterim);
 
-            // FORCED FINALIZATION: If interim sits too long without finals, force-commit it
-            // This prevents losing words during continuous speech without pauses
+            // FORCED FINALIZATION: Two triggers to prevent text getting stuck in interim:
+            // 1. MAX_INTERIM_WORDS: Force finalize when interim exceeds limit (for continuous speech)
+            // 2. PAUSE_TIMEOUT: Force finalize after 1.5s pause (for natural speech)
+            const MAX_INTERIM_WORDS = 15; // Force finalize at 15 interim words
+            const interimWordCount = currentInterim.trim().split(/\s+/).filter(w => w).length;
+
             if (currentInterim.trim()) {
                 lastInterimTextRef.current = currentInterim;
 
-                // Reset/start forced finalization timer (1.5 seconds)
+                // TRIGGER 1: MAX WORDS - Force finalize immediately if too many interim words
+                // This handles continuous speech without pauses (like videos)
+                if (interimWordCount >= MAX_INTERIM_WORDS) {
+                    console.log(`📦 [MAX_WORDS] Force finalizing ${interimWordCount} interim words (limit: ${MAX_INTERIM_WORDS})`);
+                    streamingModeRef.current?.addWords(currentInterim.trim());
+                    committedWordCountRef.current += interimWordCount;
+                    lastInterimTextRef.current = '';
+                    streamingModeRef.current?.setInterimText('');
+                    setInterimTranscript('');
+
+                    // Clear pause timer since we just finalized
+                    if (forcedFinalizationTimerRef.current) {
+                        clearTimeout(forcedFinalizationTimerRef.current);
+                        forcedFinalizationTimerRef.current = null;
+                    }
+                    return; // Skip pause-based finalization
+                }
+
+                // TRIGGER 2: PAUSE TIMEOUT - Reset/start forced finalization timer (1.5 seconds)
                 if (forcedFinalizationTimerRef.current) {
                     clearTimeout(forcedFinalizationTimerRef.current);
                 }
@@ -947,7 +969,7 @@ const App: React.FC = () => {
                     if (interimToFinalize.trim() && shouldBeListening.current) {
                         const interimWords = interimToFinalize.trim().split(/\s+/);
                         // Force-finalize all interim words
-                        console.log(`⏰ [FORCED] Finalizing ${interimWords.length} interim words after 1.5s timeout`);
+                        console.log(`⏰ [PAUSE] Finalizing ${interimWords.length} interim words after 1.5s pause`);
                         streamingModeRef.current?.addWords(interimToFinalize.trim());
                         committedWordCountRef.current += interimWords.length;
                         lastInterimTextRef.current = '';
