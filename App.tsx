@@ -946,9 +946,9 @@ const App: React.FC = () => {
                 if (interimWordCount >= MAX_INTERIM_WORDS) {
                     console.log(`📦 [MAX_WORDS] Force finalizing ${interimWordCount} interim words (limit: ${MAX_INTERIM_WORDS})`);
                     streamingModeRef.current?.addWords(currentInterim.trim());
-                    // NOTE: Don't update committedWordCountRef here!
-                    // Those words aren't in API finals yet. Let API catch up naturally.
-                    // Duplicate detection in addWords() will prevent re-adding when API finalizes them.
+                    // IMPORTANT: Track force-finalized words to prevent re-adding when API catches up
+                    // This is crucial - without this, duplicate text accumulates rapidly
+                    committedWordCountRef.current += interimWordCount;
                     lastInterimTextRef.current = '';
                     streamingModeRef.current?.setInterimText('');
                     setInterimTranscript('');
@@ -973,8 +973,8 @@ const App: React.FC = () => {
                         // Force-finalize all interim words
                         console.log(`⏰ [PAUSE] Finalizing ${interimWords.length} interim words after 1.5s pause`);
                         streamingModeRef.current?.addWords(interimToFinalize.trim());
-                        // NOTE: Don't update committedWordCountRef here!
-                        // Let API catch up naturally. Duplicate detection handles re-adds.
+                        // IMPORTANT: Track force-finalized words to prevent duplicates
+                        committedWordCountRef.current += interimWords.length;
                         lastInterimTextRef.current = '';
                         streamingModeRef.current?.setInterimText(''); // Clear interim display
                         setInterimTranscript('');
