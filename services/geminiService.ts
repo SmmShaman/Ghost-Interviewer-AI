@@ -271,7 +271,9 @@ async function generateViaAzure(prompt: string, onUpdate: (data: any) => void, s
                 messages: [
                     { role: "user", content: prompt }
                 ],
-                stream: true
+                stream: true,
+                max_tokens: 4096,  // Increased from default for longer translations
+                temperature: 0.6
             }),
             signal // Pass abort signal to fetch
         });
@@ -753,7 +755,8 @@ async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => v
         body: JSON.stringify({
             messages: [{ role: "user", content: sanitizedPrompt }],
             stream: true,
-            max_completion_tokens: 512
+            max_tokens: 4096,  // Increased from 512 for longer outputs
+            temperature: 0.6
         }),
         signal
     });
