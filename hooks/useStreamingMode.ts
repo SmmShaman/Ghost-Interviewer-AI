@@ -257,11 +257,20 @@ export function useStreamingMode(
             return;
         }
 
-        // Also check if this text was already translated (contained in previous)
-        if (lastTranslatedTextRef.current && newWords.length > 10 &&
-            lastTranslatedTextRef.current.includes(newWords)) {
-            console.log(`⚠️ [Ghost] Skipping already-translated text: "${newWords.substring(0, 30)}..."`);
-            return;
+        // Also check if new text is mostly a duplicate of previous
+        // Only skip if > 60% of words were in the previous translation
+        if (lastTranslatedTextRef.current && newWords.length > 10) {
+            const newWordsArray = newWords.split(/\s+/);
+            const prevWordsSet = new Set(lastTranslatedTextRef.current.split(/\s+/));
+            const overlappingWords = newWordsArray.filter(w => prevWordsSet.has(w)).length;
+            const overlapRatio = overlappingWords / newWordsArray.length;
+
+            if (overlapRatio > 0.6) {
+                console.log(`⚠️ [Ghost] Skipping mostly-duplicate text (${Math.round(overlapRatio * 100)}% overlap): "${newWords.substring(0, 30)}..."`);
+                return;
+            } else if (overlappingWords > 0) {
+                console.log(`✅ [Ghost] Allowing translation despite ${overlappingWords}/${newWordsArray.length} overlapping words (${Math.round(overlapRatio * 100)}%)`);
+            }
         }
 
         setState(prev => ({ ...prev, isProcessingGhost: true }));
