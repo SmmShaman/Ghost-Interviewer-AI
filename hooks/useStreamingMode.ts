@@ -360,9 +360,10 @@ export function useStreamingMode(
             const newCompanyInfo = isCompanyInfo ? result.translation : null;
 
             // SLIDING WINDOW: Freeze old part of translation
-            // Keep last 50 words "active", freeze the rest
+            // Keep last N words "active", freeze the rest
             // IMPORTANT: Never REPLACE frozen text, only APPEND to it!
-            const ACTIVE_WINDOW_WORDS = 50;
+            // NOTE: Reduced from 50 to 20 so freezing starts earlier (with less words)
+            const ACTIVE_WINDOW_WORDS = 20;
             const translationWords = result.translation.split(/\s+/);
             const originalWords = currentOriginalText.split(/\s+/);
 
