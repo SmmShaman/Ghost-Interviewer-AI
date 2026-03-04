@@ -490,49 +490,10 @@ class LocalTranslator {
             }];
         }
 
-        // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
-        const pivotApplicable = this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk';
-        if (pivotApplicable) {
-            try {
-                // Start Pivot init (fire-and-forget, non-blocking)
-                if (!this.pivotInitialized && !pivotTranslator.isReady()) {
-                    console.log('🔄 [Pivot] Starting pivot initialization (non-blocking)...');
-                    pivotTranslator.initialize().then(() => {
-                        this.pivotInitialized = true;
-                        console.log('✅ [Pivot] Pivot ready for next translation');
-                    }).catch(e => {
-                        console.warn('⚠️ [Pivot] Init failed, will use OPUS:', e);
-                    });
-                }
-
-                // Use pivot if already ready
-                if (pivotTranslator.isReady()) {
-                    const pivotResult = await pivotTranslator.translate(text);
-                    const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
-                    if (onProgress) onProgress(processedResult);
-                    return [{
-                        original: text,
-                        ghostTranslation: processedResult,
-                        status: 'ghost'
-                    }];
-                }
-
-                // Pivot is loading — return placeholder, retry will pick it up
-                // DON'T fall through to OPUS (saves bandwidth, Pivot will be ready soon)
-                return [{
-                    original: text,
-                    ghostTranslation: "⏳...",
-                    status: 'ghost'
-                }];
-            } catch (e) {
-                console.warn('⚠️ [Pivot] Translation failed, falling back to direct:', e);
-                // Continue to direct translation
-            }
-        }
-
-        // === PRIORITY 3: Fallback to Direct Transformers.js (OPUS 56MB) ===
-        // Only used when Pivot is not applicable (non NO→UK language pair)
-        console.log(`⚠️ [Ghost] Using direct OPUS model (Pivot: ${pivotApplicable ? 'failed' : 'not applicable'})`);
+        // === PRIORITY 2: Direct OPUS model (56MB, fast ~200ms) ===
+        // NOTE: Pivot (NO→EN→UK) is NOT used for Ghost — too slow on WASM (2-12s per call).
+        // Pivot NLLB 600MB model without WebGPU is impractical for real-time translation.
+        // OPUS is small and fast. LLM provides quality translation separately.
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{
@@ -610,27 +571,7 @@ class LocalTranslator {
             }];
         }
 
-        // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
-        if (this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk') {
-            try {
-                if (pivotTranslator.isReady()) {
-                    const pivotResult = await pivotTranslator.translate(text);
-                    // POST-PROCESSING: Apply IT glossary + confidence filter
-                    const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
-                    const filteredResult = this.applyConfidenceFilter(text, processedResult);
-                    return [{
-                        original: text,
-                        ghostTranslation: filteredResult,
-                        status: 'ghost'
-                    }];
-                }
-            } catch (e) {
-                console.warn('⚠️ [Pivot] Translation failed in translatePhrase:', e);
-                // Continue to direct translation
-            }
-        }
-
-        // === PRIORITY 3: Fallback to Direct Transformers.js ===
+        // === PRIORITY 2: Direct OPUS (fast) — Pivot skipped, too slow on WASM ===
         if (!this.translator) {
              if (!this.isLoading) this.initialize();
              return [{
