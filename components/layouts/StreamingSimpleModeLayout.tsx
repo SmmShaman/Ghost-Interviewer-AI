@@ -86,8 +86,16 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     const hasLLMContent = llmTranslationEnabled && accumulatedLLMTranslation && accumulatedLLMTranslation.trim().length > 0;
     const hasFrozenContent = frozenTranslation && frozenTranslation.trim().length > 0;
 
+    // Helper: strip placeholder tokens from ghost text
+    const stripPlaceholders = (text: string): string => {
+        return text
+            .replace(/⏳\.{0,3}/g, '')
+            .replace(/[❌⚠️]/g, '')
+            .trim();
+    };
+
     // ZONE 1: Frozen translation (stable, from LLM)
-    const frozenZoneText = hasFrozenContent ? frozenTranslation : '';
+    const frozenZoneText = hasFrozenContent ? stripPlaceholders(frozenTranslation) : '';
 
     // ZONE 2: Active translation (Ghost text not yet frozen by LLM)
     let activeZoneText = '';
@@ -95,11 +103,11 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
     if (!llmTranslationEnabled) {
         // LLM disabled - all Ghost goes to active zone
-        activeZoneText = accumulatedGhostTranslation;
+        activeZoneText = stripPlaceholders(accumulatedGhostTranslation);
         translationType = 'ghost';
     } else if (hasFrozenContent) {
         // LLM enabled with frozen - calculate active zone from Ghost
-        const ghostText = accumulatedGhostTranslation;
+        const ghostText = stripPlaceholders(accumulatedGhostTranslation);
 
         // Find where frozen zone ends in Ghost text
         let wordCountSoFar = 0;
@@ -118,23 +126,15 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         // Get active text (words after frozen zone)
         activeZoneText = ghostText.substring(cutPosition).trim();
         translationType = 'hybrid';
-
-        console.log(`🧊 [3-Zone] Frozen: ${frozenWordCount} words | Active: "${activeZoneText.substring(0, 40)}..." (${activeZoneText.split(/\s+/).filter(w => w).length} words)`);
     } else if (hasLLMContent) {
         // LLM enabled but not frozen yet - show LLM in active zone temporarily
         activeZoneText = accumulatedLLMTranslation;
         translationType = 'llm';
     } else {
         // LLM enabled but no content - Ghost fallback
-        activeZoneText = accumulatedGhostTranslation;
+        activeZoneText = stripPlaceholders(accumulatedGhostTranslation);
         translationType = 'ghost';
     }
-
-    // ZONE 3: Interim text (handled separately via props)
-    // Already passed as interimText and interimGhostTranslation
-
-    // Log zone states (for debugging)
-    console.log(`🖥️ [3-Zone] Type: ${translationType.toUpperCase()} | Frozen: ${frozenZoneText ? frozenWordCount + ' words' : 'empty'} | Active: ${activeZoneText.split(/\s+/).filter(w => w).length} words | Interim: ${interimGhostTranslation ? 'yes' : 'no'}`);
 
     // Get translation method for indicator
     const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {

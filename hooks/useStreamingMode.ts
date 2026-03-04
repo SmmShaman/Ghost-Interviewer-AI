@@ -288,9 +288,13 @@ export function useStreamingMode(
 
             // DUPLICATE CHECK for translation result
             setState(prev => {
+                // Skip placeholder results — model not loaded yet
+                if (translation === '⏳...' || translation === '❌' || translation === '⚠️') {
+                    return { ...prev, isProcessingGhost: false };
+                }
+
                 // Check if this translation is already at the end
                 if (prev.ghostTranslation && prev.ghostTranslation.endsWith(translation)) {
-                    console.log(`⚠️ [Ghost] Translation already appended, skipping`);
                     return { ...prev, isProcessingGhost: false };
                 }
 
@@ -485,13 +489,18 @@ export function useStreamingMode(
             // Only flush if there's LLM translation that hasn't been fully frozen
             if (!prev.llmTranslation || prev.llmTranslation.trim().length === 0) return prev;
 
-            // Safety: strip any leaked LLM tags before freezing
+            // Safety: strip any leaked LLM tags and placeholders before freezing
             const cleanLLM = prev.llmTranslation
                 .replace(/\[\/INPUT_TRANSLATION\]?/gi, '')
                 .replace(/\[INPUT_TRANSLATION\]/gi, '')
                 .replace(/\[INTENT\][\s\S]*?(\[\/INTENT\]|$)/gi, '')
                 .replace(/\[\/INTENT\]/gi, '')
+                .replace(/⏳\.{0,3}/g, '')  // Remove loading placeholders
+                .replace(/[❌⚠️]/g, '')      // Remove error placeholders
                 .trim();
+
+            // Don't freeze if only placeholder content remains
+            if (!cleanLLM || cleanLLM.length < 2) return prev;
 
             const llmWords = cleanLLM.split(/\s+/).filter(w => w);
             const frozenWords = prev.frozenTranslation.split(/\s+/).filter(w => w);
