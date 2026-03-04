@@ -491,26 +491,21 @@ class LocalTranslator {
         }
 
         // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
-        if (this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk') {
+        const pivotApplicable = this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk';
+        if (pivotApplicable) {
             try {
-                // Initialize pivot if not done yet (and AWAIT it — don't fall through to OPUS)
+                // Start Pivot init (fire-and-forget, non-blocking)
                 if (!this.pivotInitialized && !pivotTranslator.isReady()) {
-                    console.log('🔄 [Pivot] Initializing pivot translator (awaiting)...');
-                    try {
-                        const initResult = await Promise.race([
-                            pivotTranslator.initialize(),
-                            new Promise<boolean>((_, reject) =>
-                                setTimeout(() => reject(new Error('Pivot init timeout')), 30000)
-                            )
-                        ]);
-                        this.pivotInitialized = initResult;
-                    } catch (initErr) {
-                        console.warn('⚠️ [Pivot] Init failed/timeout, falling back to OPUS:', initErr);
-                        this.pivotInitialized = false;
-                    }
+                    console.log('🔄 [Pivot] Starting pivot initialization (non-blocking)...');
+                    pivotTranslator.initialize().then(() => {
+                        this.pivotInitialized = true;
+                        console.log('✅ [Pivot] Pivot ready for next translation');
+                    }).catch(e => {
+                        console.warn('⚠️ [Pivot] Init failed, will use OPUS:', e);
+                    });
                 }
 
-                // Use pivot if ready
+                // Use pivot if already ready
                 if (pivotTranslator.isReady()) {
                     const pivotResult = await pivotTranslator.translate(text);
                     const processedResult = glossaryProcessor.processTranslation(pivotResult.ukrainianText);
@@ -521,6 +516,14 @@ class LocalTranslator {
                         status: 'ghost'
                     }];
                 }
+
+                // Pivot is loading — return placeholder, retry will pick it up
+                // DON'T fall through to OPUS (saves bandwidth, Pivot will be ready soon)
+                return [{
+                    original: text,
+                    ghostTranslation: "⏳...",
+                    status: 'ghost'
+                }];
             } catch (e) {
                 console.warn('⚠️ [Pivot] Translation failed, falling back to direct:', e);
                 // Continue to direct translation
@@ -528,7 +531,8 @@ class LocalTranslator {
         }
 
         // === PRIORITY 3: Fallback to Direct Transformers.js (OPUS 56MB) ===
-        console.log(`⚠️ [Ghost] Falling back to direct OPUS model (Chrome API: unavailable, Pivot: ${pivotTranslator.isReady() ? 'ready but failed' : 'not loaded'})`);
+        // Only used when Pivot is not applicable (non NO→UK language pair)
+        console.log(`⚠️ [Ghost] Using direct OPUS model (Pivot: ${pivotApplicable ? 'failed' : 'not applicable'})`);
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{
