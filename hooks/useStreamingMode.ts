@@ -74,8 +74,8 @@ interface UseStreamingModeOptions {
 
 const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
     llmTranslationEnabled: true,
-    llmTriggerWords: 15,
-    llmPauseMs: 1500,
+    llmTriggerWords: 8,
+    llmPauseMs: 800,
     ghostContextWords: 50,
     answerTriggerConfidence: 70,
     answerPauseMs: 2500,
