@@ -74,8 +74,8 @@ interface UseStreamingModeOptions {
 
 const DEFAULT_OPTIONS: Required<UseStreamingModeOptions> = {
     llmTranslationEnabled: true,
-    llmTriggerWords: 25,
-    llmPauseMs: 2000,
+    llmTriggerWords: 15,
+    llmPauseMs: 1500,
     ghostContextWords: 50,
     answerTriggerConfidence: 70,
     answerPauseMs: 2500,
@@ -126,6 +126,7 @@ export function useStreamingMode(
     const ghostDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const interimGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For interim translation debounce
     const answerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For answer generation pause
+    const freezeFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For flushing active→frozen on 3s pause
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
@@ -372,7 +373,7 @@ export function useStreamingMode(
             // Keep last N words "active", freeze the rest
             // IMPORTANT: Never REPLACE frozen text, only APPEND to it!
             // NOTE: Reduced from 50 to 20 so freezing starts earlier (with less words)
-            const ACTIVE_WINDOW_WORDS = 20;
+            const ACTIVE_WINDOW_WORDS = 8;
             const translationWords = result.translation.split(/\s+/);
             const originalWords = currentOriginalText.split(/\s+/);
 
@@ -477,6 +478,55 @@ export function useStreamingMode(
             abortControllerRef.current = null;
         }
     }, [opts]);
+
+    // Flush all active text into frozen zone (on pause or session stop)
+    const flushActiveToFrozen = useCallback(() => {
+        setState(prev => {
+            // Only flush if there's LLM translation that hasn't been fully frozen
+            if (!prev.llmTranslation || prev.llmTranslation.trim().length === 0) return prev;
+
+            // Safety: strip any leaked LLM tags before freezing
+            const cleanLLM = prev.llmTranslation
+                .replace(/\[\/INPUT_TRANSLATION\]?/gi, '')
+                .replace(/\[INPUT_TRANSLATION\]/gi, '')
+                .replace(/\[INTENT\][\s\S]*?(\[\/INTENT\]|$)/gi, '')
+                .replace(/\[\/INTENT\]/gi, '')
+                .trim();
+
+            const llmWords = cleanLLM.split(/\s+/).filter(w => w);
+            const frozenWords = prev.frozenTranslation.split(/\s+/).filter(w => w);
+
+            // If all LLM words are already frozen, nothing to do
+            if (frozenWords.length >= llmWords.length) return prev;
+
+            // Move ALL LLM translation to frozen
+            const newFrozenPart = llmWords.slice(frozenWords.length).join(' ');
+            const updatedFrozen = prev.frozenTranslation
+                ? prev.frozenTranslation + '\n\n' + newFrozenPart
+                : cleanLLM;
+
+            const originalWords = prev.originalText.split(/\s+/).filter(w => w);
+
+            console.log(`🧊 [FLUSH] Moving ${llmWords.length - frozenWords.length} active words to frozen (total: ${llmWords.length})`);
+
+            return {
+                ...prev,
+                frozenTranslation: updatedFrozen,
+                frozenWordCount: originalWords.length // All original words are now frozen
+            };
+        });
+    }, []);
+
+    // Schedule freeze flush after 3s pause
+    const scheduleFreezeFLush = useCallback(() => {
+        if (freezeFlushTimerRef.current) {
+            clearTimeout(freezeFlushTimerRef.current);
+        }
+        freezeFlushTimerRef.current = setTimeout(() => {
+            console.log('⏸️ [3s PAUSE] Flushing active → frozen');
+            flushActiveToFrozen();
+        }, 3000);
+    }, [flushActiveToFrozen]);
 
     // Schedule LLM translation
     const scheduleLLMTranslation = useCallback(() => {
@@ -738,7 +788,10 @@ export function useStreamingMode(
 
         // Schedule LLM translation
         scheduleLLMTranslation();
-    }, [executeGhostTranslation, scheduleLLMTranslation]);
+
+        // Schedule freeze flush (3s pause → move active to frozen)
+        scheduleFreezeFLush();
+    }, [executeGhostTranslation, scheduleLLMTranslation, scheduleFreezeFLush]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -905,6 +958,10 @@ export function useStreamingMode(
             clearTimeout(llmPauseTimerRef.current);
             llmPauseTimerRef.current = null;
         }
+        if (freezeFlushTimerRef.current) {
+            clearTimeout(freezeFlushTimerRef.current);
+            freezeFlushTimerRef.current = null;
+        }
         if (ghostDebounceTimerRef.current) {
             clearTimeout(ghostDebounceTimerRef.current);
             ghostDebounceTimerRef.current = null;
@@ -974,6 +1031,10 @@ export function useStreamingMode(
             }
         }
 
+        // Flush remaining active text to frozen zone on session stop
+        flushActiveToFrozen();
+        console.log('🧊 [StopSession] Flushed active → frozen');
+
         // Trigger answer generation if question was detected but answer not yet started
         // This ensures answer is generated when user stops after asking a question
         const currentContext = contextRef.current;
@@ -996,7 +1057,7 @@ export function useStreamingMode(
         metricsCollector.logMetrics();
 
         console.log('🛑 [StreamingMode] Session stopped');
-    }, [executeLLMTranslation, executeAnswerGeneration]);
+    }, [executeLLMTranslation, executeAnswerGeneration, flushActiveToFrozen]);
 
     /**
      * Reset to initial state
@@ -1006,6 +1067,10 @@ export function useStreamingMode(
         if (llmPauseTimerRef.current) {
             clearTimeout(llmPauseTimerRef.current);
             llmPauseTimerRef.current = null;
+        }
+        if (freezeFlushTimerRef.current) {
+            clearTimeout(freezeFlushTimerRef.current);
+            freezeFlushTimerRef.current = null;
         }
         if (ghostDebounceTimerRef.current) {
             clearTimeout(ghostDebounceTimerRef.current);

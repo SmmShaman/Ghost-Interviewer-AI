@@ -69,7 +69,7 @@ class LocalTranslator {
 
     // PERFORMANCE OPTIMIZATION: Chunk translation cache
     private chunkCache: Map<string, string> = new Map();
-    private static readonly CHUNK_SIZE = 2; // Reduced from 4 to 2 for faster progressive updates
+    private static readonly CHUNK_SIZE = 5; // Larger chunks give OPUS model more context for coherent translations
     private static readonly MAX_CACHE_SIZE = 100;
 
     // PIVOT TRANSLATION: NO → EN → UK (better quality)
@@ -520,7 +520,8 @@ class LocalTranslator {
             }
         }
 
-        // === PRIORITY 3: Fallback to Direct Transformers.js ===
+        // === PRIORITY 3: Fallback to Direct Transformers.js (OPUS 56MB) ===
+        console.log(`⚠️ [Ghost] Falling back to direct OPUS model (Chrome API: unavailable, Pivot: ${pivotTranslator.isReady() ? 'ready but failed' : 'not loaded'})`);
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{

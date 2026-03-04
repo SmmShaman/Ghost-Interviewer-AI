@@ -527,6 +527,9 @@ export const generateStreamingTranslation = async (
 
         console.log(`🎯 [Intent] type=${intent.speechType}, question=${intent.containsQuestion}, confidence=${intent.questionConfidence}%`);
 
+        // Sanitize: strip any leaked LLM tags from translation text
+        resultText = sanitizeTranslationText(resultText);
+
         return {
             translation: resultText,
             intent
@@ -544,6 +547,24 @@ export const generateStreamingTranslation = async (
         };
     }
 };
+
+/**
+ * Strip any leaked LLM structural tags from translation text.
+ * Handles cases where the model outputs malformed closing tags or
+ * streaming captures partial tags in the translation.
+ */
+function sanitizeTranslationText(text: string): string {
+    return text
+        .replace(/\[\/INPUT_TRANSLATION\]?/gi, '')
+        .replace(/\[INPUT_TRANSLATION\]/gi, '')
+        .replace(/\[INTENT\][\s\S]*?(\[\/INTENT\]|$)/gi, '')
+        .replace(/\[\/INTENT\]/gi, '')
+        .replace(/\[ANALYSIS\][\s\S]*?(\[\/ANALYSIS\]|$)/gi, '')
+        .replace(/\[STRATEGY\][\s\S]*?(\[\/STRATEGY\]|$)/gi, '')
+        .replace(/\[ANSWER\][\s\S]*?(\[\/ANSWER\]|$)/gi, '')
+        .replace(/\[TRANSLATION\][\s\S]*?(\[\/TRANSLATION\]|$)/gi, '')
+        .trim();
+}
 
 /**
  * Parse LLM-based intent from response text
@@ -606,27 +627,39 @@ confidence: 0-100
 has_question: true/false
 [/INTENT]`;
 
+    // Speech recognition error correction instructions (common for Norwegian)
+    const speechCorrectionRules = `
+ВИПРАВЛЕННЯ ПОМИЛОК РОЗПІЗНАВАННЯ МОВЛЕННЯ:
+Текст надходить від Web Speech API і ЧАСТО містить помилки. Ти МУСИШ розпізнати правильне слово з контексту:
+- Спотворені слова відновлюй за контекстом (наприклад: "hitmane" → "gi tilbake", "абонути" → "повернути")
+- Зламані складені слова з'єднуй (наприклад: "til bake" → "tilbake", "frem over" → "fremover")
+- Неправильно розпізнані закінчення виправляй за граматикою
+- Якщо слово не має сенсу в контексті — підбери найближче за звучанням правильне ${context.targetLanguage} слово
+- Технічні терміни (API, deploy, framework) залишай як є`;
+
     if (hasExistingTranslation) {
         // Incremental mode - tell LLM what's already translated
         return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
 
-КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст надходить поступово.
+КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст надходить поступово від розпізнавання мовлення і містить помилки.
 
 ПОПЕРЕДНІЙ ПЕРЕКЛАД (вже зроблено):
 "${alreadyTranslated}"
 
 ПОВНИЙ ОРИГІНАЛЬНИЙ ТЕКСТ (включаючи нове):
 "${fullText}"
+${speechCorrectionRules}
 
 ЗАВДАННЯ:
-1. Переклади ВЕСЬ текст заново, покращуючи попередній переклад з урахуванням нового контексту
-2. Зберігай природність та плавність перекладу
-3. Виправляй можливі помилки розпізнавання мовлення
+1. Виправ помилки розпізнавання мовлення в оригіналі, відновлюючи правильні ${context.targetLanguage} слова за контекстом
+2. Переклади ВЕСЬ виправлений текст на природну, граматично правильну ${context.nativeLanguage} мову
+3. Покращуй попередній переклад з урахуванням нового контексту
 4. Класифікуй тип мовлення
 
-ВАЖЛИВО:
+ЯКІСТЬ ПЕРЕКЛАДУ:
 - Передавай СЕНС, а не буквальний переклад
-- Використовуй природні ${context.nativeLanguage}-мовні конструкції
+- Використовуй правильні відмінки, відміни та узгодження в ${context.nativeLanguage}
+- Переклад має звучати як природна жива ${context.nativeLanguage} мова, НЕ як машинний переклад
 - Зглажуй обірваність фраз
 ${intentInstructions}`;
     }
@@ -634,15 +667,16 @@ ${intentInstructions}`;
     // First translation - no previous context
     return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
 
-КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі.
+КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст від розпізнавання мовлення і містить помилки.
 
 ТЕКСТ ДЛЯ ПЕРЕКЛАДУ:
 "${fullText}"
+${speechCorrectionRules}
 
 ПРАВИЛА:
-1. Передавай СЕНС, а не буквальний переклад
-2. Використовуй природні ${context.nativeLanguage}-мовні конструкції
-3. Виправляй можливі помилки розпізнавання мовлення
+1. Спочатку виправ помилки розпізнавання мовлення, відновлюючи правильні ${context.targetLanguage} слова за контекстом
+2. Переклади виправлений текст на природну, граматично правильну ${context.nativeLanguage} мову
+3. Використовуй правильні відмінки, відміни та узгодження — переклад має звучати як жива ${context.nativeLanguage} мова
 4. Зглажуй обірваність фраз
 5. Класифікуй тип мовлення
 ${intentInstructions}`;
@@ -819,7 +853,9 @@ function parseAndEmit(fullText: string, onUpdate: any) {
     let rationale = "";
 
     // 0. Input Translation - supports both [/INPUT_TRANSLATION] and </INPUT_TRANSLATION>
-    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]|<\/INPUT_TRANSLATION>|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/i);
+    // Note: \]? makes closing bracket optional (LLMs sometimes omit it)
+    // [INTENT] added as delimiter to prevent intent block leaking into translation
+    const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]?|<\/INPUT_TRANSLATION>|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|\[INTENT\]|$)/i);
     if (inputMatch) inputTranslation = inputMatch[1].trim();
 
     // 1. Analysis - supports both [/ANALYSIS] and </ANALYSIS>

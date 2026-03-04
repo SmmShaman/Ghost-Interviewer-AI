@@ -14,8 +14,8 @@ export const BLOCK_CONFIG = {
 // CENTER COLUMN BLOCKS ARE INDEPENDENT FROM GHOST BLOCKS (left column)
 // STRICT THRESHOLD: Only send when 20-25 words accumulated, NO automatic pause/sentence triggers
 export const LLM_CONFIG = {
-    MIN_WORDS_FOR_LLM: 20,          // STRICT minimum - won't send with fewer words (except STOP button)
-    MAX_WORDS_FOR_LLM: 25,          // Auto-send when this threshold is reached
+    MIN_WORDS_FOR_LLM: 12,          // STRICT minimum - won't send with fewer words (except STOP button)
+    MAX_WORDS_FOR_LLM: 15,          // Auto-send when this threshold is reached
 };
 
 export const DEFAULT_PROMPTS: PromptPreset[] = [
