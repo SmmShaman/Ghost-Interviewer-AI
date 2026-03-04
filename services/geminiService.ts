@@ -530,6 +530,9 @@ export const generateStreamingTranslation = async (
         // Sanitize: strip any leaked LLM tags from translation text
         resultText = sanitizeTranslationText(resultText);
 
+        // Strip original text echo: LLMs sometimes repeat the original before translating
+        resultText = stripOriginalTextEcho(resultText, fullText);
+
         return {
             translation: resultText,
             intent
@@ -564,6 +567,65 @@ function sanitizeTranslationText(text: string): string {
         .replace(/\[ANSWER\][\s\S]*?(\[\/ANSWER\]|$)/gi, '')
         .replace(/\[TRANSLATION\][\s\S]*?(\[\/TRANSLATION\]|$)/gi, '')
         .trim();
+}
+
+/**
+ * Strip original text echo from translation.
+ * Some LLMs repeat the original text before/after the translation.
+ * Detects this by checking if the translation contains the original text
+ * and removes it, keeping only the actual translated content.
+ */
+function stripOriginalTextEcho(translation: string, originalText: string): string {
+    if (!translation || !originalText) return translation;
+
+    const trimmedOriginal = originalText.trim();
+    const trimmedTranslation = translation.trim();
+
+    // Case 1: Translation starts with the original text (most common)
+    if (trimmedTranslation.startsWith(trimmedOriginal)) {
+        const stripped = trimmedTranslation.slice(trimmedOriginal.length).trim();
+        if (stripped.length > 0) {
+            console.log(`🧹 [Sanitize] Stripped echoed original text from start of translation`);
+            return stripped;
+        }
+    }
+
+    // Case 2: Translation ends with the original text
+    if (trimmedTranslation.endsWith(trimmedOriginal)) {
+        const stripped = trimmedTranslation.slice(0, -trimmedOriginal.length).trim();
+        if (stripped.length > 0) {
+            console.log(`🧹 [Sanitize] Stripped echoed original text from end of translation`);
+            return stripped;
+        }
+    }
+
+    // Case 3: Check if significant portion of original words appear at start
+    // (handles partial echo where LLM echoes most but not all original words)
+    const originalWords = trimmedOriginal.split(/\s+/);
+    const translationWords = trimmedTranslation.split(/\s+/);
+
+    if (originalWords.length >= 3 && translationWords.length > originalWords.length) {
+        // Check if first N words of translation match original
+        let matchCount = 0;
+        for (let i = 0; i < Math.min(originalWords.length, translationWords.length); i++) {
+            if (translationWords[i].toLowerCase() === originalWords[i].toLowerCase()) {
+                matchCount++;
+            } else {
+                break; // Stop at first non-match
+            }
+        }
+
+        // If 60%+ of original words match at start, strip them
+        if (matchCount >= originalWords.length * 0.6 && matchCount >= 3) {
+            const stripped = translationWords.slice(matchCount).join(' ').trim();
+            if (stripped.length > 0) {
+                console.log(`🧹 [Sanitize] Stripped ${matchCount} echoed original words from translation`);
+                return stripped;
+            }
+        }
+    }
+
+    return translation;
 }
 
 /**
@@ -619,13 +681,15 @@ function constructStreamingPrompt(fullText: string, alreadyTranslated: string, c
 
 ФОРМАТ ВІДПОВІДІ:
 [INPUT_TRANSLATION]
-твій переклад тут
+ТІЛЬКИ переклад мовою ${context.nativeLanguage}, БЕЗ оригіналу
 [/INPUT_TRANSLATION]
 [INTENT]
 type: QUESTION/INFO/SMALL_TALK/STORY/UNKNOWN
 confidence: 0-100
 has_question: true/false
-[/INTENT]`;
+[/INTENT]
+
+КРИТИЧНО: В тегах [INPUT_TRANSLATION] пиши ТІЛЬКИ переклад на ${context.nativeLanguage}. НЕ повторюй оригінальний ${context.targetLanguage} текст. НЕ додавай оригінал перед перекладом.`;
 
     // Speech recognition error correction instructions (common for Norwegian)
     const speechCorrectionRules = `
