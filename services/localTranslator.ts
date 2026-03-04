@@ -493,14 +493,21 @@ class LocalTranslator {
         // === PRIORITY 2: Try Pivot Translation (NO → EN → UK) ===
         if (this.usePivot && this.sourceLanguageName === 'no' && this.targetLanguageName === 'uk') {
             try {
-                // Initialize pivot if not done yet
-                if (!this.pivotInitialized) {
-                    console.log('🔄 [Pivot] Pre-initializing pivot translator...');
-                    pivotTranslator.initialize().then(() => {
-                        this.pivotInitialized = true;
-                    }).catch(e => {
-                        console.warn('⚠️ [Pivot] Init failed, will use direct:', e);
-                    });
+                // Initialize pivot if not done yet (and AWAIT it — don't fall through to OPUS)
+                if (!this.pivotInitialized && !pivotTranslator.isReady()) {
+                    console.log('🔄 [Pivot] Initializing pivot translator (awaiting)...');
+                    try {
+                        const initResult = await Promise.race([
+                            pivotTranslator.initialize(),
+                            new Promise<boolean>((_, reject) =>
+                                setTimeout(() => reject(new Error('Pivot init timeout')), 30000)
+                            )
+                        ]);
+                        this.pivotInitialized = initResult;
+                    } catch (initErr) {
+                        console.warn('⚠️ [Pivot] Init failed/timeout, falling back to OPUS:', initErr);
+                        this.pivotInitialized = false;
+                    }
                 }
 
                 // Use pivot if ready

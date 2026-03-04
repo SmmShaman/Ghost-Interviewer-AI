@@ -288,8 +288,12 @@ export function useStreamingMode(
 
             // DUPLICATE CHECK for translation result
             setState(prev => {
-                // Skip placeholder results — model not loaded yet
+                // Skip placeholder results — model not loaded yet, schedule retry
                 if (translation === '⏳...' || translation === '❌' || translation === '⚠️') {
+                    console.log(`🔄 [Ghost] Model not ready, scheduling retry in 3s for: "${newWords.substring(0, 30)}..."`);
+                    setTimeout(() => {
+                        executeGhostTranslation(newWords, fullOriginalText, addParagraphBreak, punctuation);
+                    }, 3000);
                     return { ...prev, isProcessingGhost: false };
                 }
 
