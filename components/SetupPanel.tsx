@@ -582,36 +582,15 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             {context.viewMode === 'SIMPLE' && tModes.simpleDesc}
           </div>
 
-          {/* AI Model Selector (not for SIMPLE) */}
+          {/* AI Model Info (not for SIMPLE) */}
           {context.viewMode !== 'SIMPLE' && (
             <div className="mt-3">
               <label className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-1 block">
                 🤖 AI Model
               </label>
-              <select
-                className="w-full bg-gray-900/80 border border-gray-700/50 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-cyan-500 transition-all"
-                value={(currentModeConfig as any).aiModel || 'azure'}
-                onChange={(e) => handleModeConfigChange(context.viewMode.toLowerCase() as 'full' | 'focus', 'aiModel', e.target.value)}
-              >
-                <option value="azure" className="bg-gray-900">Azure OpenAI GPT-4</option>
-                <option value="groq" className="bg-gray-900">Groq Llama 3.3 70B</option>
-              </select>
-            </div>
-          )}
-
-          {/* Groq API Key (if groq selected) */}
-          {context.viewMode !== 'SIMPLE' && (currentModeConfig as any).aiModel === 'groq' && (
-            <div className="mt-2 animate-fade-in-up">
-              <label className="text-[10px] text-purple-300/70 uppercase tracking-wide font-medium mb-1 block">
-                API Key
-              </label>
-              <input
-                type="password"
-                className="w-full bg-gray-900/80 border border-gray-700/40 rounded-lg px-3 py-2 text-xs text-gray-200 font-mono focus:border-purple-500 outline-none placeholder-gray-600"
-                value={context.groqApiKey}
-                onChange={(e) => handleChange('groqApiKey', e.target.value)}
-                placeholder="gsk_..."
-              />
+              <div className="w-full bg-gray-900/80 border border-gray-700/50 rounded-lg px-3 py-2 text-xs text-gray-200">
+                Gemini 2.5 Flash
+              </div>
             </div>
           )}
         </DropdownSection>

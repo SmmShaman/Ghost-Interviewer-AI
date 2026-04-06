@@ -17,6 +17,7 @@ import { localTranslator } from './services/localTranslator';
 import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
 import { useStreamingMode } from './hooks/useStreamingMode';
+import { useGoogleAuth } from './hooks/useGoogleAuth';
 import {
     BLOCK_CONFIG,
     LLM_CONFIG,
@@ -85,6 +86,9 @@ const App: React.FC = () => {
 
   // LLM TRANSLATION TOGGLE: Enable/disable LLM translation (only Ghost/Chrome when disabled)
   const [llmTranslationEnabled, setLlmTranslationEnabled] = useState(true);
+
+  // GOOGLE AUTH HOOK: Optional sign-in for cloud sync
+  const googleAuth = useGoogleAuth();
 
   // STREAMING MODE HOOK: Manages accumulated text and translations
   const streamingMode = useStreamingMode(context, {
@@ -333,7 +337,7 @@ const App: React.FC = () => {
     const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
     const wordCount = messageText.split(/\s+/).length;
 
-    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words | responseId: ${responseId} | targetId: ${targetMessageId} | block: ${pendingBlockId} | provider: ${currentContext.llmProvider}`);
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words | responseId: ${responseId} | targetId: ${targetMessageId} | block: ${pendingBlockId} | provider: gemini`);
 
     try {
 
@@ -1508,6 +1512,10 @@ const App: React.FC = () => {
         isSetupOpen={isSetupOpen}
         setIsSetupOpen={setIsSetupOpen}
         startSessionWithMode={startSessionWithMode}
+        googleUser={googleAuth.user}
+        isAuthLoading={googleAuth.isLoading}
+        onSignOut={googleAuth.signOut}
+        renderGoogleButton={googleAuth.renderButton}
       />
     );
   }
@@ -1604,46 +1612,29 @@ const App: React.FC = () => {
               {llmTranslationEnabled ? 'LLM ✓' : 'LLM ✗'}
             </button>
 
-            {/* LLM Model Selector - only visible when LLM is enabled */}
+            {/* LLM Model indicator - only visible when LLM is enabled */}
             {llmTranslationEnabled && (
               <div className="flex items-center gap-1 bg-gray-900/50 rounded-lg border border-gray-700 p-0.5">
-                <button
-                  onClick={() => {
-                    console.log(`\n${'='.repeat(60)}`);
-                    console.log(`🔄 [MODEL SWITCH] Groq (Llama 3.3 70B)`);
-                    console.log(`${'='.repeat(60)}\n`);
-                    setContext(prev => ({ ...prev, llmProvider: 'groq' }));
-                  }}
-                  className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all ${
-                    context.llmProvider === 'groq'
-                      ? 'bg-orange-500 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
-                  }`}
-                  title="Groq - Llama 3.3 70B (швидкий, безкоштовний)"
+                <span
+                  className="px-2.5 py-1 text-[10px] font-bold rounded bg-blue-500 text-white"
+                  title="Google Gemini 2.5 Flash"
                 >
-                  GROQ
-                </button>
-                <button
-                  onClick={() => {
-                    console.log(`\n${'='.repeat(60)}`);
-                    console.log(`🔄 [MODEL SWITCH] Azure OpenAI (GPT-4)`);
-                    console.log(`${'='.repeat(60)}\n`);
-                    setContext(prev => ({ ...prev, llmProvider: 'azure' }));
-                  }}
-                  className={`px-2.5 py-1 text-[10px] font-bold rounded transition-all ${
-                    context.llmProvider === 'azure'
-                      ? 'bg-blue-500 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
-                  }`}
-                  title="Azure OpenAI - GPT-4 (якісний, потрібен API ключ)"
-                >
-                  AZURE
-                </button>
+                  GEMINI
+                </span>
               </div>
             )}
         </div>
 
         <div className="flex items-center gap-3">
+             {/* Google user avatar (if signed in) */}
+             {googleAuth.isSignedIn && googleAuth.user && (
+               <div className="flex items-center gap-1.5 mr-2" title={googleAuth.user.email}>
+                 {googleAuth.user.picture && (
+                   <img src={googleAuth.user.picture} alt="" className="w-6 h-6 rounded-full border border-gray-600" />
+                 )}
+                 <span className="text-[10px] text-gray-400 max-w-[80px] truncate hidden md:inline">{googleAuth.user.name}</span>
+               </div>
+             )}
              <div className="flex items-center gap-1 mr-4 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
                  <button onClick={handleSaveSession} className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-emerald-400 transition-colors" title={t.saveSession}>
                     <DownloadIcon className="w-5 h-5" />

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { InterviewContext, ViewMode } from '../types';
 import { MicIcon } from './Icons';
 import GearMenu from './GearMenu';
 import SetupPanel from './SetupPanel';
+import type { GoogleUser } from '../services/apiClient.ts';
 
 interface LandingPageProps {
     context: InterviewContext;
@@ -27,6 +28,11 @@ interface LandingPageProps {
     isSetupOpen: boolean;
     setIsSetupOpen: (open: boolean) => void;
     startSessionWithMode: (mode: ViewMode) => void;
+    // Google Auth (optional)
+    googleUser: GoogleUser | null;
+    isAuthLoading: boolean;
+    onSignOut: () => void;
+    renderGoogleButton: (elementId: string) => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({
@@ -39,10 +45,49 @@ const LandingPage: React.FC<LandingPageProps> = ({
     t,
     isSetupOpen,
     setIsSetupOpen,
-    startSessionWithMode
+    startSessionWithMode,
+    googleUser,
+    isAuthLoading,
+    onSignOut,
+    renderGoogleButton
 }) => {
+    // Render Google Sign-In button when not signed in
+    useEffect(() => {
+        if (!googleUser && !isAuthLoading) {
+            // Small delay to ensure DOM element exists
+            const timer = setTimeout(() => renderGoogleButton('google-signin-landing'), 300);
+            return () => clearTimeout(timer);
+        }
+    }, [googleUser, isAuthLoading, renderGoogleButton]);
+
     return (
         <div className="h-screen w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up">
+            {/* Google Auth: top-right corner */}
+            <div className="absolute top-4 right-4 z-50">
+                {isAuthLoading ? (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-800/80 border border-gray-700">
+                        <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-xs text-gray-400">Signing in...</span>
+                    </div>
+                ) : googleUser ? (
+                    <div className="flex items-center gap-2">
+                        {googleUser.picture && (
+                            <img src={googleUser.picture} alt="" className="w-8 h-8 rounded-full border border-gray-600" />
+                        )}
+                        <span className="text-xs text-gray-300 max-w-[120px] truncate">{googleUser.name || googleUser.email}</span>
+                        <button
+                            onClick={onSignOut}
+                            className="text-xs text-gray-500 hover:text-gray-300 transition-colors ml-1"
+                            title="Sign out"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ) : (
+                    <div id="google-signin-landing" />
+                )}
+            </div>
+
             {/* Model loading indicator */}
             {!isModelReady && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">

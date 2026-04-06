@@ -58,7 +58,7 @@ export const DEFAULT_PROFILES: InterviewProfile[] = [
 // Default Mode-Specific Prompts
 export const DEFAULT_MODE_CONFIG: ModeConfig = {
   full: {
-    aiModel: 'azure',
+    aiModel: 'gemini',
     strategyDetailLevel: 'detailed',
     translationPrompt: `Translate the interviewer's question with full context.
 Provide a natural, conversational translation that captures nuances.
@@ -73,7 +73,7 @@ Bridge the candidate's experience to job requirements.
 Write the answer in Target Language.`
   },
   focus: {
-    aiModel: 'azure',
+    aiModel: 'gemini',
     translationPrompt: `Quick, accurate translation of the question.
 Preserve the original meaning and intent.
 Fix any speech recognition errors.`,
@@ -123,8 +123,7 @@ export const DEFAULT_CONTEXT: InterviewContext = {
   stereoMode: false,
   viewMode: 'FULL',
   ghostModel: 'opus',
-  llmProvider: 'azure',
-  groqApiKey: "",
+  llmProvider: 'gemini',
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: DEFAULT_MODE_CONFIG

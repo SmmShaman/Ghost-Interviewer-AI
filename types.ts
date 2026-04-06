@@ -43,11 +43,11 @@ export interface ModePrompts {
 
 export interface ModeConfig {
   full: ModePrompts & {
-    aiModel: 'azure' | 'groq';
+    aiModel: 'gemini';
     strategyDetailLevel: 'brief' | 'detailed' | 'comprehensive';
   };
   focus: ModePrompts & {
-    aiModel: 'azure' | 'groq';
+    aiModel: 'gemini';
   };
   simple: {
     translationPrompt: string;
@@ -88,8 +88,7 @@ export interface InterviewContext {
   stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
   viewMode: ViewMode; // Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // Select local model type
-  llmProvider: 'azure' | 'groq'; // Select Cloud Provider
-  groqApiKey: string; // Store Groq Key
+  llmProvider: 'gemini'; // Cloud LLM Provider
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: ModeConfig; // Mode-specific prompts and settings

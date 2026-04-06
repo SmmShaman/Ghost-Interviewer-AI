@@ -94,8 +94,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       label: 'AI Model',
       color: 'purple',
       subItems: [
-        { id: 'azure', label: 'Azure GPT-4', value: 'azure', isActive: context.llmProvider === 'azure' },
-        { id: 'groq', label: 'Groq Llama 3', value: 'groq', isActive: context.llmProvider === 'groq' },
+        { id: 'gemini', label: 'Gemini 2.5 Flash', value: 'gemini', isActive: context.llmProvider === 'gemini' },
       ]
     },
     {
@@ -125,7 +124,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         handleChange('targetLanguage', subItem.value);
         break;
       case 'ai':
-        handleChange('llmProvider', subItem.value as 'azure' | 'groq');
+        handleChange('llmProvider', subItem.value as 'gemini');
         break;
       case 'audio':
         handleChange('stereoMode', subItem.value === 'true');

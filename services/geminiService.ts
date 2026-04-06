@@ -1,34 +1,15 @@
 
 
+import { GoogleGenAI } from "@google/genai";
 import { InterviewContext } from "../types";
 import { knowledgeSearch } from "./knowledgeSearch";
 
-// Azure Configuration (from .env via Vite)
-const AZURE_ENDPOINT = import.meta.env.VITE_AZURE_ENDPOINT || "https://jobbot.openai.azure.com";
-const AZURE_API_KEY = import.meta.env.VITE_AZURE_API_KEY || "";
-const API_VERSION = import.meta.env.VITE_API_VERSION || "2024-10-01-preview";
-const DEPLOYMENT = import.meta.env.VITE_DEPLOYMENT || "gpt-5.1-codex-mini";
+// Gemini Configuration (from .env via Vite)
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
 
-// Groq Configuration (from .env via Vite)
-const GROQ_ENDPOINT = import.meta.env.VITE_GROQ_ENDPOINT || "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = import.meta.env.VITE_GROQ_MODEL || "llama-3.3-70b-versatile";
-const GROQ_API_KEY_DEFAULT = import.meta.env.VITE_GROQ_API_KEY || ""; 
-
-// Helper to mask imperative commands that trigger Azure Jailbreak detection
-function sanitizeForAzure(text: string): string {
-    if (!text) return "";
-    return text
-        // Problematic phrases -> Neutral data processing terms
-        .replace(/You are (an?|the)/gi, 'Task: Provide')
-        .replace(/Act as/gi, 'Function:')
-        .replace(/Your role is to/gi, 'Process by')
-        .replace(/You must/gi, 'Required:')
-        .replace(/You should/gi, 'Recommended:')
-        .replace(/You will/gi, 'Expected output:')
-        .replace(/Ignore previous/gi, '')
-        .replace(/SYSTEM:/gi, 'CONTEXT:')
-        .replace(/INSTRUCTIONS?:/gi, 'GUIDELINES:');
-}
+// Initialize Google GenAI SDK
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
@@ -245,169 +226,56 @@ ${modeSpecificGuidelines}
 ВАЖЛИВО: Кожен тег на окремому рядку. Відповідай ТІЛЬКИ в цьому форматі.`;
 }
 
-// AZURE IMPLEMENTATION
-async function generateViaAzure(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
-     // Use key from constant (if set) or fallback to environment/UI injection in future
-     // For now, if empty, it will likely fail unless user has configured backend proxy or local overrides
-
-     if (!AZURE_API_KEY) {
-         throw new Error("Azure API Key is missing. Set VITE_AZURE_API_KEY in .env or use Groq in Settings.");
-     }
-
-     // Check if already aborted
-     if (signal?.aborted) {
-         throw new DOMException('Aborted', 'AbortError');
-     }
-
-     let response;
-     try {
-         response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'api-key': AZURE_API_KEY
-            },
-            body: JSON.stringify({
-                messages: [
-                    { role: "user", content: prompt }
-                ],
-                stream: true,
-                max_completion_tokens: 4096  // Azure requires max_completion_tokens, not max_tokens
-                // Note: temperature not supported by gpt-5.1-codex-mini (only default=1)
-            }),
-            signal // Pass abort signal to fetch
-        });
-     } catch (fetchError: any) {
-         if (fetchError.name === 'AbortError') {
-             throw new DOMException('Aborted', 'AbortError');
-         }
-         throw fetchError;
-     }
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Azure API Error: ${response.status} ${errText}`);
+// GEMINI IMPLEMENTATION using @google/genai SDK
+async function generateViaGemini(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
+    if (!GEMINI_API_KEY || !ai) {
+        throw new Error("Gemini API Key is missing. Set VITE_GEMINI_API_KEY in .env");
     }
 
-    await processStream(response, onUpdate, signal);
-}
-
-// GROQ IMPLEMENTATION
-async function generateViaGroq(prompt: string, apiKey: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
-    const key = apiKey || GROQ_API_KEY_DEFAULT;
-    if (!key) throw new Error("Groq API Key is missing. Set VITE_GROQ_API_KEY in .env or enter in Settings.");
-
-    // Check if already aborted
     if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
     }
 
-    let response;
-    try {
-        response = await fetch(GROQ_ENDPOINT, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${key}`
-            },
-            body: JSON.stringify({
-                model: GROQ_MODEL,
-                messages: [
-                    { role: "user", content: prompt }
-                ],
-                stream: true,
-                temperature: 0.6,
-                max_tokens: 1024
-            }),
-            signal // Pass abort signal to fetch
-        });
-    } catch (fetchError: any) {
-        if (fetchError.name === 'AbortError') {
-            throw new DOMException('Aborted', 'AbortError');
-        }
-        throw fetchError;
-    }
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Groq API Error: ${response.status} ${errText}`);
-    }
-
-    await processStream(response, onUpdate, signal);
-}
-
-// GENERIC STREAM PROCESSOR (Works for both Azure and Groq as they are OpenAI compatible)
-async function processStream(response: Response, onUpdate: (data: any) => void, signal?: AbortSignal) {
-    if (!response.body) throw new Error("No response body");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
     let fullText = "";
-
-    // BATCHING: Reduce UI updates from 100+/sec to ~10/sec
     let lastUpdate = 0;
-    const UPDATE_INTERVAL = 100; // ms
+    const UPDATE_INTERVAL = 100; // ms - batch UI updates
 
     try {
-        while (true) {
-            // Check if aborted before reading
+        const response = await ai.models.generateContentStream({
+            model: GEMINI_MODEL,
+            contents: prompt,
+            config: {
+                temperature: 0.6,
+                maxOutputTokens: 4096,
+            }
+        });
+
+        for await (const chunk of response) {
             if (signal?.aborted) {
-                reader.cancel().catch(() => {}); // Ignore cancel errors
                 throw new DOMException('Aborted', 'AbortError');
             }
 
-            let readResult;
-            try {
-                readResult = await reader.read();
-            } catch (readError: any) {
-                // Handle abort during read
-                if (readError.name === 'AbortError' || signal?.aborted) {
-                    throw new DOMException('Aborted', 'AbortError');
-                }
-                throw readError;
-            }
+            const content = chunk.text || "";
+            if (content) {
+                fullText += content;
 
-            const { done, value } = readResult;
-            if (done) break;
-
-            const chunk = decoder.decode(value);
-            const lines = chunk.split("\n");
-
-            for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                    const dataStr = line.slice(6);
-                    if (dataStr === "[DONE]") continue;
-                    try {
-                        const data = JSON.parse(dataStr);
-                        const content = data.choices?.[0]?.delta?.content || "";
-                        if (content) {
-                            fullText += content;
-
-                            // BATCHING: Only update UI every 100ms for smooth display
-                            const now = Date.now();
-                            if (now - lastUpdate >= UPDATE_INTERVAL) {
-                                parseAndEmit(fullText, onUpdate);
-                                onUpdate({ _rawChunk: content, _fullRawText: fullText });
-                                lastUpdate = now;
-                            }
-                        }
-                    } catch (e) {
-                        // ignore parse errors for partial chunks
-                    }
+                const now = Date.now();
+                if (now - lastUpdate >= UPDATE_INTERVAL) {
+                    parseAndEmit(fullText, onUpdate);
+                    onUpdate({ _rawChunk: content, _fullRawText: fullText });
+                    lastUpdate = now;
                 }
             }
         }
 
-        // FINAL UPDATE: Ensure all content is emitted
+        // Final update: ensure all content is emitted
         parseAndEmit(fullText, onUpdate);
         onUpdate({ _rawChunk: '', _fullRawText: fullText });
-    } finally {
-        // Ensure reader is released safely
-        try {
-            reader.releaseLock();
-        } catch (e) {
-            // Ignore release errors
+    } catch (error: any) {
+        if (error.name === 'AbortError' || signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
         }
+        throw error;
     }
 }
 
@@ -420,19 +288,9 @@ export const generateInterviewAssist = async (
 ): Promise<void> => {
   try {
     const historyText = historyBuffer.join(" ");
+    const combinedPrompt = constructPrompt(currentInput, historyText, context, context.systemInstruction);
 
-    // Sanitize prompt for Azure jailbreak detection (Good practice for Groq too)
-    const safeInstruction = sanitizeForAzure(context.systemInstruction);
-    const combinedPrompt = constructPrompt(currentInput, historyText, context, safeInstruction);
-
-    // Switch Provider
-    if (context.llmProvider === 'groq') {
-        // console.log("🚀 Sending to Groq...");
-        await generateViaGroq(combinedPrompt, context.groqApiKey, onUpdate, signal);
-    } else {
-        // console.log("☁️ Sending to Azure...");
-        await generateViaAzure(combinedPrompt, onUpdate, signal);
-    }
+    await generateViaGemini(combinedPrompt, onUpdate, signal);
 
   } catch (error: any) {
     // Don't log abort errors as they are expected
@@ -502,11 +360,7 @@ export const generateStreamingTranslation = async (
             }
         };
 
-        if (context.llmProvider === 'groq') {
-            await generateViaGroqDirect(prompt, context.groqApiKey, onUpdate, signal);
-        } else {
-            await generateViaAzureDirect(prompt, onUpdate, signal);
-        }
+        await generateViaGemini(prompt, onUpdate, signal);
 
         // Try to parse LLM-based intent first
         let intent = parseLLMIntent(fullResponseText);
@@ -829,81 +683,6 @@ function classifyIntent(originalText: string, translation: string): StreamingTra
         questionConfidence: hasQuestionMark ? 70 : 20,
         speechType: hasQuestionMark ? 'QUESTION' : 'UNKNOWN'
     };
-}
-
-// Direct API calls (without the full interview assist logic)
-async function generateViaAzureDirect(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
-    if (!AZURE_API_KEY) {
-        throw new Error("Azure API Key is missing");
-    }
-
-    if (signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-    }
-
-    // Sanitize prompt to avoid Azure content filtering issues
-    const sanitizedPrompt = sanitizeForAzure(prompt);
-
-    const response = await fetch(`${AZURE_ENDPOINT}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-key': AZURE_API_KEY
-        },
-        body: JSON.stringify({
-            messages: [{ role: "user", content: sanitizedPrompt }],
-            stream: true,
-            max_completion_tokens: 4096  // Azure requires max_completion_tokens, not max_tokens
-            // Note: temperature not supported by gpt-5.1-codex-mini (only default=1)
-        }),
-        signal
-    });
-
-    if (!response.ok) {
-        // Try to get error details for debugging
-        let errorDetails = '';
-        try {
-            const errorBody = await response.text();
-            errorDetails = errorBody.slice(0, 500);
-            console.error('Azure API Error details:', errorDetails);
-        } catch (e) {
-            // Ignore parse error
-        }
-        throw new Error(`Azure API Error: ${response.status} - ${errorDetails}`);
-    }
-
-    await processStream(response, onUpdate, signal);
-}
-
-async function generateViaGroqDirect(prompt: string, apiKey: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
-    const key = apiKey || GROQ_API_KEY_DEFAULT;
-    if (!key) throw new Error("Groq API Key is missing");
-
-    if (signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-    }
-
-    const response = await fetch(GROQ_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify({
-            model: GROQ_MODEL,
-            messages: [{ role: "user", content: prompt }],
-            stream: true,
-            temperature: 0.5,
-            max_tokens: 512
-        }),
-        signal
-    });
-
-    if (!response.ok) {
-        throw new Error(`Groq API Error: ${response.status}`);
-    }
-
-    await processStream(response, onUpdate, signal);
 }
 
 // Helper for parsing structured output with closing tags support

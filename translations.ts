@@ -110,9 +110,7 @@ export const translations = {
       },
       llmModel: {
           label: "SMART ANALYSIS MODEL (STREAM 2)",
-          azure: "Azure OpenAI (Enterprise)",
-          groq: "Groq (Llama 3 - Fast)",
-          apiKeyLabel: "Groq API Key"
+          gemini: "Gemini 2.5 Flash",
       },
       // Mode-Centric Cards UI
       modeCards: {
@@ -325,9 +323,7 @@ Example:
       },
       llmModel: {
           label: "РОЗУМНИЙ АНАЛІЗ (STREAM 2)",
-          azure: "Azure OpenAI (Enterprise)",
-          groq: "Groq (Llama 3 - Швидко)",
-          apiKeyLabel: "Ключ Groq API"
+          gemini: "Gemini 2.5 Flash",
       },
       // Mode-Centric Cards UI
       modeCards: {
