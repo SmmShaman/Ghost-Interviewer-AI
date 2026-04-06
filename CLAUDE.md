@@ -145,6 +145,16 @@ Parsing in `geminiService.ts parseAndEmit()`. Supports both `[/TAG]` and `</TAG>
 
 Chrome 138+ recommended (native translation + WebGPU + Speech API). Falls back to WASM on other browsers. Firefox has limited Speech API support (behind flag). HTTPS required in production.
 
+## Audio Device Selection (Chrome 135+)
+
+The app uses `SpeechRecognition.start(MediaStreamTrack)` (Chrome 135+) to allow users to select a specific audio input device from the SetupPanel dropdown. The selected device ID is stored in `context.audioDeviceId` (persisted in localStorage).
+
+- If a device is selected: `getUserMedia({ deviceId: { exact: id } })` creates a stream, and the audio track is passed to `recognition.start(track)`
+- If no device is selected or browser doesn't support MediaStreamTrack: falls back to `recognition.start()` (system default mic)
+- `setupAudioAnalysis()` for stereo mode also respects the selected device
+
+This enables users with VB-Audio Cable to select "CABLE Output" directly in the app without changing their system default microphone.
+
 ## Common Tasks
 
 ### Adding a New Language

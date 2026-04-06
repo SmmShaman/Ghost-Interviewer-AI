@@ -119,6 +119,7 @@ const App: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioHistoryRef = useRef<{left: number, right: number}[]>([]); // Stores recent volume levels
   const streamRef = useRef<MediaStream | null>(null);
+  const speechStreamRef = useRef<MediaStream | null>(null); // Stream for SpeechRecognition (Chrome 135+)
 
   // --- SPEECH BUFFERING REFS (Delta Tracking Pattern) ---
   // Web Speech API gives FULL accumulated text each time, not deltas
@@ -1113,8 +1114,12 @@ const App: React.FC = () => {
           if (audioContextRef.current) audioContextRef.current.close();
           if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
 
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false, channelCount: 2 } 
+          const deviceId = contextRef.current.audioDeviceId;
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+                echoCancellation: false, autoGainControl: false, noiseSuppression: false, channelCount: 2
+            }
           });
           streamRef.current = stream;
 
@@ -1231,7 +1236,7 @@ const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, interimTranscript]);
 
-  const startListening = () => {
+  const startListening = async () => {
       if (!recognitionRef.current) return;
 
       // CREATE SESSION-LEVEL IDs (one per recording session)
@@ -1248,7 +1253,29 @@ const App: React.FC = () => {
       }
 
       try {
-          recognitionRef.current.start();
+          // Chrome 135+: Use MediaStreamTrack to select specific audio device
+          const deviceId = contextRef.current.audioDeviceId;
+          if (deviceId) {
+              try {
+                  // Clean up previous speech stream
+                  if (speechStreamRef.current) {
+                      speechStreamRef.current.getTracks().forEach(t => t.stop());
+                  }
+                  const stream = await navigator.mediaDevices.getUserMedia({
+                      audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                  });
+                  speechStreamRef.current = stream;
+                  const track = stream.getAudioTracks()[0];
+                  recognitionRef.current.start(track);
+                  console.log(`🎙️ [${Math.round(performance.now())}ms] Started with device: ${track.label}`);
+              } catch (trackErr: any) {
+                  // Fallback: browser doesn't support MediaStreamTrack in start() or device unavailable
+                  console.warn(`⚠️ MediaStreamTrack start failed (${trackErr.message}), falling back to default mic`);
+                  recognitionRef.current.start();
+              }
+          } else {
+              recognitionRef.current.start();
+          }
           shouldBeListening.current = true;
           setAppState(AppState.LISTENING);
       } catch(e: any) {
@@ -1264,6 +1291,11 @@ const App: React.FC = () => {
 
       shouldBeListening.current = false;
       try { recognitionRef.current?.stop(); } catch (e) {}
+      // Clean up speech recognition stream (Chrome 135+ MediaStreamTrack)
+      if (speechStreamRef.current) {
+          speechStreamRef.current.getTracks().forEach(t => t.stop());
+          speechStreamRef.current = null;
+      }
       setAppState(AppState.IDLE);
       setInterimTranscript("");
       setLiveTranslation("");

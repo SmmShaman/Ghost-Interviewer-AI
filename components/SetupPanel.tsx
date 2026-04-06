@@ -5,6 +5,8 @@ import { InterviewContext, PromptPreset, InterviewProfile, ViewMode, CandidatePr
 import { translations } from '../translations';
 import { localTranslator } from '../services/localTranslator';
 import { knowledgeSearch } from '../services/knowledgeSearch';
+import AudioPresetSelector from './AudioPresetSelector';
+import { useAudioDevices } from '../hooks/useAudioDevices';
 
 interface SetupPanelProps {
   context: InterviewContext;
@@ -45,7 +47,9 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const [showAudioGuide, setShowAudioGuide] = useState(false);
   const [showVMGuide, setShowVMGuide] = useState(false);
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>(context.audioDeviceId || '');
+  const [showManualDevice, setShowManualDevice] = useState(false);
+  const audioDevices = useAudioDevices();
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [localModelReady, setLocalModelReady] = useState(false);
@@ -191,6 +195,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
 
   const handleDeviceChange = async (deviceId: string) => {
       setSelectedDeviceId(deviceId);
+      onContextChange({ ...context, audioDeviceId: deviceId });
       if (isTestingAudio) {
           stopAudioTest();
           setTimeout(() => startAudioTest(deviceId), 100);
@@ -828,54 +833,82 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           isOpen={audioOpen}
           onToggle={() => setAudioOpen(!audioOpen)}
         >
-          {/* Microphone Selection */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-medium text-gray-400 uppercase">{t.inputSource}</label>
-            <select
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:border-emerald-500 outline-none"
-              value={selectedDeviceId}
-              onChange={(e) => handleDeviceChange(e.target.value)}
-              title={selectedDeviceId ? availableDevices.find(d => d.deviceId === selectedDeviceId)?.label || '' : ''}
+          {/* Audio Preset Buttons */}
+          <AudioPresetSelector
+            context={context}
+            onContextChange={(ctx) => {
+              onContextChange(ctx);
+              setSelectedDeviceId(ctx.audioDeviceId || '');
+            }}
+            presets={audioDevices.getPresets()}
+            uiLang={uiLang}
+            t={t}
+          />
+
+          {/* Manual Device Selection (collapsible) */}
+          <div className="mt-3">
+            <button
+              onClick={() => setShowManualDevice(!showManualDevice)}
+              className="w-full flex justify-between items-center text-[9px] font-bold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors"
             >
-              <option value="" className="bg-gray-900">{t.defaultMic}</option>
-              {availableDevices.map(device => {
-                const label = device.label || `Microphone ${device.deviceId.slice(0, 5)}...`;
-                const truncatedLabel = label.length > 35 ? label.slice(0, 35) + '...' : label;
-                return (
-                  <option key={device.deviceId} value={device.deviceId} className="bg-gray-900" title={label}>
-                    {truncatedLabel}
-                  </option>
-                );
-              })}
-            </select>
+              <span>{t.presetManualDevice}</span>
+              <span>{showManualDevice ? '−' : '+'}</span>
+            </button>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => isTestingAudio ? stopAudioTest() : startAudioTest()}
-                className={`text-[10px] px-2 py-1 rounded border transition-colors ${isTestingAudio ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
-              >
-                {isTestingAudio ? t.stopTest : t.testMic}
-              </button>
-
-              {/* Visualizer Bar */}
-              <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-75 ease-out"
-                  style={{ width: `${audioLevel}%` }}
-                />
+            {showManualDevice && (
+              <div className="space-y-2 mt-2 pt-2 border-t border-gray-800">
+                <label className="text-[10px] font-medium text-gray-400 uppercase">{t.inputSource}</label>
+                <select
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:border-emerald-500 outline-none"
+                  value={selectedDeviceId}
+                  onChange={(e) => {
+                    handleDeviceChange(e.target.value);
+                    onContextChange({ ...context, audioDeviceId: e.target.value, activeAudioPreset: 'manual' });
+                  }}
+                  title={selectedDeviceId ? availableDevices.find(d => d.deviceId === selectedDeviceId)?.label || '' : ''}
+                >
+                  <option value="" className="bg-gray-900">{t.defaultMic}</option>
+                  {availableDevices.map(device => {
+                    const label = device.label || `Microphone ${device.deviceId.slice(0, 5)}...`;
+                    const truncatedLabel = label.length > 35 ? label.slice(0, 35) + '...' : label;
+                    return (
+                      <option key={device.deviceId} value={device.deviceId} className="bg-gray-900" title={label}>
+                        {truncatedLabel}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Stereo Mode Toggle */}
-            <div className="flex items-center justify-between pt-2">
-              <label className="text-[10px] font-medium text-orange-400 uppercase">{t.stereoMode}</label>
-              <button
-                onClick={() => handleChange('stereoMode', !context.stereoMode)}
-                className={`w-10 h-5 rounded-full relative transition-colors duration-200 ${context.stereoMode ? 'bg-orange-600' : 'bg-gray-700'}`}
-              >
-                <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all duration-200 ${context.stereoMode ? 'left-6' : 'left-1'}`} />
-              </button>
+          {/* Audio Test */}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              onClick={() => isTestingAudio ? stopAudioTest() : startAudioTest()}
+              className={`text-[10px] px-2 py-1 rounded border transition-colors ${isTestingAudio ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
+            >
+              {isTestingAudio ? t.stopTest : t.testMic}
+            </button>
+
+            {/* Visualizer Bar */}
+            <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-75 ease-out"
+                style={{ width: `${audioLevel}%` }}
+              />
             </div>
+          </div>
+
+          {/* Stereo Mode Toggle */}
+          <div className="flex items-center justify-between pt-2">
+            <label className="text-[10px] font-medium text-orange-400 uppercase">{t.stereoMode}</label>
+            <button
+              onClick={() => handleChange('stereoMode', !context.stereoMode)}
+              className={`w-10 h-5 rounded-full relative transition-colors duration-200 ${context.stereoMode ? 'bg-orange-600' : 'bg-gray-700'}`}
+            >
+              <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all duration-200 ${context.stereoMode ? 'left-6' : 'left-1'}`} />
+            </button>
           </div>
 
           {/* Audio Guide */}

@@ -55,6 +55,14 @@ export interface ModeConfig {
   };
 }
 
+export type AudioPresetId =
+  | 'headphones-youtube'    // Stereo Mix / VB-Cable for system audio capture
+  | 'speakers'              // Default mic captures speaker output
+  | 'monitor-speakers'      // Monitor built-in speakers + mic capture
+  | 'headphones-interview'  // VB-Cable routing for Teams/Zoom calls
+  | 'manual'                // User manually selected from dropdown
+  | '';                     // No preset selected
+
 export interface InterviewContext {
   // === ACTIVE DATA (loaded from selected profiles) ===
   resume: string;
@@ -86,6 +94,8 @@ export interface InterviewContext {
 
   // === UI & HARDWARE ===
   stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
+  audioDeviceId: string; // Selected audio input device ID (empty = system default)
+  activeAudioPreset: AudioPresetId; // Active audio routing preset
   viewMode: ViewMode; // Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // Select local model type
   llmProvider: 'gemini'; // Cloud LLM Provider
