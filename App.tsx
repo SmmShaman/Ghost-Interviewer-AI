@@ -1624,35 +1624,13 @@ const App: React.FC = () => {
             <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
-            {/* LLM Translation Toggle */}
-            <button
-              onClick={() => {
-                const newValue = !llmTranslationEnabled;
-                console.log(`\n${'='.repeat(60)}`);
-                console.log(`🔄 [LLM TOGGLE] ${newValue ? '✅ УВІМКНЕНО' : '❌ ВИМКНЕНО'}`);
-                console.log(`   Режим: ${newValue ? 'Ghost + LLM (якісний переклад)' : 'Тільки Ghost/Chrome (швидкий переклад)'}`);
-                console.log(`${'='.repeat(60)}\n`);
-                setLlmTranslationEnabled(newValue);
-              }}
-              className={`px-3 py-1.5 text-xs font-black rounded-lg border transition-all shadow-lg shadow-black/20 ${
-                llmTranslationEnabled
-                  ? 'bg-purple-600 border-purple-500 text-white hover:bg-purple-500'
-                  : 'bg-gray-800 border-gray-600 text-gray-400 hover:bg-gray-700'
-              }`}
-              title={llmTranslationEnabled ? 'LLM переклад увімкнено (натисни щоб вимкнути)' : 'LLM переклад вимкнено (тільки Ghost/Chrome)'}
-            >
-              {llmTranslationEnabled ? 'LLM ✓' : 'LLM ✗'}
-            </button>
-
-            {/* LLM Model indicator - only visible when LLM is enabled */}
-            {llmTranslationEnabled && (
-              <div className="flex items-center gap-1 bg-gray-900/50 rounded-lg border border-gray-700 p-0.5">
-                <span
-                  className="px-2.5 py-1 text-[10px] font-bold rounded bg-blue-500 text-white"
-                  title="Google Gemini 2.5 Flash"
-                >
-                  GEMINI
-                </span>
+            {/* Audio preset indicator (compact) */}
+            {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && (
+              <div className="px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
+                {context.activeAudioPreset === 'headphones-youtube' ? '🎧' :
+                 context.activeAudioPreset === 'speakers' ? '🔊' :
+                 context.activeAudioPreset === 'monitor-speakers' ? '🖥️' :
+                 context.activeAudioPreset === 'headphones-interview' ? '🎙️' : ''}
               </div>
             )}
         </div>

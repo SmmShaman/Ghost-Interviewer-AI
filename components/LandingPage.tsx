@@ -1,8 +1,9 @@
 import React, { useEffect } from 'react';
-import { InterviewContext, ViewMode } from '../types';
+import { InterviewContext, ViewMode, AudioPresetId } from '../types';
 import { MicIcon } from './Icons';
 import GearMenu from './GearMenu';
 import SetupPanel from './SetupPanel';
+import { useAudioDevices } from '../hooks/useAudioDevices';
 import type { GoogleUser } from '../services/apiClient.ts';
 
 interface LandingPageProps {
@@ -51,10 +52,16 @@ const LandingPage: React.FC<LandingPageProps> = ({
     onSignOut,
     renderGoogleButton
 }) => {
+    const audioDevices = useAudioDevices();
+    const presets = audioDevices.getPresets();
+
+    const selectPreset = (presetId: AudioPresetId, deviceId: string) => {
+        setContext({ ...context, audioDeviceId: deviceId, activeAudioPreset: presetId });
+    };
+
     // Render Google Sign-In button when not signed in
     useEffect(() => {
         if (!googleUser && !isAuthLoading) {
-            // Small delay to ensure DOM element exists
             const timer = setTimeout(() => renderGoogleButton('google-signin-landing'), 300);
             return () => clearTimeout(timer);
         }
@@ -182,6 +189,58 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         </div>
                     </div>
                 </button>
+            </div>
+
+            {/* Audio Preset Buttons */}
+            <div className="w-full max-w-5xl px-6 mb-8">
+                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+                    {uiLang === 'uk' ? 'РЕЖИМ АУДІО' : 'AUDIO MODE'}
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {presets.map(preset => {
+                        const active = context.activeAudioPreset === preset.id;
+                        const meta: Record<string, { icon: string; label: string; labelUk: string }> = {
+                            'headphones-youtube': { icon: '🎧', label: 'Headphones + Video', labelUk: 'Навушники + Відео' },
+                            'speakers': { icon: '🔊', label: 'Speakers', labelUk: 'Колонки' },
+                            'monitor-speakers': { icon: '🖥️', label: 'Monitor', labelUk: 'Монітор' },
+                            'headphones-interview': { icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда' },
+                        };
+                        const m = meta[preset.id] || { icon: '?', label: preset.id, labelUk: preset.id };
+
+                        return (
+                            <button
+                                key={preset.id}
+                                onClick={() => {
+                                    if (preset.available) {
+                                        selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId);
+                                    }
+                                }}
+                                className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                                    ${active
+                                        ? 'border-cyan-400 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]'
+                                        : preset.available
+                                            ? 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
+                                            : 'border-gray-800/50 bg-gray-900/20 opacity-40 cursor-not-allowed'
+                                    }`}
+                                disabled={!preset.available}
+                                title={!preset.available
+                                    ? (uiLang === 'uk' ? 'Потрібен VB-Cable (vb-audio.com/Cable/)' : 'Requires VB-Cable (vb-audio.com/Cable/)')
+                                    : preset.matchedDeviceLabel}
+                            >
+                                <div className="text-2xl mb-2">{m.icon}</div>
+                                <div className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
+                                    {uiLang === 'uk' ? m.labelUk : m.label}
+                                </div>
+                                {active && (
+                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-gray-950" />
+                                )}
+                                {!preset.available && (
+                                    <div className="text-[8px] text-amber-500/70 mt-1">VB-Cable</div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             {/* Footer hint */}
