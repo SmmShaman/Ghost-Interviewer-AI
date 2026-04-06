@@ -817,7 +817,21 @@ export default {
         return authenticateGoogle(sql, request);
       }
 
-      // All other routes require auth
+      // Non-API routes — proxy to Netlify frontend
+      if (!path.startsWith('/api/')) {
+        const netlifyUrl = new URL(request.url);
+        netlifyUrl.hostname = 'ghost-interviewer-ai.netlify.app';
+        netlifyUrl.port = '';
+        const proxyReq = new Request(netlifyUrl.toString(), {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          redirect: 'follow',
+        });
+        return fetch(proxyReq);
+      }
+
+      // All other /api/ routes require auth
       const user = await getUserFromRequest(sql, request);
       const authError = requireAuth(user);
       if (authError) return authError;
@@ -884,7 +898,7 @@ export default {
         return syncUp(sql, userId, request);
       }
 
-      // Not found
+      // No matching API route
       return jsonResponse({ error: 'Not found', path, method }, 404);
     } catch (error: any) {
       console.error('Worker error:', error);
