@@ -247,15 +247,21 @@ class LocalTranslator {
         return this.currentModelType;
     }
 
-    /** Configure Google Cloud NMT API key (from env or UI) */
+    /** Configure Google Cloud NMT — direct key or proxy */
     setGoogleNMTKey(key: string): void {
         if (key) {
             googleTranslateNMT.setApiKey(key);
-            googleTranslateNMT.setLanguages(
-                this.sourceLanguageName === 'no' ? 'Norwegian' : 'English',
-                this.targetLanguageName === 'uk' ? 'Ukrainian' : 'English'
-            );
         }
+    }
+
+    /** Configure Google NMT proxy mode (production) */
+    setGoogleNMTProxy(proxyUrl: string, authToken: string): void {
+        googleTranslateNMT.setProxy(proxyUrl, authToken);
+    }
+
+    /** Update auth token for NMT proxy */
+    setGoogleNMTAuthToken(token: string): void {
+        googleTranslateNMT.setAuthToken(token);
     }
 
     async initialize(onProgress?: (progress: number) => void) {

@@ -3,6 +3,7 @@ import { neon } from '@neondatabase/serverless';
 interface Env {
   DATABASE_URL: string;
   ENVIRONMENT: string;
+  GOOGLE_TRANSLATE_KEY: string;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -829,6 +830,52 @@ export default {
           redirect: 'follow',
         });
         return fetch(proxyReq);
+      }
+
+      // Translation proxy (requires auth, uses server-side API key)
+      if (method === 'POST' && path === '/api/translate') {
+        // Lightweight auth: just verify token, don't need DB user
+        const authHeader = request.headers.get('Authorization');
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          return jsonResponse({ error: 'Authorization required' }, 401);
+        }
+        const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
+        if (!tokenInfo) {
+          return jsonResponse({ error: 'Invalid token' }, 401);
+        }
+
+        const body = await request.json() as { q: string; source?: string; target?: string };
+        if (!body.q) {
+          return jsonResponse({ error: 'Missing "q" parameter' }, 400);
+        }
+
+        const translateKey = env.GOOGLE_TRANSLATE_KEY;
+        if (!translateKey) {
+          return jsonResponse({ error: 'Translation service not configured' }, 503);
+        }
+
+        const googleResp = await fetch(
+          `https://translation.googleapis.com/language/translate/v2?key=${translateKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              q: body.q,
+              source: body.source || 'no',
+              target: body.target || 'uk',
+              format: 'text',
+            }),
+          }
+        );
+
+        const googleData = await googleResp.json() as any;
+
+        if (!googleResp.ok) {
+          return jsonResponse({ error: 'Translation failed', details: googleData?.error?.message }, googleResp.status);
+        }
+
+        const translatedText = googleData?.data?.translations?.[0]?.translatedText || '';
+        return jsonResponse({ translatedText });
       }
 
       // All other /api/ routes require auth

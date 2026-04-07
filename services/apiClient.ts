@@ -94,6 +94,11 @@ class ApiClient {
     return this.user;
   }
 
+  // Get current ID token (for NMT proxy auth)
+  getIdToken(): string | null {
+    return this.idToken;
+  }
+
   // ─── HTTP helpers ────────────────────────────────────────────────────────
 
   private async request<T>(

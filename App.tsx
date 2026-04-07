@@ -14,6 +14,7 @@ import { MicIcon, StopIcon, DownloadIcon, TrashIcon } from './components/Icons';
 import { InterviewContext, AppState, Message, IWindow, ViewMode } from './types';
 import { generateInterviewAssist } from './services/geminiService';
 import { localTranslator } from './services/localTranslator';
+import { apiClient } from './services/apiClient';
 import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
 import { useStreamingMode } from './hooks/useStreamingMode';
@@ -234,11 +235,17 @@ const App: React.FC = () => {
     localTranslator.clearCache();
     // Pre-initialize Chrome Translator API (prevents race condition)
     localTranslator.preInitChrome();
-    // Configure Google Cloud NMT key from context (localStorage)
-    if (context.googleTranslateKey) {
+    // Configure Google Cloud NMT:
+    // 1. Proxy mode (production, secure): use Worker + auth token
+    // 2. Direct mode (dev fallback): use API key from env/context
+    const apiUrl = import.meta.env.VITE_API_URL || 'https://ghost.vitalii.no';
+    const authToken = apiClient.getIdToken();
+    if (authToken) {
+      localTranslator.setGoogleNMTProxy(apiUrl, authToken);
+    } else if (context.googleTranslateKey) {
       localTranslator.setGoogleNMTKey(context.googleTranslateKey);
     }
-  }, [context.targetLanguage, context.nativeLanguage, context.googleTranslateKey]);
+  }, [context.targetLanguage, context.nativeLanguage, context.googleTranslateKey, googleAuth.isSignedIn]);
 
   // RETRY GHOST TRANSLATIONS when model becomes ready
   // Re-translates any messages that got "⏳..." while model was loading

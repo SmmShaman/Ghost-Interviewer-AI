@@ -4,19 +4,20 @@
  * Dedicated Neural Machine Translation — NOT LLM-based.
  * 50-200ms latency for a sentence, significantly faster than any LLM.
  *
- * API: Google Cloud Translation v2 (Basic)
- * Endpoint: https://translation.googleapis.com/language/translate/v2
- * Free tier: 500,000 characters/month
+ * TWO MODES:
+ * 1. Proxy mode (production): Browser → ghost.vitalii.no/api/translate → Google API
+ *    API key stays on server, requires Google auth token
+ * 2. Direct mode (dev/fallback): Browser → Google API directly
+ *    Uses VITE_GOOGLE_TRANSLATE_KEY from .env.local
  *
  * Used as Level 2 in the translation pipeline:
  *   Level 1: Chrome Translator API (0-50ms, on-device)
- *   Level 2: Google Cloud NMT (50-200ms, cloud)     ← THIS
+ *   Level 2: Google Cloud NMT (50-300ms, cloud)     ← THIS
  *   Level 3: Opus WASM model (300-2000ms, on-device fallback)
  */
 
 import { debugLogger } from './debugLogger';
 
-// BCP-47 language codes for Google Cloud Translation
 const LANG_MAP: Record<string, string> = {
     'Norwegian': 'no',
     'Ukrainian': 'uk',
@@ -29,42 +30,71 @@ const LANG_MAP: Record<string, string> = {
 };
 
 class GoogleTranslateNMT {
-    private apiKey: string = '';
+    private directApiKey: string = '';
+    private proxyUrl: string = '';
+    private authToken: string = '';  // Google ID token for proxy auth
     private sourceLang: string = 'no';
     private targetLang: string = 'uk';
     private available: boolean = false;
+    private useProxy: boolean = false;
 
-    private static readonly ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+    private static readonly DIRECT_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
 
-    /** Set API key (from env var or UI input) */
+    /** Configure direct mode (dev): API key in frontend */
     setApiKey(key: string): void {
-        this.apiKey = key.trim();
-        this.available = this.apiKey.length > 10;
-        if (this.available) {
-            console.log('🌐 [Google NMT] API key configured');
+        this.directApiKey = key.trim();
+        if (this.directApiKey.length > 10) {
+            this.available = true;
+            this.useProxy = false;
+            console.log('🌐 [Google NMT] Direct mode (API key in frontend)');
         }
     }
 
-    /** Set translation languages */
+    /** Configure proxy mode (production): requests go through Worker */
+    setProxy(url: string, authToken: string): void {
+        this.proxyUrl = url.replace(/\/$/, '');
+        this.authToken = authToken;
+        if (this.proxyUrl && this.authToken) {
+            this.available = true;
+            this.useProxy = true;
+            console.log('🌐 [Google NMT] Proxy mode (via Worker)');
+        }
+    }
+
+    /** Update auth token (when user re-authenticates) */
+    setAuthToken(token: string): void {
+        this.authToken = token;
+        // If we have a proxy URL, re-enable proxy mode
+        if (this.proxyUrl && this.authToken) {
+            this.available = true;
+            this.useProxy = true;
+        }
+    }
+
     setLanguages(source: string, target: string): void {
         this.sourceLang = LANG_MAP[source] || 'no';
         this.targetLang = LANG_MAP[target] || 'uk';
     }
 
-    /** Check if service is available (has API key) */
     isAvailable(): boolean {
         return this.available;
     }
 
-    /** Translate text using Google Cloud NMT */
+    /** Translate text — routes to proxy or direct based on config */
     async translate(text: string): Promise<string | null> {
         if (!this.available || !text.trim()) return null;
 
-        const startTime = performance.now();
+        return this.useProxy
+            ? this.translateViaProxy(text)
+            : this.translateDirect(text);
+    }
 
+    /** Direct translation (dev mode) */
+    private async translateDirect(text: string): Promise<string | null> {
+        const startTime = performance.now();
         try {
             const response = await fetch(
-                `${GoogleTranslateNMT.ENDPOINT}?key=${this.apiKey}`,
+                `${GoogleTranslateNMT.DIRECT_ENDPOINT}?key=${this.directApiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -78,13 +108,7 @@ class GoogleTranslateNMT {
             );
 
             if (!response.ok) {
-                const errBody = await response.text().catch(() => '');
-                console.error(`🌐 [Google NMT] API error ${response.status}:`, errBody);
-                debugLogger.log('GNMT_ERR', `HTTP ${response.status}: ${errBody.substring(0, 80)}`);
-
-                // Disable on auth errors to avoid repeated failures
                 if (response.status === 401 || response.status === 403) {
-                    console.error('🌐 [Google NMT] Invalid API key — disabling');
                     this.available = false;
                 }
                 return null;
@@ -92,27 +116,57 @@ class GoogleTranslateNMT {
 
             const data = await response.json();
             const translation = data?.data?.translations?.[0]?.translatedText;
+            if (!translation) return null;
 
-            if (!translation) {
-                debugLogger.log('GNMT_ERR', 'Empty translation in response');
-                return null;
-            }
-
-            const latency = performance.now() - startTime;
-            debugLogger.log('GNMT', `${text.substring(0, 30)} → ${translation.substring(0, 30)}`, latency, text.split(/\s+/).length);
-
+            debugLogger.log('GNMT', `${text.substring(0, 30)} → ${translation.substring(0, 30)}`, performance.now() - startTime, text.split(/\s+/).length);
             return translation;
-        } catch (e: any) {
-            const latency = performance.now() - startTime;
-            debugLogger.log('GNMT_ERR', `${e?.message || e}`, latency);
+        } catch {
             return null;
         }
     }
 
-    /** Get status for diagnostics */
-    getStatus(): { available: boolean; sourceLang: string; targetLang: string } {
+    /** Proxy translation (production mode) */
+    private async translateViaProxy(text: string): Promise<string | null> {
+        const startTime = performance.now();
+        try {
+            const response = await fetch(`${this.proxyUrl}/api/translate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.authToken}`
+                },
+                body: JSON.stringify({
+                    q: text,
+                    source: this.sourceLang,
+                    target: this.targetLang,
+                })
+            });
+
+            if (!response.ok) {
+                const errBody = await response.text().catch(() => '');
+                debugLogger.log('GNMT_ERR', `Proxy ${response.status}: ${errBody.substring(0, 60)}`);
+                if (response.status === 401) {
+                    // Auth expired — don't disable, user may re-auth
+                    console.warn('🌐 [Google NMT] Auth token expired');
+                }
+                return null;
+            }
+
+            const data = await response.json() as { translatedText?: string };
+            const translation = data?.translatedText;
+            if (!translation) return null;
+
+            debugLogger.log('GNMT', `${text.substring(0, 30)} → ${translation.substring(0, 30)}`, performance.now() - startTime, text.split(/\s+/).length);
+            return translation;
+        } catch {
+            return null;
+        }
+    }
+
+    getStatus(): { available: boolean; useProxy: boolean; sourceLang: string; targetLang: string } {
         return {
             available: this.available,
+            useProxy: this.useProxy,
             sourceLang: this.sourceLang,
             targetLang: this.targetLang,
         };
