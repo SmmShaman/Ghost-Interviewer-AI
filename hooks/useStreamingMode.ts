@@ -334,27 +334,46 @@ export function useStreamingMode(
                 const translatedWordCount = translation.split(/\s+/).length;
                 metricsCollector.recordWordsTranslated(translatedWordCount);
 
-                // APPEND: Each finalized block = sentence-like unit
-                // Add period + block separator (｜) for visual segmentation
-                const BLOCK_SEP = '｜'; // Full-width pipe as block boundary marker
+                // SMART APPEND: glue fragments into sentences
+                // Only start a new visual block (｜) when NMT ends with sentence punctuation
+                const BLOCK_SEP = '｜';
                 let cleanTranslation = translation.trim();
-                // Capitalize first letter of each block
-                if (cleanTranslation.length > 0) {
+
+                // Check if this fragment completes a sentence (NMT placed punctuation)
+                const endsWithPunctuation = /[.!?]$/.test(cleanTranslation);
+                // Check if previous text already ends with punctuation (= ready for new block)
+                const prevText = prev.ghostTranslation || '';
+                const prevEndsPunctuation = /[.!?]\s*$/.test(prevText) || /｜\s*$/.test(prevText) || !prevText;
+
+                // Capitalize only if starting a new sentence
+                if (prevEndsPunctuation && cleanTranslation.length > 0) {
                     cleanTranslation = cleanTranslation[0].toUpperCase() + cleanTranslation.slice(1);
                 }
-                // Add period if block doesn't end with punctuation
-                if (cleanTranslation && !/[.!?;:]$/.test(cleanTranslation)) {
+
+                let separator: string;
+                if (addParagraphBreak) {
+                    separator = punctuation + PARAGRAPH_MARKER;
+                } else if (prevEndsPunctuation && prevText) {
+                    // Previous sentence complete → start new visual block
+                    separator = ` ${BLOCK_SEP} `;
+                } else {
+                    // Mid-sentence → just append with space (no block break)
+                    separator = ' ';
+                }
+
+                // Add period at the end only if this looks like a complete thought
+                // (NMT didn't add punctuation, but we have 7+ words accumulated in this sentence)
+                const currentSentenceText = prevEndsPunctuation ? cleanTranslation : prevText.split(BLOCK_SEP).pop() + ' ' + cleanTranslation;
+                const currentSentenceWords = currentSentenceText.trim().split(/\s+/).length;
+                if (!endsWithPunctuation && currentSentenceWords >= 14) {
+                    // Force period after ~14 words without punctuation (2 blocks worth)
                     cleanTranslation += '.';
                 }
 
-                const separator = addParagraphBreak
-                    ? (punctuation + PARAGRAPH_MARKER)
-                    : (prev.ghostTranslation ? ` ${BLOCK_SEP} ` : '');
-
                 return {
                     ...prev,
-                    ghostTranslation: prev.ghostTranslation
-                        ? `${prev.ghostTranslation}${separator}${cleanTranslation}`
+                    ghostTranslation: prevText
+                        ? `${prevText}${separator}${cleanTranslation}`
                         : cleanTranslation,
                     isProcessingGhost: false
                 };
