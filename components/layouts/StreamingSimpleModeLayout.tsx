@@ -133,34 +133,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT PANEL: Structured topics */}
-                <div className="flex-1 basis-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col">
-                    <div className="flex items-center justify-between px-6 py-3 shrink-0 border-b border-gray-800/20">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
-                            Структура
-                        </span>
-                        {isProcessingTopics && (
-                            <span className="flex items-center gap-1 text-[9px] text-purple-400">
-                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                                AI
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto px-6 py-4">
-                        {topicSummary ? (
-                            renderTopics()
-                        ) : (
-                            <div className="flex items-center justify-center h-full">
-                                <p className="text-gray-700 text-sm italic">
-                                    {wordCount > 0 ? 'Аналізую...' : 'Теми з\'являться тут'}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* RIGHT PANEL: Live subtitles */}
+                {/* LEFT PANEL: Live subtitles */}
                 <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
                     <div
                         ref={scrollRef}
@@ -194,6 +167,33 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                         ) : isListening ? (
                             <div className="text-gray-700 italic text-xs">слухаю...</div>
                         ) : null}
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL: Structured topics */}
+                <div className="flex-1 basis-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between px-6 py-3 shrink-0 border-b border-gray-800/20">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
+                            Структура
+                        </span>
+                        {isProcessingTopics && (
+                            <span className="flex items-center gap-1 text-[9px] text-purple-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                AI
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                        {topicSummary ? (
+                            renderTopics()
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-700 text-sm italic">
+                                    {wordCount > 0 ? 'Аналізую...' : 'Теми з\'являться тут'}
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
