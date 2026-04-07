@@ -137,7 +137,7 @@ export const STORAGE_KEY = 'ghost_interviewer_context_v2';
 
 // Language code mappings
 export const LANG_MAP: Record<string, string> = {
-    'Norwegian': 'no-NO',
+    'Norwegian': 'nb-NO',
     'English': 'en-US',
     'German': 'de-DE',
     'Spanish': 'es-ES',
