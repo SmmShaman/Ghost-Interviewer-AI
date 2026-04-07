@@ -85,12 +85,12 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         return () => clearInterval(interval);
     }, [mainText]);
 
-    // Auto-scroll subtitles
+    // Auto-scroll subtitles (on both finalized and interim changes)
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [displayedText]);
+    }, [displayedText, interimDisplay]);
 
     const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
@@ -133,15 +133,22 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT PANEL: Live subtitles */}
-                <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
+                {/* LEFT PANEL: Live subtitles — finalized + interim inline */}
+                <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden">
                     <div
                         ref={scrollRef}
-                        className="flex-1 overflow-y-auto scroll-smooth px-6 py-5"
+                        className="h-full overflow-y-auto scroll-smooth px-6 py-5"
                     >
-                        {displayedText ? (
-                            <div className="text-base md:text-lg leading-relaxed font-medium text-gray-100" style={{ whiteSpace: 'pre-line' }}>
-                                {displayedText}
+                        {(displayedText || interimDisplay) ? (
+                            <div className="text-base md:text-lg leading-relaxed font-medium" style={{ whiteSpace: 'pre-line' }}>
+                                {/* Finalized text — white, stable */}
+                                {displayedText && (
+                                    <span className="text-gray-100">{displayedText}</span>
+                                )}
+                                {/* Interim — same size, inline, slightly transparent */}
+                                {interimDisplay && (
+                                    <span className="text-gray-400"> {interimDisplay}</span>
+                                )}
                                 {isListening && (
                                     <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
                                 )}
@@ -156,17 +163,6 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                                 </div>
                             </div>
                         )}
-                    </div>
-
-                    {/* Interim */}
-                    <div className="shrink-0 border-t border-gray-800/30 bg-gray-900/40 px-6 py-2"
-                         style={{ minHeight: '2.5rem', maxHeight: '3rem' }}
-                    >
-                        {interimDisplay ? (
-                            <div className="text-sm text-gray-500 italic truncate">{interimDisplay}</div>
-                        ) : isListening ? (
-                            <div className="text-gray-700 italic text-xs">слухаю...</div>
-                        ) : null}
                     </div>
                 </div>
 
