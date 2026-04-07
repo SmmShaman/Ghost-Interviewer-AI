@@ -133,7 +133,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-6 mb-12">
                 {/* SIMPLE Mode */}
                 <button
-                    onClick={() => startSessionWithMode('SIMPLE')}
+                    onClick={() => { setContext({ ...context, speedPreset: 'youtube' }); startSessionWithMode('SIMPLE'); }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
                         hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
@@ -145,7 +145,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-amber-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
                             {t.modes.simple}
-                            <Tip color="amber" text="Режим субтитрів. Миттєвий переклад (Google NMT, ~200мс). Ліва панель — переклад з кольоровими блоками. Права — структура тем (AI). Для YouTube, підкастів, лекцій. LLM вимкнений — текст стабільний." />
+                            <Tip color="amber" text="Тільки переклад, без AI-відповідей. Ліворуч — субтитри мовлення. Праворуч — короткий зміст по темах. Для перегляду відео, подкастів, лекцій." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.simpleDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-amber-500/70 text-xs font-mono">
@@ -157,7 +157,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FOCUS Mode */}
                 <button
-                    onClick={() => startSessionWithMode('FOCUS')}
+                    onClick={() => { setContext({ ...context, speedPreset: 'interview' }); startSessionWithMode('FOCUS'); }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
                         hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
@@ -169,7 +169,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-blue-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
                             {t.modes.focus}
-                            <Tip color="blue" text="Переклад + відповідь. Миттєвий переклад зліва, AI-відповідь + теми справа. Коли інтерв'юер ставить питання — AI генерує рекомендовану відповідь. Для співбесід де потрібна швидка підказка." />
+                            <Tip color="blue" text="Переклад + підказка. Ліворуч — переклад що каже інтерв'юер. Праворуч — AI підказує що відповісти, коли задають питання. Для співбесід." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.focusDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-blue-500/70 text-xs font-mono">
@@ -181,7 +181,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FULL Mode */}
                 <button
-                    onClick={() => startSessionWithMode('FULL')}
+                    onClick={() => { setContext({ ...context, speedPreset: 'interview' }); startSessionWithMode('FULL'); }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
                         hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
@@ -193,7 +193,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-emerald-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
                             {t.modes.full}
-                            <Tip color="emerald" text="Повний аналіз. 3 колонки: переклад + аналіз питання + стратегія відповіді. Внизу — готова відповідь. Для важливих співбесід де потрібна глибока AI-підготовка. Найбільше навантаження на AI." />
+                            <Tip color="emerald" text="Максимальна допомога. Переклад + AI аналізує питання + пропонує стратегію + готова відповідь. Для важливих співбесід де потрібна повна підтримка." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.fullDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-emerald-500/70 text-xs font-mono">
@@ -270,9 +270,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             custom: '⚙️',
                         };
                         const tips: Record<SpeedPresetId, string> = {
-                            youtube: 'Тільки Ghost-переклад (Google NMT, ~200мс). LLM вимкнений — без затримок. Текст тече безперервно як субтитри. Затримка від мовлення до тексту: 3-5с. Ідеально для відео та підкастів.',
-                            interview: 'Ghost + LLM для відповідей. Максимальна швидкість перекладу (~200мс) + AI генерує відповіді на питання інтерв\'юера. Менші блоки, швидші тригери. Для живих співбесід.',
-                            custom: 'Ручне налаштування: debounce перекладу, Hold-N (приховування нестабільних слів), тригери LLM, розмір активного вікна. Для досвідчених користувачів.',
+                            youtube: 'Тільки переклад, без AI-відповідей. Текст тече плавно як субтитри. Затримка ~3-5 секунд від мовлення. Обирається автоматично для режиму SIMPLE.',
+                            interview: 'Переклад + AI-відповіді на питання. Швидші реакції, менші блоки тексту. Обирається автоматично для режимів FOCUS та FULL.',
+                            custom: 'Змінити швидкість та поведінку вручну. Для просунутих користувачів які хочуть тонко налаштувати систему під себе.',
                         };
                         return (
                             <button
