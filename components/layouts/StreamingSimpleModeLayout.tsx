@@ -133,19 +133,30 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT PANEL: Live subtitles — finalized + interim inline */}
+                {/* LEFT PANEL: Live subtitles — block-segmented + interim inline */}
                 <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden">
                     <div
                         ref={scrollRef}
                         className="h-full overflow-y-auto scroll-smooth px-6 py-5"
                     >
                         {(displayedText || interimDisplay) ? (
-                            <div className="text-base md:text-lg leading-relaxed font-medium" style={{ whiteSpace: 'pre-line' }}>
-                                {/* Finalized text — white, stable */}
-                                {displayedText && (
-                                    <span className="text-gray-100">{displayedText}</span>
-                                )}
-                                {/* Interim — same size, inline, slightly transparent */}
+                            <div className="text-base md:text-lg leading-relaxed font-medium">
+                                {/* Finalized blocks — alternating colors */}
+                                {displayedText && displayedText.split('｜').map((block, i, arr) => {
+                                    const trimmed = block.trim();
+                                    if (!trimmed) return null;
+                                    const isEven = i % 2 === 0;
+                                    const isLast = i === arr.length - 1;
+                                    return (
+                                        <span key={i}>
+                                            <span className={isEven ? 'text-gray-100' : 'text-blue-100'}>
+                                                {trimmed}
+                                            </span>
+                                            {!isLast && <span className="text-gray-700 mx-1">|</span>}
+                                        </span>
+                                    );
+                                })}
+                                {/* Interim — inline, slightly transparent */}
                                 {interimDisplay && (
                                     <span className="text-gray-400"> {interimDisplay}</span>
                                 )}

@@ -150,8 +150,10 @@ export function useStreamingMode(
     const topicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For topic summarization debounce
     const topicAbortRef = useRef<AbortController | null>(null);
     const lastTopicWordCountRef = useRef<number>(0); // Track words at last topic generation
-    const TOPIC_TRIGGER_WORDS = 25; // Generate topics every N new words
-    const TOPIC_PAUSE_MS = 5000; // Or after 5s pause
+    const wordsInCountRef = useRef<number>(0); // Count WORDS_IN events since last topic
+    const TOPIC_TRIGGER_BLOCKS = 2; // Generate topics every N finalized blocks (WORDS_IN)
+    const TOPIC_MIN_WORDS = 15; // Minimum words before first topic
+    const TOPIC_PAUSE_MS = 8000; // Or after 8s pause (real silence)
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
@@ -332,15 +334,28 @@ export function useStreamingMode(
                 const translatedWordCount = translation.split(/\s+/).length;
                 metricsCollector.recordWordsTranslated(translatedWordCount);
 
-                // APPEND ONLY: Never modify existing translation
-                // Add paragraph break if flagged (when there was a pause)
-                // Include punctuation before paragraph marker
-                const separator = addParagraphBreak ? (punctuation + PARAGRAPH_MARKER) : ' ';
+                // APPEND: Each finalized block = sentence-like unit
+                // Add period + block separator (｜) for visual segmentation
+                const BLOCK_SEP = '｜'; // Full-width pipe as block boundary marker
+                let cleanTranslation = translation.trim();
+                // Capitalize first letter of each block
+                if (cleanTranslation.length > 0) {
+                    cleanTranslation = cleanTranslation[0].toUpperCase() + cleanTranslation.slice(1);
+                }
+                // Add period if block doesn't end with punctuation
+                if (cleanTranslation && !/[.!?;:]$/.test(cleanTranslation)) {
+                    cleanTranslation += '.';
+                }
+
+                const separator = addParagraphBreak
+                    ? (punctuation + PARAGRAPH_MARKER)
+                    : (prev.ghostTranslation ? ` ${BLOCK_SEP} ` : '');
+
                 return {
                     ...prev,
                     ghostTranslation: prev.ghostTranslation
-                        ? `${prev.ghostTranslation}${separator}${translation}`
-                        : translation,
+                        ? `${prev.ghostTranslation}${separator}${cleanTranslation}`
+                        : cleanTranslation,
                     isProcessingGhost: false
                 };
             });
@@ -729,17 +744,21 @@ export function useStreamingMode(
     const scheduleTopicSummary = useCallback(() => {
         if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
 
-        // Trigger if enough new words
-        const newWords = wordCountRef.current - lastTopicWordCountRef.current;
-        if (newWords >= TOPIC_TRIGGER_WORDS) {
-            executeTopicSummary();
-            return;
-        }
-
-        // Or schedule on pause
+        // Schedule on long pause
         topicTimerRef.current = setTimeout(() => {
-            executeTopicSummary();
+            if (wordCountRef.current >= TOPIC_MIN_WORDS) {
+                executeTopicSummary();
+            }
         }, TOPIC_PAUSE_MS);
+    }, [executeTopicSummary]);
+
+    // Trigger topics after N finalized blocks (called from addWords)
+    const triggerTopicOnBlock = useCallback(() => {
+        wordsInCountRef.current++;
+        if (wordsInCountRef.current >= TOPIC_TRIGGER_BLOCKS && wordCountRef.current >= TOPIC_MIN_WORDS) {
+            wordsInCountRef.current = 0;
+            executeTopicSummary();
+        }
     }, [executeTopicSummary]);
 
     // === PUBLIC API ===
@@ -895,12 +914,13 @@ export function useStreamingMode(
         // Schedule LLM translation
         scheduleLLMTranslation();
 
-        // Schedule topic structuring (Flash-Lite)
+        // Topic structuring: trigger every 2 blocks + schedule on pause
+        triggerTopicOnBlock();
         scheduleTopicSummary();
 
         // Schedule freeze flush (3s pause → move active to frozen)
         scheduleFreezeFLush();
-    }, [executeGhostTranslation, scheduleLLMTranslation, scheduleTopicSummary, scheduleFreezeFLush]);
+    }, [executeGhostTranslation, scheduleLLMTranslation, triggerTopicOnBlock, scheduleTopicSummary, scheduleFreezeFLush]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -1060,6 +1080,8 @@ export function useStreamingMode(
         currentSentenceWordCountRef.current = 0;
         currentSentenceTextRef.current = ''; // Reset sentence text
         llmQuestionDetectedRef.current = false; // Reset LLM question detection
+        wordsInCountRef.current = 0; // Reset topic block counter
+        lastTopicWordCountRef.current = 0;
 
         // METRICS: Start metrics session
         metricsCollector.startSession();
