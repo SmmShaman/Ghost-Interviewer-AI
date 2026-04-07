@@ -212,13 +212,25 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {presets.map(preset => {
                         const active = context.activeAudioPreset === preset.id;
-                        const meta: Record<string, { icon: string; label: string; labelUk: string }> = {
-                            'headphones-youtube': { icon: '🎧', label: 'Headphones + Video', labelUk: 'Навушники + Відео' },
-                            'speakers': { icon: '🔊', label: 'Speakers', labelUk: 'Колонки' },
-                            'monitor-speakers': { icon: '🖥️', label: 'Monitor', labelUk: 'Монітор' },
-                            'headphones-interview': { icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда' },
+                        const meta: Record<string, { icon: string; label: string; labelUk: string; tip: string }> = {
+                            'headphones-youtube': {
+                                icon: '🎧', label: 'Headphones + Video', labelUk: 'Навушники + Відео',
+                                tip: 'Звук з відео/підкасту йде через VB-Cable в навушники. Додаток слухає цей же звук і перекладає. Потрібен VB-Cable.'
+                            },
+                            'speakers': {
+                                icon: '🔊', label: 'Speakers', labelUk: 'Колонки',
+                                tip: 'Звук йде з колонок, мікрофон ловить його і перекладає. Найпростіший варіант — не потрібне додаткове ПЗ.'
+                            },
+                            'monitor-speakers': {
+                                icon: '🖥️', label: 'Monitor', labelUk: 'Монітор',
+                                tip: 'Звук з динаміків монітора + мікрофон. Для ситуацій коли колонки вбудовані в монітор.'
+                            },
+                            'headphones-interview': {
+                                icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда',
+                                tip: 'Для Zoom/Teams/Meet дзвінків. Звук співрозмовника через VB-Cable направляється в додаток. Ви чуєте і бачите переклад одночасно.'
+                            },
                         };
-                        const m = meta[preset.id] || { icon: '?', label: preset.id, labelUk: preset.id };
+                        const m = meta[preset.id] || { icon: '?', label: preset.id, labelUk: preset.id, tip: '' };
 
                         return (
                             <button
@@ -241,8 +253,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                     : preset.matchedDeviceLabel}
                             >
                                 <div className="text-2xl mb-2">{m.icon}</div>
-                                <div className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
+                                <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
                                     {uiLang === 'uk' ? m.labelUk : m.label}
+                                    {m.tip && <Tip color="cyan" text={m.tip} />}
                                 </div>
                                 {active && (
                                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-gray-950" />
