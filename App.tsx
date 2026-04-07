@@ -981,7 +981,7 @@ const App: React.FC = () => {
             // FORCED FINALIZATION: Two triggers to prevent text getting stuck in interim:
             // 1. MAX_INTERIM_WORDS: Force finalize when interim exceeds limit (for continuous speech)
             // 2. PAUSE_TIMEOUT: Force finalize after 1.5s pause (for natural speech)
-            const MAX_INTERIM_WORDS = 15; // Force finalize at 15 interim words
+            const MAX_INTERIM_WORDS = 7; // Force finalize at 7 words — lower latency (~3-5s)
 
             if (currentInterim.trim()) {
                 lastInterimTextRef.current = currentInterim;

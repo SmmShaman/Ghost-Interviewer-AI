@@ -68,8 +68,8 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     const interimDisplay = interimGhostTranslation || interimText || '';
 
     // Smooth word-by-word animation
-    // Words arrive in batches of ~15 every 5-7s from Speech API
-    // Spread them out: 15 words / 5s gap = ~330ms per word
+    // With MAX_INTERIM_WORDS=7, batches arrive every ~3-4s
+    // 7 words × 200ms = 1.4s animation — smooth spread
     useEffect(() => {
         targetTextRef.current = mainText;
 
@@ -81,7 +81,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                 const nextSpace = target.indexOf(' ', prev.length + 1);
                 return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
             });
-        }, 250);
+        }, 200);
 
         return () => clearInterval(interval);
     }, [mainText]);
@@ -164,17 +164,9 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                                         </div>
                                     );
                                 })}
-                                {/* Interim — inline after last block */}
-                                {interimDisplay && (
-                                    <div className="text-base md:text-lg leading-relaxed text-gray-400">
-                                        {interimDisplay}
-                                        {isListening && (
-                                            <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
-                                        )}
-                                    </div>
-                                )}
-                                {!interimDisplay && isListening && (
-                                    <div><span className="text-emerald-400 animate-pulse">▊</span></div>
+                                {/* Listening indicator — no flickering interim, just stable cursor */}
+                                {isListening && (
+                                    <div className="mt-2 text-emerald-400 animate-pulse text-lg">▊</div>
                                 )}
                             </div>
                         ) : (
