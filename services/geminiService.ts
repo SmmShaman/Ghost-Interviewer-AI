@@ -7,6 +7,7 @@ import { knowledgeSearch } from "./knowledgeSearch";
 // Gemini Configuration (from .env via Vite)
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
 const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL_LITE = "gemini-2.5-flash-lite";
 
 // Initialize Google GenAI SDK
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
@@ -308,6 +309,65 @@ export const generateInterviewAssist = async (
     });
   }
 };
+
+// ========== TOPIC STRUCTURING (Flash-Lite) ==========
+
+const TOPIC_SYSTEM_PROMPT = `Ти — структурувальник мовлення в реальному часі. Отримуєш фрагмент норвезького тексту (транскрибація мовлення) і поточний список тем.
+
+ЗАВДАННЯ:
+- Визнач основні теми/думки з тексту
+- Для кожної теми: емодзі + короткий заголовок + суть 1-2 реченнями УКРАЇНСЬКОЮ
+- Якщо нова інформація доповнює існуючу тему — оновлюй її
+- Якщо з'явилась нова тема — додавай
+- Максимум 7 тем
+- Відповідай ТІЛЬКИ структурованим списком, без пояснень
+- Пиши УКРАЇНСЬКОЮ
+
+ФОРМАТ:
+📌 **Заголовок теми**
+Суть в 1-2 реченнях.
+
+📌 **Наступна тема**
+Суть.`;
+
+/**
+ * Generate structured topic summary from Norwegian speech transcript.
+ * Uses Flash-Lite (fast, cheap) with thinking disabled.
+ */
+export async function generateTopicSummary(
+    norwegianText: string,
+    existingTopics: string,
+    signal?: AbortSignal
+): Promise<string> {
+    if (!ai || !norwegianText.trim()) return existingTopics || '';
+
+    try {
+        const userPrompt = existingTopics
+            ? `ПОТОЧНІ ТЕМИ:\n${existingTopics}\n\nНОВИЙ ТЕКСТ (норвезька):\n${norwegianText}\n\nОновлений список тем:`
+            : `ТЕКСТ (норвезька):\n${norwegianText}\n\nСтруктурований список тем:`;
+
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL_LITE,
+            contents: userPrompt,
+            config: {
+                systemInstruction: TOPIC_SYSTEM_PROMPT,
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.1,
+                maxOutputTokens: 300,
+            }
+        });
+
+        if (signal?.aborted) return existingTopics || '';
+
+        const text = response?.text?.trim();
+        return text || existingTopics || '';
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            console.error('[TopicSummary] Error:', e?.message || e);
+        }
+        return existingTopics || '';
+    }
+}
 
 // ========== STREAMING TRANSLATION (NEW) ==========
 

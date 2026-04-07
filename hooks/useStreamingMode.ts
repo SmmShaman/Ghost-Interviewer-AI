@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -49,6 +49,10 @@ export interface StreamingState {
     strategy: string;
     isGeneratingAnswer: boolean;
     isAnalyzing: boolean;
+
+    // Topic structuring (Flash-Lite)
+    topicSummary: string;
+    isProcessingTopics: boolean;
 
     // Processing flags
     isListening: boolean;
@@ -126,6 +130,8 @@ export function useStreamingMode(
         answerTranslation: '',
         analysis: '',
         strategy: '',
+        topicSummary: '',
+        isProcessingTopics: false,
         isGeneratingAnswer: false,
         isAnalyzing: false,
         isListening: false,
@@ -141,6 +147,11 @@ export function useStreamingMode(
     const interimGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For interim translation debounce
     const answerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For answer generation pause
     const freezeFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For flushing active→frozen on 3s pause
+    const topicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For topic summarization debounce
+    const topicAbortRef = useRef<AbortController | null>(null);
+    const lastTopicWordCountRef = useRef<number>(0); // Track words at last topic generation
+    const TOPIC_TRIGGER_WORDS = 25; // Generate topics every N new words
+    const TOPIC_PAUSE_MS = 5000; // Or after 5s pause
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
@@ -681,6 +692,56 @@ export function useStreamingMode(
         scheduleAnswerGenerationRef.current = scheduleAnswerGeneration;
     }, [scheduleAnswerGeneration]);
 
+    // === TOPIC STRUCTURING (Flash-Lite) ===
+
+    const executeTopicSummary = useCallback(async () => {
+        const currentOriginal = originalTextRef.current;
+        if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 10) return;
+
+        // Abort previous
+        if (topicAbortRef.current) topicAbortRef.current.abort();
+        topicAbortRef.current = new AbortController();
+
+        setState(prev => ({ ...prev, isProcessingTopics: true }));
+        const startTime = performance.now();
+
+        try {
+            const result = await generateTopicSummary(
+                currentOriginal,
+                state.topicSummary,
+                topicAbortRef.current.signal
+            );
+
+            debugLogger.log('TOPICS', `${Math.round(performance.now() - startTime)}ms`, performance.now() - startTime, currentOriginal.split(/\s+/).length);
+            lastTopicWordCountRef.current = wordCountRef.current;
+
+            setState(prev => ({
+                ...prev,
+                topicSummary: result,
+                isProcessingTopics: false
+            }));
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('[Topics] Error:', e);
+            setState(prev => ({ ...prev, isProcessingTopics: false }));
+        }
+    }, [state.topicSummary]);
+
+    const scheduleTopicSummary = useCallback(() => {
+        if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
+
+        // Trigger if enough new words
+        const newWords = wordCountRef.current - lastTopicWordCountRef.current;
+        if (newWords >= TOPIC_TRIGGER_WORDS) {
+            executeTopicSummary();
+            return;
+        }
+
+        // Or schedule on pause
+        topicTimerRef.current = setTimeout(() => {
+            executeTopicSummary();
+        }, TOPIC_PAUSE_MS);
+    }, [executeTopicSummary]);
+
     // === PUBLIC API ===
 
     /**
@@ -834,9 +895,12 @@ export function useStreamingMode(
         // Schedule LLM translation
         scheduleLLMTranslation();
 
+        // Schedule topic structuring (Flash-Lite)
+        scheduleTopicSummary();
+
         // Schedule freeze flush (3s pause → move active to frozen)
         scheduleFreezeFLush();
-    }, [executeGhostTranslation, scheduleLLMTranslation, scheduleFreezeFLush]);
+    }, [executeGhostTranslation, scheduleLLMTranslation, scheduleTopicSummary, scheduleFreezeFLush]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -973,6 +1037,8 @@ export function useStreamingMode(
             answerTranslation: '',
             analysis: '',
             strategy: '',
+            topicSummary: '',
+            isProcessingTopics: false,
             isGeneratingAnswer: false,
             isAnalyzing: false,
             isListening: true,

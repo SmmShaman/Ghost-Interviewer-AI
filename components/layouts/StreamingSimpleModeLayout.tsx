@@ -1,20 +1,22 @@
 /**
- * STREAMING SIMPLE MODE LAYOUT
+ * STREAMING SIMPLE MODE LAYOUT — Dual Panel
  *
- * Unified subtitle view — one continuous text stream.
- * Ghost translation (Google NMT / Chrome API) appears instantly.
- * Interim words shown inline as faded text.
+ * ┌──────────────────────┬────────────────────────────────────┐
+ * │                      │                                    │
+ * │  📌 Структура        │    Перекладений текст...           │
+ * │                      │    плавно з'являється              │
+ * │  📌 Теми з LLM       │    по словах                      │
+ * │  (Flash-Lite)        │                                    │
+ * │                      │                            ▊       │
+ * │                      ├────────────────────────────────────┤
+ * │                      │  interim text...                   │
+ * └──────────────────────┴────────────────────────────────────┘
  *
- * ┌──────────────────────────────────────────────────┐
- * │                                                  │
- * │  Перекладений текст що скролиться вгору...       │
- * │  Нові слова з'являються внизу.                   │
- * │  Проміжні слова показані напівпрозорими ▊        │
- * │                                                  │
- * └──────────────────────────────────────────────────┘
+ * Left: Structured topics from Gemini Flash-Lite (Norwegian → Ukrainian)
+ * Right: Live NMT subtitles with smooth word-by-word appearance
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingSimpleModeLayoutProps {
@@ -33,128 +35,198 @@ interface StreamingSimpleModeLayoutProps {
     isProcessingLLM: boolean;
 
     llmTranslationEnabled?: boolean;
-
     showOriginal?: boolean;
     showGhost?: boolean;
     preferLLM?: boolean;
 
     wordCount: number;
     sessionDuration?: number;
+
+    topicSummary?: string;
+    isProcessingTopics?: boolean;
 }
 
 const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
-    accumulatedOriginal,
     accumulatedGhostTranslation,
-    accumulatedLLMTranslation,
-    frozenTranslation = '',
-    frozenWordCount = 0,
-    frozenTranslationWordCount = 0,
     interimText = '',
     interimGhostTranslation = '',
     isListening,
     isProcessingLLM,
-    llmTranslationEnabled = false,
-    showOriginal = true,
     wordCount,
-    sessionDuration = 0
+    sessionDuration = 0,
+    topicSummary = '',
+    isProcessingTopics = false
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const [displayedText, setDisplayedText] = useState('');
+    const targetTextRef = useRef('');
 
-    // Strip placeholder tokens
     const strip = (text: string): string =>
         text.replace(/⏳\.{0,3}/g, '').replace(/[❌⚠️]/g, '').trim();
 
-    // Main translation text — single stream
-    // Priority: Ghost (NMT/Chrome) which is already fast and good quality
     const mainText = strip(accumulatedGhostTranslation);
-
-    // Interim text — words being spoken right now (not yet finalized)
     const interimDisplay = interimGhostTranslation || interimText || '';
 
-    // Auto-scroll only when finalized text grows (not on interim changes)
+    // Smooth word-by-word animation (60ms per word)
     useEffect(() => {
-        if (scrollRef.current && mainText) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        targetTextRef.current = mainText;
+        if (displayedText.length < mainText.length) {
+            const interval = setInterval(() => {
+                setDisplayedText(prev => {
+                    const target = targetTextRef.current;
+                    if (prev.length >= target.length) return target;
+                    const nextSpace = target.indexOf(' ', prev.length + 1);
+                    return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
+                });
+            }, 60);
+            return () => clearInterval(interval);
+        } else {
+            setDisplayedText(mainText);
         }
     }, [mainText]);
 
-    // Translation method indicator
+    // Auto-scroll subtitle panel
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [displayedText]);
+
+    // Translation method
     const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
-        if (status.useChromeAPI) return { label: 'Chrome API', color: 'text-blue-400' };
-        if (status.useGoogleNMT) return { label: 'Google NMT', color: 'text-green-400' };
+        if (status.useChromeAPI) return { label: 'Chrome', color: 'text-blue-400' };
+        if (status.useGoogleNMT) return { label: 'NMT', color: 'text-green-400' };
         return { label: 'Opus', color: 'text-cyan-400' };
     };
     const method = getMethodLabel();
 
-    // Format duration
     const formatDuration = (ms: number): string => {
         const s = Math.floor(ms / 1000);
         const m = Math.floor(s / 60);
         return `${m}:${(s % 60).toString().padStart(2, '0')}`;
     };
 
+    // Parse topic summary into styled blocks
+    const renderTopics = () => {
+        if (!topicSummary) return null;
+
+        // Split by 📌 or similar emoji markers
+        const blocks = topicSummary.split(/(?=📌|🔹|•\s\*\*|^\d+\.\s)/m).filter(b => b.trim());
+
+        return blocks.map((block, i) => {
+            const lines = block.trim().split('\n').filter(l => l.trim());
+            const title = lines[0] || '';
+            const body = lines.slice(1).join(' ').trim();
+
+            return (
+                <div key={i} className="mb-3 last:mb-0">
+                    <div className="text-sm font-semibold text-gray-200 leading-snug">
+                        {title}
+                    </div>
+                    {body && (
+                        <div className="text-xs text-gray-400 leading-relaxed mt-0.5">
+                            {body}
+                        </div>
+                    )}
+                </div>
+            );
+        });
+    };
+
     return (
-        <div className="max-w-4xl mx-auto h-full flex flex-col">
-            {/* Main subtitle area — finalized text only, never jumps */}
-            <div
-                ref={scrollRef}
-                className="flex-1 rounded-t-2xl bg-gray-950/80 border border-b-0 border-gray-800/50 shadow-2xl overflow-y-auto scroll-smooth px-6 py-5 md:px-10 md:py-8"
-                style={{ minHeight: '300px', maxHeight: 'calc(100vh - 16rem)' }}
-            >
-                {mainText ? (
-                    <div className="text-xl md:text-2xl lg:text-3xl leading-relaxed font-medium tracking-wide text-gray-100" style={{ whiteSpace: 'pre-line' }}>
-                        {mainText}
-                        {isListening && (
-                            <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
+        <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
+            <div className="flex-1 flex gap-3 min-h-0">
+
+                {/* LEFT PANEL: Structured topics from Flash-Lite */}
+                <div className="w-[35%] rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-y-auto px-4 py-4 flex flex-col">
+                    <div className="flex items-center justify-between mb-3 shrink-0">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
+                            Структура
+                        </span>
+                        {isProcessingTopics && (
+                            <span className="flex items-center gap-1 text-[9px] text-purple-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                AI
+                            </span>
                         )}
                     </div>
-                ) : (
-                    <div className="flex items-center justify-center h-full">
-                        <div className="text-center space-y-3">
-                            <div className="text-4xl opacity-20">🎧</div>
-                            <p className="text-gray-600 text-sm">
-                                {isListening ? 'Слухаю...' : 'Натисніть Start для початку'}
-                            </p>
-                        </div>
+
+                    <div className="flex-1 overflow-y-auto">
+                        {topicSummary ? (
+                            <div className="space-y-1">
+                                {renderTopics()}
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-700 text-xs italic text-center">
+                                    {wordCount > 0
+                                        ? 'Аналізую структуру...'
+                                        : 'Теми з\'являться тут'}
+                                </p>
+                            </div>
+                        )}
                     </div>
-                )}
+                </div>
+
+                {/* RIGHT PANEL: Live subtitles */}
+                <div className="w-[65%] rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
+                    {/* Subtitle area */}
+                    <div
+                        ref={scrollRef}
+                        className="flex-1 overflow-y-auto scroll-smooth px-6 py-5 md:px-8 md:py-6"
+                    >
+                        {displayedText ? (
+                            <div className="text-xl md:text-2xl leading-relaxed font-medium text-gray-100" style={{ whiteSpace: 'pre-line' }}>
+                                {displayedText}
+                                {isListening && (
+                                    <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <div className="text-center space-y-3">
+                                    <div className="text-4xl opacity-20">🎧</div>
+                                    <p className="text-gray-600 text-sm">
+                                        {isListening ? 'Слухаю...' : 'Натисніть Start'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Interim — fixed bottom */}
+                    <div className="shrink-0 border-t border-gray-800/30 bg-gray-900/40 px-6 py-2 md:px-8"
+                         style={{ minHeight: '2.5rem', maxHeight: '3rem' }}
+                    >
+                        {interimDisplay ? (
+                            <div className="text-sm text-gray-500 italic truncate">
+                                {interimDisplay}
+                            </div>
+                        ) : isListening ? (
+                            <div className="text-gray-700 italic text-xs">слухаю...</div>
+                        ) : null}
+                    </div>
+                </div>
             </div>
 
-            {/* Interim zone — fixed height, separate from main text */}
-            <div className="shrink-0 rounded-b-2xl bg-gray-900/60 border border-t-0 border-gray-800/50 px-6 py-3 md:px-10"
-                 style={{ minHeight: '3.5rem', maxHeight: '4.5rem' }}
-            >
-                {interimDisplay ? (
-                    <div className="text-lg md:text-xl text-gray-500 italic leading-relaxed truncate">
-                        {interimDisplay}
-                    </div>
-                ) : isListening ? (
-                    <div className="text-gray-700 italic text-sm">слухаю...</div>
-                ) : null}
-            </div>
-
-            {/* Compact status bar */}
-            <div className="mt-3 px-4 py-2.5 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between text-xs">
+            {/* Status bar */}
+            <div className="mt-2 px-4 py-2 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-4">
-                    {wordCount > 0 && (
-                        <span className="text-gray-400 font-mono">{wordCount} слів</span>
-                    )}
-                    {sessionDuration > 0 && (
-                        <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>
-                    )}
+                    {wordCount > 0 && <span className="text-gray-400 font-mono">{wordCount} слів</span>}
+                    {sessionDuration > 0 && <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>}
                     <span className={method.color}>{method.label}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                    {isProcessingLLM && (
-                        <span className="text-orange-400 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
-                            LLM
+                    {isProcessingTopics && (
+                        <span className="text-purple-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                            Flash-Lite
                         </span>
                     )}
                     {isListening && (
-                        <span className="text-red-400 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                        <span className="text-red-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                             REC
                         </span>
                     )}

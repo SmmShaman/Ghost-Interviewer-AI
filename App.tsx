@@ -1718,6 +1718,8 @@ const App: React.FC = () => {
                  preferLLM={true}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
+                 topicSummary={streamingMode.state.topicSummary}
+                 isProcessingTopics={streamingMode.state.isProcessingTopics}
              />
          )}
 
