@@ -6,6 +6,16 @@ import SetupPanel from './SetupPanel';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import type { GoogleUser } from '../services/apiClient.ts';
 
+// Tooltip component — hover over ? to see explanation
+const Tip: React.FC<{ text: string; color?: string }> = ({ text, color = 'gray' }) => (
+    <span className="relative group inline-flex ml-1.5 cursor-help">
+        <span className={`w-4 h-4 rounded-full border border-${color}-500/40 text-${color}-400 text-[9px] flex items-center justify-center`}>?</span>
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 leading-relaxed opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 shadow-xl pointer-events-none">
+            {text}
+        </span>
+    </span>
+);
+
 interface LandingPageProps {
     context: InterviewContext;
     setContext: (context: InterviewContext) => void;
@@ -135,6 +145,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-amber-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
                             {t.modes.simple}
+                            <Tip color="amber" text="Режим субтитрів. Миттєвий переклад (Google NMT, ~200мс). Ліва панель — переклад з кольоровими блоками. Права — структура тем (AI). Для YouTube, підкастів, лекцій. LLM вимкнений — текст стабільний." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.simpleDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-amber-500/70 text-xs font-mono">
@@ -158,6 +169,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-blue-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
                             {t.modes.focus}
+                            <Tip color="blue" text="Переклад + відповідь. Миттєвий переклад зліва, AI-відповідь + теми справа. Коли інтерв'юер ставить питання — AI генерує рекомендовану відповідь. Для співбесід де потрібна швидка підказка." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.focusDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-blue-500/70 text-xs font-mono">
@@ -181,6 +193,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         <div className="text-emerald-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
                             {t.modes.full}
+                            <Tip color="emerald" text="Повний аналіз. 3 колонки: переклад + аналіз питання + стратегія відповіді. Внизу — готова відповідь. Для важливих співбесід де потрібна глибока AI-підготовка. Найбільше навантаження на AI." />
                         </div>
                         <div className="text-gray-300 text-sm leading-relaxed">{t.modes.fullDesc}</div>
                         <div className="mt-6 flex items-center gap-2 text-emerald-500/70 text-xs font-mono">
@@ -256,19 +269,25 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             interview: '🎙️',
                             custom: '⚙️',
                         };
+                        const tips: Record<SpeedPresetId, string> = {
+                            youtube: 'Тільки Ghost-переклад (Google NMT, ~200мс). LLM вимкнений — без затримок. Текст тече безперервно як субтитри. Затримка від мовлення до тексту: 3-5с. Ідеально для відео та підкастів.',
+                            interview: 'Ghost + LLM для відповідей. Максимальна швидкість перекладу (~200мс) + AI генерує відповіді на питання інтерв\'юера. Менші блоки, швидші тригери. Для живих співбесід.',
+                            custom: 'Ручне налаштування: debounce перекладу, Hold-N (приховування нестабільних слів), тригери LLM, розмір активного вікна. Для досвідчених користувачів.',
+                        };
                         return (
                             <button
                                 key={id}
                                 onClick={() => setContext({ ...context, speedPreset: id })}
-                                className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                                className={`group/btn relative p-4 rounded-xl border-2 transition-all duration-300 text-center
                                     ${active
                                         ? 'border-amber-400 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
                                         : 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
                                     }`}
                             >
                                 <div className="text-2xl mb-2">{icons[id]}</div>
-                                <div className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-amber-300' : 'text-gray-400'}`}>
+                                <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-amber-300' : 'text-gray-400'}`}>
                                     {preset.label}
+                                    <Tip color="amber" text={tips[id]} />
                                 </div>
                                 <div className="text-[8px] text-gray-500 mt-1">
                                     {preset.description}
