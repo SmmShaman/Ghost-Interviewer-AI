@@ -1,19 +1,18 @@
 /**
  * STREAMING SIMPLE MODE LAYOUT — Dual Panel
  *
- * ┌──────────────────────┬────────────────────────────────────┐
- * │                      │                                    │
- * │  📌 Структура        │    Перекладений текст...           │
- * │                      │    плавно з'являється              │
- * │  📌 Теми з LLM       │    по словах                      │
- * │  (Flash-Lite)        │                                    │
- * │                      │                            ▊       │
- * │                      ├────────────────────────────────────┤
- * │                      │  interim text...                   │
- * └──────────────────────┴────────────────────────────────────┘
+ * ┌────────────────────────────┬────────────────────────────┐
+ * │                            │                            │
+ * │  Переклад (субтитри)      │  📌 Структура тем          │
+ * │  слово за словом           │  (Flash-Lite, з оригіналу) │
+ * │  плавна поява        ▊     │                            │
+ * │                            │                            │
+ * ├────────────────────────────┤                            │
+ * │  interim...                │                            │
+ * └────────────────────────────┴────────────────────────────┘
  *
- * Left: Structured topics from Gemini Flash-Lite (Norwegian → Ukrainian)
- * Right: Live NMT subtitles with smooth word-by-word appearance
+ * Left (50%): Live NMT subtitles with smooth word-by-word animation
+ * Right (50%): Structured topics from Gemini Flash-Lite
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -67,7 +66,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     const mainText = strip(accumulatedGhostTranslation);
     const interimDisplay = interimGhostTranslation || interimText || '';
 
-    // Smooth word-by-word animation (60ms per word)
+    // Smooth word-by-word animation
     useEffect(() => {
         targetTextRef.current = mainText;
         if (displayedText.length < mainText.length) {
@@ -85,14 +84,13 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         }
     }, [mainText]);
 
-    // Auto-scroll subtitle panel
+    // Auto-scroll subtitles
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [displayedText]);
 
-    // Translation method
     const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
         if (status.useChromeAPI) return { label: 'Chrome', color: 'text-blue-400' };
@@ -110,22 +108,18 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     // Parse topic summary into styled blocks
     const renderTopics = () => {
         if (!topicSummary) return null;
-
-        // Split by 📌 or similar emoji markers
-        const blocks = topicSummary.split(/(?=📌|🔹|•\s\*\*|^\d+\.\s)/m).filter(b => b.trim());
-
+        const blocks = topicSummary.split(/(?=📌)/).filter(b => b.trim());
         return blocks.map((block, i) => {
             const lines = block.trim().split('\n').filter(l => l.trim());
             const title = lines[0] || '';
             const body = lines.slice(1).join(' ').trim();
-
             return (
-                <div key={i} className="mb-3 last:mb-0">
-                    <div className="text-sm font-semibold text-gray-200 leading-snug">
+                <div key={i} className="mb-4 last:mb-0">
+                    <div className="text-base font-semibold text-gray-200 leading-snug">
                         {title}
                     </div>
                     {body && (
-                        <div className="text-xs text-gray-400 leading-relaxed mt-0.5">
+                        <div className="text-base text-gray-400 leading-relaxed mt-1">
                             {body}
                         </div>
                     )}
@@ -138,46 +132,14 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT PANEL: Structured topics from Flash-Lite */}
-                <div className="w-[35%] rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-y-auto px-4 py-4 flex flex-col">
-                    <div className="flex items-center justify-between mb-3 shrink-0">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
-                            Структура
-                        </span>
-                        {isProcessingTopics && (
-                            <span className="flex items-center gap-1 text-[9px] text-purple-400">
-                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                                AI
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto">
-                        {topicSummary ? (
-                            <div className="space-y-1">
-                                {renderTopics()}
-                            </div>
-                        ) : (
-                            <div className="flex items-center justify-center h-full">
-                                <p className="text-gray-700 text-xs italic text-center">
-                                    {wordCount > 0
-                                        ? 'Аналізую структуру...'
-                                        : 'Теми з\'являться тут'}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* RIGHT PANEL: Live subtitles */}
-                <div className="w-[65%] rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
-                    {/* Subtitle area */}
+                {/* LEFT PANEL: Live subtitles */}
+                <div className="w-1/2 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
                     <div
                         ref={scrollRef}
-                        className="flex-1 overflow-y-auto scroll-smooth px-6 py-5 md:px-8 md:py-6"
+                        className="flex-1 overflow-y-auto scroll-smooth px-6 py-5"
                     >
                         {displayedText ? (
-                            <div className="text-xl md:text-2xl leading-relaxed font-medium text-gray-100" style={{ whiteSpace: 'pre-line' }}>
+                            <div className="text-base md:text-lg leading-relaxed font-medium text-gray-100" style={{ whiteSpace: 'pre-line' }}>
                                 {displayedText}
                                 {isListening && (
                                     <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
@@ -195,17 +157,42 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                         )}
                     </div>
 
-                    {/* Interim — fixed bottom */}
-                    <div className="shrink-0 border-t border-gray-800/30 bg-gray-900/40 px-6 py-2 md:px-8"
+                    {/* Interim */}
+                    <div className="shrink-0 border-t border-gray-800/30 bg-gray-900/40 px-6 py-2"
                          style={{ minHeight: '2.5rem', maxHeight: '3rem' }}
                     >
                         {interimDisplay ? (
-                            <div className="text-sm text-gray-500 italic truncate">
-                                {interimDisplay}
-                            </div>
+                            <div className="text-sm text-gray-500 italic truncate">{interimDisplay}</div>
                         ) : isListening ? (
                             <div className="text-gray-700 italic text-xs">слухаю...</div>
                         ) : null}
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL: Structured topics */}
+                <div className="w-1/2 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between px-6 py-3 shrink-0 border-b border-gray-800/20">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
+                            Структура
+                        </span>
+                        {isProcessingTopics && (
+                            <span className="flex items-center gap-1 text-[9px] text-purple-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                AI
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                        {topicSummary ? (
+                            renderTopics()
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-700 text-sm italic">
+                                    {wordCount > 0 ? 'Аналізую...' : 'Теми з\'являться тут'}
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
