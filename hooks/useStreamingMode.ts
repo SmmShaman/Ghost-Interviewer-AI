@@ -14,6 +14,7 @@ import { localTranslator } from '../services/localTranslator';
 import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
+import { cleanSpeechText } from '../services/speechCleaner';
 
 export interface StreamingState {
     // Text content
@@ -690,7 +691,9 @@ export function useStreamingMode(
     const addWords = useCallback((newWords: string) => {
         if (!newWords.trim()) return;
 
-        const trimmedNew = newWords.trim();
+        // Clean speech: remove fillers (eh, øh), duplicates, fragments
+        const trimmedNew = cleanSpeechText(newWords);
+        if (!trimmedNew) return;
 
         // DUPLICATE DETECTION: Multiple checks to prevent text duplication
         const currentOriginal = originalTextRef.current;
@@ -843,7 +846,9 @@ export function useStreamingMode(
      */
     const setInterimText = useCallback((interimText: string) => {
         const interimStartTime = performance.now();
-        const allWords = interimText.trim().split(/\s+/).filter(w => w.length > 0);
+        // Clean interim speech too (fillers, duplicates)
+        const cleanedInterim = cleanSpeechText(interimText);
+        const allWords = cleanedInterim.split(/\s+/).filter(w => w.length > 0);
 
         // HOLD-N: Hide last N words from display (they're most unstable)
         // BUT if we have too few words, show all of them (better than nothing)
