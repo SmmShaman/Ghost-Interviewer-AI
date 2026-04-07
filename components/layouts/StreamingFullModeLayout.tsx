@@ -1,69 +1,55 @@
 /**
  * STREAMING FULL MODE LAYOUT
  *
- * Потокова архітектура для FULL режиму.
- * Показує: Переклад + Аналіз + Стратегія + Відповідь
+ * Full interview assistance: Translation + Analysis + Strategy + Answer
+ * Inherits SIMPLE mode improvements: NMT speed, stable text, no flickering
  *
- * LAYOUT:
- * ┌──────────────────┬────────────┬────────────┐
- * │   ПЕРЕКЛАД       │  АНАЛІЗ    │ СТРАТЕГІЯ  │
- * │   (streaming)    │            │            │
- * └──────────────────┴────────────┴────────────┘
- * ┌────────────────────────────────────────────┐
- * │              ГОТОВА ВІДПОВІДЬ              │
- * └────────────────────────────────────────────┘
+ * ┌──────────────────┬──────────────────┬──────────────────┐
+ * │  Переклад        │  Аналіз          │  Стратегія       │
+ * │  (NMT, stable)   │  (Flash-Lite)    │  (Flash-Lite)    │
+ * ├──────────────────┴──────────────────┴──────────────────┤
+ * │  Рекомендована відповідь (Gemini Flash)                │
+ * └───────────────────────────────────────────────────────┘
  */
 
-import React from 'react';
-import StreamingTextView from '../StreamingTextView';
+import React, { useEffect, useRef, useState } from 'react';
 import { localTranslator } from '../../services/localTranslator';
 
 interface StreamingFullModeLayoutProps {
-    // Накопичений стан перекладу
     accumulatedOriginal: string;
     accumulatedGhostTranslation: string;
     accumulatedLLMTranslation: string;
 
-    // FROZEN ZONE: Already translated by LLM, won't change
     frozenTranslation?: string;
     frozenWordCount?: number;
 
-    // Interim (real-time, not finalized yet)
     interimText?: string;
     interimGhostTranslation?: string;
 
-    // Стан запису
     isListening: boolean;
     isProcessingLLM: boolean;
 
-    // Intent classification
     containsQuestion: boolean;
     questionConfidence: number;
     speechType: 'QUESTION' | 'INFO' | 'STORY' | 'SMALL_TALK' | 'UNKNOWN';
 
-    // Аналіз та стратегія (якщо є питання)
     analysis?: string;
     strategy?: string;
     isAnalyzing?: boolean;
 
-    // Відповідь (якщо є питання)
     generatedAnswer?: string;
     answerTranslation?: string;
     isGeneratingAnswer?: boolean;
 
-    // Статистика
     wordCount: number;
     sessionDuration?: number;
+
+    topicSummary?: string;
+    isProcessingTopics?: boolean;
 }
 
 const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
-    accumulatedOriginal,
     accumulatedGhostTranslation,
-    accumulatedLLMTranslation,
-    frozenTranslation = '',
-    frozenWordCount = 0,
-    interimText = '',
-    interimGhostTranslation = '',
     isListening,
     isProcessingLLM,
     containsQuestion,
@@ -76,260 +62,192 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
     answerTranslation = '',
     isGeneratingAnswer = false,
     wordCount,
-    sessionDuration = 0
+    sessionDuration = 0,
+    topicSummary = '',
+    isProcessingTopics = false
 }) => {
-    // SINGLE SOURCE OF TRUTH: Ghost translation only (no switching!)
-    // LLM is used for intent detection, analysis, strategy, NOT for display
-    // This eliminates race condition and "jumping" text
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [displayedText, setDisplayedText] = useState('');
+    const targetTextRef = useRef('');
 
-    // Display ONLY Ghost translation - consistent, no flickering
-    const displayTranslation = accumulatedGhostTranslation;
+    const strip = (text: string): string =>
+        text.replace(/⏳\.{0,3}/g, '').replace(/[❌⚠️]/g, '').trim();
 
-    // Always show as Ghost (since we only display Ghost now)
-    const translationType = 'ghost';
+    const mainText = strip(accumulatedGhostTranslation);
 
-    // Get translation method for indicator
-    const getTranslationMethodLabel = (): { label: string; bgClass: string; textClass: string } => {
+    // Smooth word-by-word animation (from SIMPLE mode)
+    useEffect(() => {
+        targetTextRef.current = mainText;
+        const interval = setInterval(() => {
+            setDisplayedText(prev => {
+                const target = targetTextRef.current;
+                if (!target) return '';
+                if (prev.length >= target.length) return target;
+                const nextSpace = target.indexOf(' ', prev.length + 1);
+                return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
+            });
+        }, 200);
+        return () => clearInterval(interval);
+    }, [mainText]);
+
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [displayedText]);
+
+    const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
-        if (status.useChromeAPI) {
-            return { label: 'Chrome API', bgClass: 'bg-blue-400', textClass: 'text-blue-400' };
-        }
-        if (status.pivotReady && status.usePivot) {
-            return { label: 'Pivot NO→EN→UK', bgClass: 'bg-purple-400', textClass: 'text-purple-400' };
-        }
-        return { label: 'Direct', bgClass: 'bg-cyan-400', textClass: 'text-cyan-400' };
+        if (status.useChromeAPI) return { label: 'Chrome', color: 'text-blue-400' };
+        if (status.useGoogleNMT) return { label: 'NMT', color: 'text-green-400' };
+        return { label: 'Opus', color: 'text-cyan-400' };
     };
-    const methodInfo = getTranslationMethodLabel();
+    const method = getMethodLabel();
 
-    // Format duration
     const formatDuration = (ms: number): string => {
-        const seconds = Math.floor(ms / 1000);
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = seconds % 60;
-        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        return `${m}:${(s % 60).toString().padStart(2, '0')}`;
     };
 
-    // Speech type label
-    const getSpeechTypeLabel = () => {
-        switch (speechType) {
-            case 'QUESTION': return '❓ Питання';
-            case 'INFO': return 'ℹ️ Інформація';
-            case 'STORY': return '📖 Розповідь';
-            case 'SMALL_TALK': return '💬 Small Talk';
-            default: return '🎤 Мовлення';
-        }
+    // Render blocks with alternating colors
+    const renderBlocks = () => {
+        if (!displayedText) return null;
+        return displayedText.split('｜').map((block, i) => {
+            const trimmed = block.trim();
+            if (!trimmed) return null;
+            const isEven = i % 2 === 0;
+            return (
+                <div key={i} className={`text-sm md:text-base leading-relaxed font-medium py-1 ${
+                    isEven ? 'text-gray-100' : 'text-sky-200 pl-2 border-l-2 border-sky-800/40'
+                }`}>
+                    {trimmed}
+                </div>
+            );
+        });
     };
 
     return (
-        <div className="max-w-[1800px] mx-auto h-full flex flex-col gap-4">
-            {/* TOP ROW: Translation + Analysis + Strategy */}
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-                {/* COLUMN 1: Translation (Streaming) */}
-                <div className="flex flex-col h-full">
-                    <StreamingTextView
-                        translationText={displayTranslation}
-                        originalText={accumulatedOriginal}
-                        interimTranslation={interimGhostTranslation}
-                        interimOriginal={interimText}
-                        isActive={isListening}
-                        isProcessing={isProcessingLLM}
-                        variant={translationType === 'llm' ? 'llm' : 'ghost'}
-                        showOriginal={false}
-                        showCursor={isListening}
-                        isHoldingWords={!!interimText}
-                        accentColor={containsQuestion ? 'amber' : 'cyan'}
-                        title={getSpeechTypeLabel()}
-                        minHeight="300px"
-                        maxHeight="calc(50vh - 4rem)"
-                    />
-                </div>
+        <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
+            {/* Top row: Translation + Analysis + Strategy */}
+            <div className="flex-1 flex gap-2 min-h-0">
 
-                {/* COLUMN 2: Analysis */}
-                <div className="sticky top-4 h-fit">
-                    <div className="border-l-4 border-purple-500 bg-purple-900/10 min-h-[300px] max-h-[calc(50vh-4rem)] overflow-y-auto rounded-lg shadow-xl">
-                        {/* Header */}
-                        <div className="px-4 py-2.5 bg-purple-950/30 border-b border-purple-500/10 flex items-center justify-between sticky top-0 backdrop-blur z-10">
-                            <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full bg-purple-400 ${isAnalyzing ? 'animate-pulse' : ''}`}></span>
-                                <span className="text-[10px] font-black text-purple-300 uppercase tracking-widest">
-                                    Аналіз
-                                </span>
+                {/* COL 1: Translation (stable, block-based) */}
+                <div className="flex-1 basis-0 rounded-xl bg-gray-950/80 border border-gray-800/50 shadow-xl overflow-hidden">
+                    <div
+                        ref={scrollRef}
+                        className="h-full overflow-y-auto scroll-smooth px-4 py-4"
+                    >
+                        {displayedText ? (
+                            <div className="space-y-2">
+                                {renderBlocks()}
+                                {isListening && <div className="text-emerald-400 animate-pulse">▊</div>}
                             </div>
-                            {isAnalyzing && (
-                                <div className="flex gap-0.5">
-                                    <div className="w-1 h-3 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
-                                    <div className="w-1 h-3 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '100ms'}}></div>
-                                    <div className="w-1 h-3 bg-purple-400 rounded-full animate-pulse" style={{animationDelay: '200ms'}}></div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Content */}
-                        <div className="p-4">
-                            {analysis ? (
-                                <div className="text-sm text-purple-200/90 leading-relaxed whitespace-pre-line">
-                                    {analysis}
-                                </div>
-                            ) : containsQuestion ? (
-                                isAnalyzing ? (
-                                    <div className="space-y-2">
-                                        <div className="animate-pulse bg-purple-700/20 rounded h-4 w-full"></div>
-                                        <div className="animate-pulse bg-purple-700/20 rounded h-4 w-3/4"></div>
-                                        <div className="animate-pulse bg-purple-700/20 rounded h-4 w-5/6"></div>
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-purple-400/50 italic text-center py-4">
-                                        Аналіз буде тут...
-                                    </div>
-                                )
-                            ) : (
-                                <div className="text-center py-8">
-                                    <div className="w-12 h-12 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mx-auto mb-3">
-                                        <svg className="w-6 h-6 text-purple-400 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                        </svg>
-                                    </div>
-                                    <div className="text-xs text-purple-500/50">
-                                        Очікую питання для аналізу
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-600 text-sm">{isListening ? 'Слухаю...' : 'Start'}</p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* COLUMN 3: Strategy */}
-                <div className="sticky top-4 h-fit">
-                    <div className="border-l-4 border-blue-500 bg-blue-900/10 min-h-[300px] max-h-[calc(50vh-4rem)] overflow-y-auto rounded-lg shadow-xl">
-                        {/* Header */}
-                        <div className="px-4 py-2.5 bg-blue-950/30 border-b border-blue-500/10 flex items-center justify-between sticky top-0 backdrop-blur z-10">
-                            <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full bg-blue-400 ${isAnalyzing ? 'animate-pulse' : ''}`}></span>
-                                <span className="text-[10px] font-black text-blue-300 uppercase tracking-widest">
-                                    Стратегія
-                                </span>
-                            </div>
-                        </div>
+                {/* COL 2: Analysis */}
+                <div className="flex-1 basis-0 rounded-xl bg-purple-950/30 border border-purple-800/30 overflow-hidden flex flex-col">
+                    <div className="px-4 py-2 border-b border-purple-800/20 flex items-center justify-between shrink-0">
+                        <span className="text-[10px] text-purple-400 uppercase tracking-wider font-bold">Аналіз</span>
+                        {isAnalyzing && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                        )}
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 py-3">
+                        {analysis ? (
+                            <div className="text-sm text-purple-200 leading-relaxed">{analysis}</div>
+                        ) : (
+                            <p className="text-purple-700 text-xs italic">
+                                {containsQuestion ? 'Аналізую питання...' : 'Аналіз з\'явиться при питанні'}
+                            </p>
+                        )}
+                    </div>
+                </div>
 
-                        {/* Content */}
-                        <div className="p-4">
-                            {strategy ? (
-                                <div className="text-sm text-blue-200/90 leading-relaxed whitespace-pre-line font-medium">
-                                    {strategy}
-                                </div>
-                            ) : containsQuestion ? (
-                                isAnalyzing ? (
-                                    <div className="space-y-2">
-                                        <div className="animate-pulse bg-blue-700/20 rounded h-4 w-full"></div>
-                                        <div className="animate-pulse bg-blue-700/20 rounded h-4 w-2/3"></div>
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-blue-400/50 italic text-center py-4">
-                                        Стратегія буде тут...
-                                    </div>
-                                )
-                            ) : (
-                                <div className="text-center py-8">
-                                    <div className="w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-3">
-                                        <svg className="w-6 h-6 text-blue-400 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                                        </svg>
-                                    </div>
-                                    <div className="text-xs text-blue-500/50">
-                                        Очікую питання для стратегії
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                {/* COL 3: Strategy */}
+                <div className="flex-1 basis-0 rounded-xl bg-blue-950/30 border border-blue-800/30 overflow-hidden flex flex-col">
+                    <div className="px-4 py-2 border-b border-blue-800/20 flex items-center justify-between shrink-0">
+                        <span className="text-[10px] text-blue-400 uppercase tracking-wider font-bold">Стратегія</span>
+                        {isAnalyzing && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                        )}
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-4 py-3">
+                        {strategy ? (
+                            <div className="text-sm text-blue-200 leading-relaxed">{strategy}</div>
+                        ) : (
+                            <p className="text-blue-700 text-xs italic">
+                                {containsQuestion ? 'Формую стратегію...' : 'Стратегія з\'явиться при питанні'}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
 
-            {/* BOTTOM ROW: Answer */}
-            <div className="border-l-4 border-emerald-500 bg-emerald-900/10 rounded-lg shadow-xl">
-                {/* Header */}
-                <div className="px-4 py-2.5 bg-emerald-950/30 border-b border-emerald-500/10 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full bg-emerald-400 ${isGeneratingAnswer ? 'animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]' : ''}`}></span>
-                        <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">
-                            Готова відповідь
+            {/* Bottom row: Answer */}
+            <div className="mt-2 rounded-xl bg-emerald-950/30 border border-emerald-800/30 px-5 py-3"
+                 style={{ minHeight: '5rem', maxHeight: '10rem', overflowY: 'auto' }}
+            >
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-bold">Відповідь</span>
+                    {isGeneratingAnswer && (
+                        <span className="flex items-center gap-1 text-[9px] text-emerald-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            AI
                         </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {isGeneratingAnswer && (
-                            <div className="flex gap-0.5">
-                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '0ms'}}></div>
-                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '100ms'}}></div>
-                                <div className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" style={{animationDelay: '200ms'}}></div>
-                            </div>
-                        )}
-                        {/* Stats */}
-                        <div className="flex items-center gap-3 text-xs">
-                            <span className="text-gray-500">{wordCount} слів</span>
-                            {sessionDuration > 0 && (
-                                <span className="text-gray-500">{formatDuration(sessionDuration)}</span>
-                            )}
-                            {/* Translation method indicator */}
-                            <div className="flex items-center gap-1">
-                                <span className={`w-1.5 h-1.5 rounded-full ${methodInfo.bgClass}`}></span>
-                                <span className={`${methodInfo.textClass}`}>{methodInfo.label}</span>
-                            </div>
-                            {isListening && (
-                                <div className="flex items-center gap-1 text-red-400">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
-                                    <span>REC</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                    )}
                 </div>
+                {generatedAnswer ? (
+                    <div className="space-y-1">
+                        <div className="text-base font-semibold text-emerald-300 leading-relaxed">{generatedAnswer}</div>
+                        {answerTranslation && (
+                            <div className="text-sm text-gray-400 italic">{answerTranslation}</div>
+                        )}
+                    </div>
+                ) : isGeneratingAnswer ? (
+                    <div className="flex gap-2">
+                        <div className="animate-pulse bg-emerald-700/20 rounded h-4 flex-1" />
+                        <div className="animate-pulse bg-emerald-700/20 rounded h-4 w-1/3" />
+                    </div>
+                ) : (
+                    <p className="text-emerald-700 text-xs italic">
+                        {containsQuestion ? `Питання (${questionConfidence}%) — генерую...` : 'Очікую питання'}
+                    </p>
+                )}
+            </div>
 
-                {/* Content */}
-                <div className="p-4">
-                    {generatedAnswer ? (
-                        <div className="space-y-3">
-                            {/* Answer in target language */}
-                            <div className="text-xl md:text-2xl font-bold text-emerald-300 leading-relaxed">
-                                "{generatedAnswer}"
-                            </div>
-                            {/* Translation to native */}
-                            {answerTranslation && (
-                                <div className="text-sm text-gray-400 italic border-t border-emerald-800/30 pt-3">
-                                    {answerTranslation}
-                                </div>
-                            )}
-                        </div>
-                    ) : containsQuestion ? (
-                        isGeneratingAnswer ? (
-                            <div className="space-y-3 py-4">
-                                <div className="animate-pulse bg-emerald-700/20 rounded h-8 w-full"></div>
-                                <div className="animate-pulse bg-emerald-700/20 rounded h-8 w-2/3"></div>
-                                <div className="text-[10px] text-emerald-500/50 mt-2">
-                                    Генерую відповідь...
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-center py-6">
-                                <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/20 border border-amber-500/30 rounded-lg">
-                                    <span className="text-amber-400">❓</span>
-                                    <span className="text-sm text-amber-300">Виявлено питання ({questionConfidence}%)</span>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-2">
-                                    Відповідь буде згенерована після паузи
-                                </div>
-                            </div>
-                        )
-                    ) : (
-                        <div className="text-center py-8">
-                            <div className="text-sm text-emerald-400/50 mb-2">
-                                {speechType === 'INFO' ? 'Інтерв\'юер розповідає про компанію' :
-                                 speechType === 'SMALL_TALK' ? 'Неформальна бесіда' :
-                                 'Очікую питання...'}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                                Відповідь з'явиться коли інтерв'юер поставить питання
-                            </div>
-                        </div>
+            {/* Status bar */}
+            <div className="mt-2 px-4 py-2 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-4">
+                    {wordCount > 0 && <span className="text-gray-400 font-mono">{wordCount} слів</span>}
+                    {sessionDuration > 0 && <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>}
+                    <span className={method.color}>{method.label}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        speechType === 'QUESTION' ? 'bg-amber-500/20 text-amber-300' :
+                        speechType === 'INFO' ? 'bg-blue-500/20 text-blue-300' :
+                        'bg-gray-500/20 text-gray-400'
+                    }`}>
+                        {speechType}
+                    </span>
+                </div>
+                <div className="flex items-center gap-3">
+                    {isProcessingTopics && (
+                        <span className="text-purple-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                            Flash-Lite
+                        </span>
+                    )}
+                    {isListening && (
+                        <span className="text-red-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                            REC
+                        </span>
                     )}
                 </div>
             </div>

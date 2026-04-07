@@ -1745,10 +1745,6 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
-                 frozenTranslation={streamingMode.state.frozenTranslation}
-                 frozenWordCount={streamingMode.state.frozenWordCount}
-                 interimText={streamingMode.state.interimText}
-                 interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  containsQuestion={streamingMode.state.containsQuestion}
@@ -1759,6 +1755,8 @@ const App: React.FC = () => {
                  isGeneratingAnswer={streamingMode.state.isGeneratingAnswer}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
+                 topicSummary={streamingMode.state.topicSummary}
+                 isProcessingTopics={streamingMode.state.isProcessingTopics}
              />
          )}
 
@@ -1782,10 +1780,6 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
-                 frozenTranslation={streamingMode.state.frozenTranslation}
-                 frozenWordCount={streamingMode.state.frozenWordCount}
-                 interimText={streamingMode.state.interimText}
-                 interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  containsQuestion={streamingMode.state.containsQuestion}
@@ -1799,6 +1793,8 @@ const App: React.FC = () => {
                  isGeneratingAnswer={streamingMode.state.isGeneratingAnswer}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
+                 topicSummary={streamingMode.state.topicSummary}
+                 isProcessingTopics={streamingMode.state.isProcessingTopics}
              />
          )}
 
