@@ -67,20 +67,20 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     const interimDisplay = interimGhostTranslation || interimText || '';
 
     // Smooth word-by-word animation
+    // Words arrive in batches of ~15 every 5-7s from Speech API
+    // Spread them out: 15 words / 5s gap = ~330ms per word
     useEffect(() => {
         targetTextRef.current = mainText;
 
-        // Always start animation when target changes
         const interval = setInterval(() => {
             setDisplayedText(prev => {
                 const target = targetTextRef.current;
                 if (!target) return '';
                 if (prev.length >= target.length) return target;
-                // Find next word boundary
                 const nextSpace = target.indexOf(' ', prev.length + 1);
                 return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
             });
-        }, 60);
+        }, 250);
 
         return () => clearInterval(interval);
     }, [mainText]);
