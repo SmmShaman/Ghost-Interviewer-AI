@@ -57,6 +57,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     isProcessingTopics = false
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const topicScrollRef = useRef<HTMLDivElement>(null);
     const [displayedText, setDisplayedText] = useState('');
     const targetTextRef = useRef('');
 
@@ -91,6 +92,13 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [displayedText, interimDisplay]);
+
+    // Auto-scroll topics to bottom (new topics always visible)
+    useEffect(() => {
+        if (topicScrollRef.current && topicSummary) {
+            topicScrollRef.current.scrollTop = topicScrollRef.current.scrollHeight;
+        }
+    }, [topicSummary]);
 
     const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
@@ -133,35 +141,40 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT PANEL: Live subtitles — block-segmented + interim inline */}
+                {/* LEFT PANEL: Live subtitles — each block on new line, contrasting */}
                 <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden">
                     <div
                         ref={scrollRef}
                         className="h-full overflow-y-auto scroll-smooth px-6 py-5"
                     >
                         {(displayedText || interimDisplay) ? (
-                            <div className="text-base md:text-lg leading-relaxed font-medium">
-                                {/* Finalized blocks — alternating colors */}
-                                {displayedText && displayedText.split('｜').map((block, i, arr) => {
+                            <div className="space-y-3">
+                                {/* Finalized blocks — each on new line, alternating style */}
+                                {displayedText && displayedText.split('｜').map((block, i) => {
                                     const trimmed = block.trim();
                                     if (!trimmed) return null;
                                     const isEven = i % 2 === 0;
-                                    const isLast = i === arr.length - 1;
                                     return (
-                                        <span key={i}>
-                                            <span className={isEven ? 'text-gray-100' : 'text-blue-100'}>
-                                                {trimmed}
-                                            </span>
-                                            {!isLast && <span className="text-gray-700 mx-1">|</span>}
-                                        </span>
+                                        <div key={i} className={`text-base md:text-lg leading-relaxed font-medium py-1 ${
+                                            isEven
+                                                ? 'text-gray-100'
+                                                : 'text-sky-200 pl-3 border-l-2 border-sky-800/40'
+                                        }`}>
+                                            {trimmed}
+                                        </div>
                                     );
                                 })}
-                                {/* Interim — inline, slightly transparent */}
+                                {/* Interim — inline after last block */}
                                 {interimDisplay && (
-                                    <span className="text-gray-400"> {interimDisplay}</span>
+                                    <div className="text-base md:text-lg leading-relaxed text-gray-400">
+                                        {interimDisplay}
+                                        {isListening && (
+                                            <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
+                                        )}
+                                    </div>
                                 )}
-                                {isListening && (
-                                    <span className="inline-block ml-0.5 text-emerald-400 animate-pulse">▊</span>
+                                {!interimDisplay && isListening && (
+                                    <div><span className="text-emerald-400 animate-pulse">▊</span></div>
                                 )}
                             </div>
                         ) : (
@@ -177,7 +190,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     </div>
                 </div>
 
-                {/* RIGHT PANEL: Structured topics */}
+                {/* RIGHT PANEL: Structured topics — new content always visible at bottom */}
                 <div className="flex-1 basis-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col">
                     <div className="flex items-center justify-between px-6 py-3 shrink-0 border-b border-gray-800/20">
                         <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
@@ -191,9 +204,16 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                    <div
+                        ref={topicScrollRef}
+                        className="flex-1 overflow-y-auto px-6 py-4 flex flex-col"
+                    >
                         {topicSummary ? (
-                            renderTopics()
+                            <>
+                                {/* Spacer pushes content to bottom — new topics always visible */}
+                                <div className="flex-1" />
+                                <div>{renderTopics()}</div>
+                            </>
                         ) : (
                             <div className="flex items-center justify-center h-full">
                                 <p className="text-gray-700 text-sm italic">
