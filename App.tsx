@@ -91,11 +91,9 @@ const App: React.FC = () => {
   const googleAuth = useGoogleAuth();
 
   // STREAMING MODE HOOK: Manages accumulated text and translations
+  // Speed preset controls llmTriggerWords/llmPauseMs — don't override here
   const streamingMode = useStreamingMode(context, {
     llmTranslationEnabled,
-    llmTriggerWords: 25,
-    llmPauseMs: 2000,
-    ghostContextWords: 50,
     onQuestionDetected: (confidence) => {
       console.log(`❓ [StreamingMode] Question detected with ${confidence}% confidence`);
     }
@@ -1698,6 +1696,7 @@ const App: React.FC = () => {
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
                  frozenTranslation={streamingMode.state.frozenTranslation}
                  frozenWordCount={streamingMode.state.frozenWordCount}
+                 frozenTranslationWordCount={streamingMode.state.frozenTranslationWordCount}
                  interimText={streamingMode.state.interimText}
                  interimGhostTranslation={streamingMode.state.interimGhostTranslation}
                  isListening={streamingMode.state.isListening}

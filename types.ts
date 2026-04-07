@@ -63,6 +63,59 @@ export type AudioPresetId =
   | 'manual'                // User manually selected from dropdown
   | '';                     // No preset selected
 
+// Speed preset for translation pipeline tuning
+export type SpeedPresetId = 'youtube' | 'interview' | 'custom';
+
+export interface SpeedPresetConfig {
+  ghostBatchWords: number;       // Max words per Ghost translation batch
+  ghostDebounceMs: number;       // Debounce before Ghost translates
+  interimDebounceMs: number;     // Debounce before interim translates
+  holdN: number;                 // Hide last N interim words (reduces flicker)
+  llmEnabled: boolean;           // Enable LLM translation
+  llmTriggerWords: number;       // Words threshold to trigger LLM
+  llmPauseMs: number;            // Pause duration to trigger LLM
+  activeWindowWords: number;     // Words kept in active zone before freezing
+}
+
+export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: string; description: string }> = {
+  youtube: {
+    label: 'YouTube / Підкасти',
+    description: 'Ghost only, оптимізовано для читання субтитрів',
+    ghostBatchWords: 8,
+    ghostDebounceMs: 80,
+    interimDebounceMs: 80,
+    holdN: 2,
+    llmEnabled: false,
+    llmTriggerWords: 25,
+    llmPauseMs: 2000,
+    activeWindowWords: 25,
+  },
+  interview: {
+    label: 'Live інтерв\'ю',
+    description: 'Максимальна швидкість Ghost + LLM для відповідей',
+    ghostBatchWords: 4,
+    ghostDebounceMs: 50,
+    interimDebounceMs: 50,
+    holdN: 1,
+    llmEnabled: true,
+    llmTriggerWords: 6,
+    llmPauseMs: 600,
+    activeWindowWords: 12,
+  },
+  custom: {
+    label: 'Власні',
+    description: 'Ручне налаштування всіх параметрів',
+    ghostBatchWords: 8,
+    ghostDebounceMs: 100,
+    interimDebounceMs: 100,
+    holdN: 2,
+    llmEnabled: true,
+    llmTriggerWords: 8,
+    llmPauseMs: 800,
+    activeWindowWords: 18,
+  },
+};
+
 export interface InterviewContext {
   // === ACTIVE DATA (loaded from selected profiles) ===
   resume: string;
@@ -99,6 +152,7 @@ export interface InterviewContext {
   viewMode: ViewMode; // Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // Select local model type
   llmProvider: 'gemini'; // Cloud LLM Provider
+  speedPreset: SpeedPresetId; // Translation speed preset
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: ModeConfig; // Mode-specific prompts and settings

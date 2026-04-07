@@ -126,6 +126,7 @@ export const DEFAULT_CONTEXT: InterviewContext = {
   viewMode: 'FULL',
   ghostModel: 'opus',
   llmProvider: 'gemini',
+  speedPreset: 'interview',
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: DEFAULT_MODE_CONFIG

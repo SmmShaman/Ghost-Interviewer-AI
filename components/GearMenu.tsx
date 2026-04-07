@@ -1,7 +1,7 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
-import { InterviewContext, ViewMode } from '../types';
+import { InterviewContext, ViewMode, SpeedPresetId, SPEED_PRESETS } from '../types';
 import { translations } from '../translations';
 import { SettingsIcon } from './Icons';
 
@@ -108,6 +108,18 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       ]
     },
     {
+      id: 'speed',
+      icon: '⚡',
+      label: uiLang === 'uk' ? 'Швидкість' : 'Speed',
+      color: 'amber',
+      subItems: (Object.entries(SPEED_PRESETS) as [SpeedPresetId, typeof SPEED_PRESETS[SpeedPresetId]][]).map(([id, preset]) => ({
+        id,
+        label: preset.label,
+        value: id,
+        isActive: (context.speedPreset || 'interview') === id,
+      }))
+    },
+    {
       id: 'settings',
       icon: '⚙️',
       label: t.settings.accordion?.advancedPrompts || 'Full Settings',
@@ -128,6 +140,9 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         break;
       case 'audio':
         handleChange('stereoMode', subItem.value === 'true');
+        break;
+      case 'speed':
+        handleChange('speedPreset', subItem.value as SpeedPresetId);
         break;
     }
     // Close submenu after selection

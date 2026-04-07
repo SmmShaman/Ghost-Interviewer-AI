@@ -36,6 +36,7 @@ interface StreamingSimpleModeLayoutProps {
     // FROZEN ZONE: Already translated by LLM, won't change
     frozenTranslation?: string;
     frozenWordCount?: number;
+    frozenTranslationWordCount?: number; // Actual word count in translated text
 
     // Interim (real-time, not finalized yet)
     interimText?: string;             // Interim original text
@@ -64,6 +65,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     accumulatedLLMTranslation,
     frozenTranslation = '',
     frozenWordCount = 0,
+    frozenTranslationWordCount = 0,
     interimText = '',
     interimGhostTranslation = '',
     isListening,
@@ -109,7 +111,8 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         // LLM enabled with frozen - calculate active zone from Ghost
         const ghostText = stripPlaceholders(accumulatedGhostTranslation);
 
-        // Find where frozen zone ends in Ghost text
+        // Use frozenTranslationWordCount (translated words) to cut Ghost text
+        // This matches Ghost word count to translated word count, not original word count
         let wordCountSoFar = 0;
         let cutPosition = 0;
         const wordRegex = /\S+/g;
@@ -117,7 +120,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
         while ((match = wordRegex.exec(ghostText)) !== null) {
             wordCountSoFar++;
-            if (wordCountSoFar >= frozenWordCount) {
+            if (wordCountSoFar >= frozenTranslationWordCount) {
                 cutPosition = match.index + match[0].length;
                 break;
             }
@@ -273,7 +276,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     className="shrink-0 border-t border-red-500/30 bg-red-900/10 px-4 py-3"
                     style={{
                         minHeight: '4.5rem',
-                        maxHeight: '4.5rem'
+                        maxHeight: '6.5rem'
                     }}
                 >
                     <div className="flex items-center gap-2 mb-1">
@@ -282,7 +285,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                             Interim (реальний час)
                         </span>
                     </div>
-                    <div className="text-base md:text-lg leading-relaxed font-medium overflow-hidden">
+                    <div className="text-base md:text-lg leading-relaxed font-medium overflow-auto">
                         {interimGhostTranslation ? (
                             <span
                                 className="text-red-400 italic"

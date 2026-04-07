@@ -309,13 +309,6 @@ export const generateInterviewAssist = async (
   }
 };
 
-// Simple translator fallback
-export const translateText = async (text: string, targetLang: string): Promise<string> => {
-    // Basic implementation - for now just returns text as this is rarely used in current flow
-    // Future: implement router for this too
-    return text;
-}
-
 // ========== STREAMING TRANSLATION (NEW) ==========
 
 export interface StreamingTranslationResult {

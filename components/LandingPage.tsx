@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { InterviewContext, ViewMode, AudioPresetId } from '../types';
+import { InterviewContext, ViewMode, AudioPresetId, SpeedPresetId, SPEED_PRESETS } from '../types';
 import { MicIcon } from './Icons';
 import GearMenu from './GearMenu';
 import SetupPanel from './SetupPanel';
@@ -236,6 +236,45 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                 )}
                                 {!preset.available && (
                                     <div className="text-[8px] text-amber-500/70 mt-1">VB-Cable</div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Speed Preset Buttons */}
+            <div className="w-full max-w-5xl px-6 mb-8">
+                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+                    {uiLang === 'uk' ? 'ШВИДКІСТЬ ПЕРЕКЛАДУ' : 'TRANSLATION SPEED'}
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                    {(Object.entries(SPEED_PRESETS) as [SpeedPresetId, typeof SPEED_PRESETS[SpeedPresetId]][]).map(([id, preset]) => {
+                        const active = (context.speedPreset || 'interview') === id;
+                        const icons: Record<SpeedPresetId, string> = {
+                            youtube: '📺',
+                            interview: '🎙️',
+                            custom: '⚙️',
+                        };
+                        return (
+                            <button
+                                key={id}
+                                onClick={() => setContext({ ...context, speedPreset: id })}
+                                className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                                    ${active
+                                        ? 'border-amber-400 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
+                                        : 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
+                                    }`}
+                            >
+                                <div className="text-2xl mb-2">{icons[id]}</div>
+                                <div className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'text-amber-300' : 'text-gray-400'}`}>
+                                    {preset.label}
+                                </div>
+                                <div className="text-[8px] text-gray-500 mt-1">
+                                    {preset.description}
+                                </div>
+                                {active && (
+                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full border-2 border-gray-950" />
                                 )}
                             </button>
                         );

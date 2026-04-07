@@ -9,10 +9,11 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { InterviewContext } from '../types';
+import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
 import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
+import { debugLogger } from '../services/debugLogger';
 
 export interface StreamingState {
     // Text content
@@ -25,6 +26,7 @@ export interface StreamingState {
     // FROZEN ZONE: LLM-translated text that won't change anymore
     frozenTranslation: string;    // Finalized translation (LLM quality)
     frozenWordCount: number;      // How many original words are in frozen zone
+    frozenTranslationWordCount: number; // How many TRANSLATED words are in frozen zone
 
     // Statistics
     wordCount: number;
@@ -90,7 +92,17 @@ export function useStreamingMode(
     context: InterviewContext,
     options: UseStreamingModeOptions = {}
 ) {
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    // Resolve speed preset from context
+    const speedPreset: SpeedPresetConfig = SPEED_PRESETS[context.speedPreset || 'interview'];
+
+    const opts = {
+        ...DEFAULT_OPTIONS,
+        // Apply speed preset defaults (can be overridden by options)
+        llmTranslationEnabled: speedPreset.llmEnabled,
+        llmTriggerWords: speedPreset.llmTriggerWords,
+        llmPauseMs: speedPreset.llmPauseMs,
+        ...options
+    };
 
     // State
     const [state, setState] = useState<StreamingState>({
@@ -101,6 +113,7 @@ export function useStreamingMode(
         llmTranslation: '',
         frozenTranslation: '',
         frozenWordCount: 0,
+        frozenTranslationWordCount: 0,
         wordCount: 0,
         sessionStartTime: 0,
         sessionDuration: 0,
@@ -146,7 +159,7 @@ export function useStreamingMode(
     }>({ originalPrefix: '', translatedPrefix: '', prefixWordCount: 0 });
 
     // HOLD-N CONFIG: Don't show last N words of interim (they change most often)
-    const HOLD_N = 2;
+    const HOLD_N = speedPreset.holdN;
     const TRANSLATE_LAST_N = 7; // Only translate last N words, use cache for the rest
 
     // PARAGRAPH MARKER: Used to create visual line breaks between speech blocks
@@ -252,6 +265,7 @@ export function useStreamingMode(
     // STABLE APPROACH: Translate ONLY new words, append to existing translation
     // This eliminates flickering caused by context-aware translation inconsistency
     const executeGhostTranslation = useCallback(async (newWords: string, fullText: string, addParagraphBreak: boolean = false, punctuation: string = '') => {
+        const ghostStartTime = performance.now();
         // DUPLICATE CHECK: Skip if we already translated this text
         if (lastTranslatedTextRef.current === newWords) {
             console.log(`⚠️ [Ghost] Skipping duplicate translation: "${newWords.substring(0, 30)}..."`);
@@ -292,7 +306,7 @@ export function useStreamingMode(
                 if (translation === '⏳...' || translation === '❌' || translation === '⚠️') {
                     console.log(`🔄 [Ghost] Model not ready, scheduling retry in 3s for: "${newWords.substring(0, 30)}..."`);
                     setTimeout(() => {
-                        executeGhostTranslation(newWords, fullOriginalText, addParagraphBreak, punctuation);
+                        executeGhostTranslation(newWords, fullText, addParagraphBreak, punctuation);
                     }, 3000);
                     return { ...prev, isProcessingGhost: false };
                 }
@@ -320,8 +334,10 @@ export function useStreamingMode(
             });
 
             // === GHOST LOG ===
+            const ghostLatency = performance.now() - ghostStartTime;
+            debugLogger.log('GHOST', `${newWords.substring(0, 40)} → ${translation.substring(0, 40)}`, ghostLatency, newWords.split(/\s+/).length);
             console.log(`\n${'─'.repeat(50)}`);
-            console.log(`👻 [GHOST ПЕРЕКЛАД] Завершено`);
+            console.log(`👻 [GHOST ПЕРЕКЛАД] ${Math.round(ghostLatency)}ms`);
             console.log(`   📝 Вхід: "${newWords.substring(0, 100)}${newWords.length > 100 ? '...' : ''}"`);
             console.log(`   🇺🇦 Вихід: "${translation.substring(0, 100)}${translation.length > 100 ? '...' : ''}"`);
             console.log(`${'─'.repeat(50)}\n`);
@@ -360,6 +376,8 @@ export function useStreamingMode(
         const signal = abortControllerRef.current.signal;
 
         setState(prev => ({ ...prev, isProcessingLLM: true }));
+        const llmStartTime = performance.now();
+        debugLogger.log('LLM_START', `${currentWordCount} words, ${currentWordCount - llmTranslatedWordCountRef.current} new`);
 
         try {
             const result = await generateStreamingTranslation(
@@ -380,8 +398,8 @@ export function useStreamingMode(
             // SLIDING WINDOW: Freeze old part of translation
             // Keep last N words "active", freeze the rest
             // IMPORTANT: Never REPLACE frozen text, only APPEND to it!
-            // NOTE: Reduced from 50 to 20 so freezing starts earlier (with less words)
-            const ACTIVE_WINDOW_WORDS = 8;
+            // Active window size from speed preset
+            const ACTIVE_WINDOW_WORDS = speedPreset.activeWindowWords;
             const translationWords = result.translation.split(/\s+/);
             const originalWords = currentOriginalText.split(/\s+/);
 
@@ -390,6 +408,10 @@ export function useStreamingMode(
             const newFreezeTranslationWordCount = Math.max(0, translationWords.length - ACTIVE_WINDOW_WORDS);
 
             console.log(`🧊 [LLM] Freeze calculation: ${newFreezeTranslationWordCount} words to freeze, ${translationWords.length - newFreezeTranslationWordCount} active`);
+
+            // === DEBUG LOG ===
+            const llmLatency = performance.now() - llmStartTime;
+            debugLogger.log('LLM', `${result.intent.speechType} | ${result.translation.substring(0, 50)}`, llmLatency, originalWords.length);
 
             // === COMPARISON LOG: Ghost vs LLM ===
             console.log(`\n${'═'.repeat(60)}`);
@@ -414,13 +436,15 @@ export function useStreamingMode(
                 // FROZEN ZONE FIX: Never replace, only append new frozen content
                 // 1. Keep existing frozen translation intact
                 // 2. Only add NEW words that are now being frozen (not previously frozen)
+                // 3. Track frozenTranslationWordCount SEPARATELY from frozenWordCount
                 let updatedFrozenTranslation = prev.frozenTranslation;
                 let updatedFrozenWordCount = prev.frozenWordCount;
+                let updatedFrozenTranslationWordCount = prev.frozenTranslationWordCount;
 
                 if (newFreezeWordCount > prev.frozenWordCount) {
                     // There are new words to freeze
-                    // Calculate how many NEW translation words to add to frozen zone
-                    const prevFrozenTranslationWords = prev.frozenTranslation.split(/\s+/).filter(w => w).length;
+                    // Use frozenTranslationWordCount (not recalculated from split) for accuracy
+                    const prevFrozenTranslationWords = prev.frozenTranslationWordCount;
                     const newWordsToFreeze = newFreezeTranslationWordCount - prevFrozenTranslationWords;
 
                     if (newWordsToFreeze > 0) {
@@ -428,15 +452,17 @@ export function useStreamingMode(
                         const newFrozenWords = translationWords.slice(prevFrozenTranslationWords, newFreezeTranslationWordCount);
                         const newFrozenPart = newFrozenWords.join(' ');
 
-                        // APPEND to existing frozen translation (with paragraph break to preserve structure)
+                        // APPEND with space only — paragraph breaks are managed by addWords pauses
                         if (prev.frozenTranslation && newFrozenPart) {
-                            updatedFrozenTranslation = prev.frozenTranslation + '\n\n' + newFrozenPart;
+                            updatedFrozenTranslation = prev.frozenTranslation + ' ' + newFrozenPart;
                         } else if (newFrozenPart) {
                             updatedFrozenTranslation = newFrozenPart;
                         }
 
                         updatedFrozenWordCount = newFreezeWordCount;
-                        console.log(`🧊 [LLM] APPENDING ${newWordsToFreeze} new frozen words (total: ${newFreezeTranslationWordCount})`);
+                        updatedFrozenTranslationWordCount = newFreezeTranslationWordCount;
+                        debugLogger.log('FREEZE', `+${newWordsToFreeze} words → total ${newFreezeTranslationWordCount} translated`, undefined, newWordsToFreeze);
+                        console.log(`🧊 [LLM] APPENDING ${newWordsToFreeze} new frozen words (translated: ${newFreezeTranslationWordCount}, original: ${newFreezeWordCount})`);
                         console.log(`   OLD frozen: "${prev.frozenTranslation.substring(0, 50)}..."`);
                         console.log(`   NEW part: "${newFrozenPart.substring(0, 50)}..."`);
                     }
@@ -449,6 +475,7 @@ export function useStreamingMode(
                     llmTranslation: result.translation,
                     frozenTranslation: updatedFrozenTranslation,
                     frozenWordCount: updatedFrozenWordCount,
+                    frozenTranslationWordCount: updatedFrozenTranslationWordCount,
                     containsQuestion: result.intent.containsQuestion,
                     questionConfidence: result.intent.questionConfidence,
                     speechType: result.intent.speechType,
@@ -512,10 +539,10 @@ export function useStreamingMode(
             // If all LLM words are already frozen, nothing to do
             if (frozenWords.length >= llmWords.length) return prev;
 
-            // Move ALL LLM translation to frozen
+            // Move ALL LLM translation to frozen (space only, no forced paragraph breaks)
             const newFrozenPart = llmWords.slice(frozenWords.length).join(' ');
             const updatedFrozen = prev.frozenTranslation
-                ? prev.frozenTranslation + '\n\n' + newFrozenPart
+                ? prev.frozenTranslation + ' ' + newFrozenPart
                 : cleanLLM;
 
             const originalWords = prev.originalText.split(/\s+/).filter(w => w);
@@ -525,7 +552,8 @@ export function useStreamingMode(
             return {
                 ...prev,
                 frozenTranslation: updatedFrozen,
-                frozenWordCount: originalWords.length // All original words are now frozen
+                frozenWordCount: originalWords.length, // All original words are now frozen
+                frozenTranslationWordCount: llmWords.length // Track translated word count
             };
         });
     }, []);
@@ -737,6 +765,7 @@ export function useStreamingMode(
         // METRICS: Record words received
         const newWordCount = trimmedNew.split(/\s+/).length;
         metricsCollector.recordWordsReceived(newWordCount);
+        debugLogger.log('WORDS_IN', trimmedNew, undefined, newWordCount);
 
         // SENTENCE TRACKING: Track first word and full text of current sentence
         if (!currentSentenceStartRef.current || shouldAddParagraphBreak) {
@@ -797,7 +826,7 @@ export function useStreamingMode(
                 console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words${addParagraphBreak ? ` (with "${punctuation}" + paragraph break)` : ''}`);
                 executeGhostTranslation(allPendingWords, originalTextRef.current, addParagraphBreak, punctuation);
             }
-        }, 100);
+        }, speedPreset.ghostDebounceMs);
 
         // Schedule LLM translation
         scheduleLLMTranslation();
@@ -813,6 +842,7 @@ export function useStreamingMode(
      * - Cache: Only translate last TRANSLATE_LAST_N words, use cached prefix
      */
     const setInterimText = useCallback((interimText: string) => {
+        const interimStartTime = performance.now();
         const allWords = interimText.trim().split(/\s+/).filter(w => w.length > 0);
 
         // HOLD-N: Hide last N words from display (they're most unstable)
@@ -894,6 +924,9 @@ export function useStreamingMode(
                         }
                     }
 
+                    const interimLatency = performance.now() - interimStartTime;
+                    debugLogger.log('INTERIM', finalTranslation.trim().substring(0, 50), interimLatency, allWords.length);
+
                     setState(prev => ({
                         ...prev,
                         interimGhostTranslation: finalTranslation.trim()
@@ -901,7 +934,7 @@ export function useStreamingMode(
                 } catch (e) {
                     // Ignore translation errors for interim text
                 }
-            }, 100); // Increased from 50ms to 100ms for stability
+            }, speedPreset.interimDebounceMs);
         } else {
             setState(prev => ({
                 ...prev,
@@ -923,6 +956,7 @@ export function useStreamingMode(
             llmTranslation: '',
             frozenTranslation: '',
             frozenWordCount: 0,
+            frozenTranslationWordCount: 0,
             wordCount: 0,
             sessionStartTime: Date.now(),
             sessionDuration: 0,
@@ -958,6 +992,8 @@ export function useStreamingMode(
 
         // METRICS: Start metrics session
         metricsCollector.startSession();
+        debugLogger.startSession();
+        debugLogger.log('PRESET', `${context.speedPreset || 'interview'} | holdN=${speedPreset.holdN} ghostDb=${speedPreset.ghostDebounceMs}ms llm=${speedPreset.llmEnabled} activeWin=${speedPreset.activeWindowWords}`);
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
@@ -1068,6 +1104,7 @@ export function useStreamingMode(
         // METRICS: Stop and log session metrics
         metricsCollector.stopSession();
         metricsCollector.logMetrics();
+        debugLogger.stopSession();
 
         console.log('🛑 [StreamingMode] Session stopped');
     }, [executeLLMTranslation, executeAnswerGeneration, flushActiveToFrozen]);
