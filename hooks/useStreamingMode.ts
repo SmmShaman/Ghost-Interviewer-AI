@@ -97,11 +97,11 @@ export function useStreamingMode(
 
     const opts = {
         ...DEFAULT_OPTIONS,
-        // Apply speed preset defaults (can be overridden by options)
-        llmTranslationEnabled: speedPreset.llmEnabled,
+        ...options,
+        // Speed preset overrides — these always win over options
+        llmTranslationEnabled: speedPreset.llmEnabled && (options.llmTranslationEnabled !== false),
         llmTriggerWords: speedPreset.llmTriggerWords,
         llmPauseMs: speedPreset.llmPauseMs,
-        ...options
     };
 
     // State
@@ -149,7 +149,7 @@ export function useStreamingMode(
     const lastAnswerTextRef = useRef<string>(''); // Track text that was last used to generate answer (avoid duplicates)
     const scheduleAnswerGenerationRef = useRef<() => void>(() => {}); // Ref for answer scheduling to avoid circular deps
     const lastWordAddedTimeRef = useRef<number>(Date.now()); // Track time of last word addition for paragraph breaks
-    const PARAGRAPH_PAUSE_MS = 1500; // Pause duration to trigger paragraph break (1.5 seconds)
+    const PARAGRAPH_PAUSE_MS = speedPreset.paragraphPauseMs;
 
     // INTERIM OPTIMIZATION: Cache prefix translation to avoid re-translating stable text
     const interimCacheRef = useRef<{
@@ -162,8 +162,8 @@ export function useStreamingMode(
     const HOLD_N = speedPreset.holdN;
     const TRANSLATE_LAST_N = 7; // Only translate last N words, use cache for the rest
 
-    // PARAGRAPH MARKER: Used to create visual line breaks between speech blocks
-    const PARAGRAPH_MARKER = '\n\n';
+    // PARAGRAPH MARKER: '\n\n' for interview (visual break), '. ' for youtube (continuous)
+    const PARAGRAPH_MARKER = speedPreset.paragraphMarker;
 
     // PUNCTUATION CONFIG: Auto-add periods and question marks
     const MIN_WORDS_FOR_PUNCTUATION = 3; // Minimum words before adding punctuation

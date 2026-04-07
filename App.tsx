@@ -234,7 +234,11 @@ const App: React.FC = () => {
     localTranslator.clearCache();
     // Pre-initialize Chrome Translator API (prevents race condition)
     localTranslator.preInitChrome();
-  }, [context.targetLanguage, context.nativeLanguage]);
+    // Configure Google Cloud NMT key from context (localStorage)
+    if (context.googleTranslateKey) {
+      localTranslator.setGoogleNMTKey(context.googleTranslateKey);
+    }
+  }, [context.targetLanguage, context.nativeLanguage, context.googleTranslateKey]);
 
   // RETRY GHOST TRANSLATIONS when model becomes ready
   // Re-translates any messages that got "⏳..." while model was loading

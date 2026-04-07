@@ -75,12 +75,14 @@ export interface SpeedPresetConfig {
   llmTriggerWords: number;       // Words threshold to trigger LLM
   llmPauseMs: number;            // Pause duration to trigger LLM
   activeWindowWords: number;     // Words kept in active zone before freezing
+  paragraphPauseMs: number;      // Pause to trigger paragraph break (ms)
+  paragraphMarker: string;       // What to insert on pause: '\n\n' or '. ' or ' '
 }
 
 export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: string; description: string }> = {
   youtube: {
     label: 'YouTube / Підкасти',
-    description: 'Ghost only, оптимізовано для читання субтитрів',
+    description: 'Ghost only, суцільний текст як субтитри',
     ghostBatchWords: 8,
     ghostDebounceMs: 80,
     interimDebounceMs: 80,
@@ -89,6 +91,8 @@ export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: s
     llmTriggerWords: 25,
     llmPauseMs: 2000,
     activeWindowWords: 25,
+    paragraphPauseMs: 8000,    // 8s — only on real long pauses
+    paragraphMarker: '. ',     // Dot + space instead of line break
   },
   interview: {
     label: 'Live інтерв\'ю',
@@ -101,6 +105,8 @@ export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: s
     llmTriggerWords: 6,
     llmPauseMs: 600,
     activeWindowWords: 12,
+    paragraphPauseMs: 3000,    // 3s — separate interviewer phrases
+    paragraphMarker: '\n\n',   // Visual paragraph break
   },
   custom: {
     label: 'Власні',
@@ -113,6 +119,8 @@ export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: s
     llmTriggerWords: 8,
     llmPauseMs: 800,
     activeWindowWords: 18,
+    paragraphPauseMs: 2000,
+    paragraphMarker: '\n\n',
   },
 };
 
@@ -153,6 +161,7 @@ export interface InterviewContext {
   ghostModel: 'opus' | 'nllb'; // Select local model type
   llmProvider: 'gemini'; // Cloud LLM Provider
   speedPreset: SpeedPresetId; // Translation speed preset
+  googleTranslateKey: string; // Google Cloud Translation API key (Level 2 NMT)
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: ModeConfig; // Mode-specific prompts and settings

@@ -127,6 +127,7 @@ export const DEFAULT_CONTEXT: InterviewContext = {
   ghostModel: 'opus',
   llmProvider: 'gemini',
   speedPreset: 'interview',
+  googleTranslateKey: '',
 
   // === MODE-SPECIFIC CONFIGURATION ===
   modeConfig: DEFAULT_MODE_CONFIG

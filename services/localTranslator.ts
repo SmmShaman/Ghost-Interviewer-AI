@@ -5,6 +5,7 @@ import { glossaryProcessor } from './glossaryProcessor';
 import { pivotTranslator } from './pivotTranslator';
 import { confidenceFilter } from './confidenceFilter';
 import { debugLogger } from './debugLogger';
+import { googleTranslateNMT } from './googleTranslateNMT';
 
 // CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
 env.allowLocalModels = false;
@@ -246,11 +247,36 @@ class LocalTranslator {
         return this.currentModelType;
     }
 
+    /** Configure Google Cloud NMT API key (from env or UI) */
+    setGoogleNMTKey(key: string): void {
+        if (key) {
+            googleTranslateNMT.setApiKey(key);
+            googleTranslateNMT.setLanguages(
+                this.sourceLanguageName === 'no' ? 'Norwegian' : 'English',
+                this.targetLanguageName === 'uk' ? 'Ukrainian' : 'English'
+            );
+        }
+    }
+
     async initialize(onProgress?: (progress: number) => void) {
+        // Initialize Google Cloud NMT if API key available (from env var)
+        const nmtKey = (import.meta as any).env?.VITE_GOOGLE_TRANSLATE_KEY || '';
+        if (nmtKey) {
+            googleTranslateNMT.setApiKey(nmtKey);
+        }
+
         // OPTIMIZATION: Skip model loading if Chrome Translator API is available
         const chromeAvailable = await this.checkChromeTranslator();
         if (chromeAvailable) {
             console.log('✅ Chrome Translator API available - skipping model download');
+            if (onProgress) onProgress(100);
+            this.finishInit();
+            return;
+        }
+
+        // Also skip model loading if Google NMT is available
+        if (googleTranslateNMT.isAvailable()) {
+            console.log('✅ Google Cloud NMT available - skipping model download');
             if (onProgress) onProgress(100);
             this.finishInit();
             return;
@@ -470,6 +496,9 @@ class LocalTranslator {
 
         this.sourceLanguageName = newSourceLang;
         this.targetLanguageName = newTargetLang;
+
+        // Sync Google NMT languages
+        googleTranslateNMT.setLanguages(source, target);
     }
 
     // Split text into chunks of CHUNK_SIZE words
@@ -541,10 +570,23 @@ class LocalTranslator {
             }];
         }
 
-        // === PRIORITY 2: Direct OPUS model (56MB, fast ~200ms) ===
-        // NOTE: Pivot (NO→EN→UK) is NOT used for Ghost — too slow on WASM (2-12s per call).
-        // Pivot NLLB 600MB model without WebGPU is impractical for real-time translation.
-        // OPUS is small and fast. LLM provides quality translation separately.
+        // === PRIORITY 2: Google Cloud NMT API (50-200ms, high quality) ===
+        if (googleTranslateNMT.isAvailable()) {
+            const nmtStart = performance.now();
+            const nmtResult = await googleTranslateNMT.translate(text);
+            if (nmtResult !== null) {
+                const processedResult = glossaryProcessor.processTranslation(nmtResult);
+                debugLogger.log('GNMT_OK', text.substring(0, 40), performance.now() - nmtStart, text.split(/\s+/).length);
+                if (onProgress) onProgress(processedResult);
+                return [{
+                    original: text,
+                    ghostTranslation: processedResult,
+                    status: 'ghost'
+                }];
+            }
+        }
+
+        // === PRIORITY 3: Direct OPUS model (56MB, 300-2000ms, offline fallback) ===
         if (!this.translator) {
             if (!this.isLoading) this.initialize();
             return [{
@@ -669,8 +711,9 @@ class LocalTranslator {
         const pivotStatus = pivotTranslator.getStatus();
         return {
             isLoading: this.isLoading,
-            isReady: !!this.translator || !!this.chromeTranslator || pivotTranslator.isReady(),
+            isReady: !!this.translator || !!this.chromeTranslator || googleTranslateNMT.isAvailable() || pivotTranslator.isReady(),
             useChromeAPI: this.chromeTranslatorAvailable === true,
+            useGoogleNMT: googleTranslateNMT.isAvailable(),
             chromeChecked: this.chromeTranslatorAvailable !== null,
             device: this.activeDevice, // 'webgpu' | 'wasm' | null
             modelType: this.currentModelType,
