@@ -7,10 +7,11 @@ import { useAudioDevices } from '../hooks/useAudioDevices';
 import type { GoogleUser } from '../services/apiClient.ts';
 
 // Tooltip component — hover over ? to see explanation
+// Uses group/tip to avoid conflicts with parent group classes
 const Tip: React.FC<{ text: string; color?: string }> = ({ text, color = 'gray' }) => (
-    <span className="relative group inline-flex ml-1.5 cursor-help">
-        <span className={`w-4 h-4 rounded-full border border-${color}-500/40 text-${color}-400 text-[9px] flex items-center justify-center`}>?</span>
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 leading-relaxed opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 shadow-xl pointer-events-none">
+    <span className="relative group/tip inline-flex ml-1.5 cursor-help" onClick={(e) => e.stopPropagation()}>
+        <span className={`w-4 h-4 rounded-full border border-${color}-500/40 text-${color}-400 text-[9px] flex items-center justify-center shrink-0`}>?</span>
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-[100] shadow-2xl pointer-events-none text-left font-normal normal-case tracking-normal">
             {text}
         </span>
     </span>
