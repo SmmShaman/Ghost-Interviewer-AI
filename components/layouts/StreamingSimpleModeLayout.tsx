@@ -69,19 +69,20 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     // Smooth word-by-word animation
     useEffect(() => {
         targetTextRef.current = mainText;
-        if (displayedText.length < mainText.length) {
-            const interval = setInterval(() => {
-                setDisplayedText(prev => {
-                    const target = targetTextRef.current;
-                    if (prev.length >= target.length) return target;
-                    const nextSpace = target.indexOf(' ', prev.length + 1);
-                    return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
-                });
-            }, 60);
-            return () => clearInterval(interval);
-        } else {
-            setDisplayedText(mainText);
-        }
+
+        // Always start animation when target changes
+        const interval = setInterval(() => {
+            setDisplayedText(prev => {
+                const target = targetTextRef.current;
+                if (!target) return '';
+                if (prev.length >= target.length) return target;
+                // Find next word boundary
+                const nextSpace = target.indexOf(' ', prev.length + 1);
+                return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
+            });
+        }, 60);
+
+        return () => clearInterval(interval);
     }, [mainText]);
 
     // Auto-scroll subtitles
