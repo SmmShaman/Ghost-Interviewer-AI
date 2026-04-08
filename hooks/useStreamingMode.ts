@@ -1105,7 +1105,9 @@ export function useStreamingMode(
         // METRICS: Start metrics session
         metricsCollector.startSession();
         debugLogger.startSession();
-        debugLogger.log('PRESET', `${context.speedPreset || 'interview'} | holdN=${speedPreset.holdN} ghostDb=${speedPreset.ghostDebounceMs}ms llm=${speedPreset.llmEnabled} activeWin=${speedPreset.activeWindowWords}`);
+        // Use contextRef for fresh values (startSession has [] deps = stale closure)
+        const currentPreset = SPEED_PRESETS[contextRef.current.speedPreset || 'interview'];
+        debugLogger.log('PRESET', `${contextRef.current.speedPreset || 'interview'} | holdN=${currentPreset.holdN} ghostDb=${currentPreset.ghostDebounceMs}ms llm=${currentPreset.llmEnabled} activeWin=${currentPreset.activeWindowWords}`);
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);

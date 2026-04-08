@@ -195,13 +195,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 {/* FOCUS Mode */}
                 <button
                     onClick={() => {
-                        if (context.speedPreset === 'youtube') {
-                            setContext({ ...context, speedPreset: 'interview' });
-                            // Small delay to let state update before starting session
-                            setTimeout(() => startSessionWithMode('FOCUS'), 50);
-                        } else {
-                            startSessionWithMode('FOCUS');
-                        }
+                        setContext({ ...context, speedPreset: 'interview' });
+                        startSessionWithMode('FOCUS');
                     }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
@@ -227,12 +222,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 {/* FULL Mode */}
                 <button
                     onClick={() => {
-                        if (context.speedPreset === 'youtube') {
-                            setContext({ ...context, speedPreset: 'interview' });
-                            setTimeout(() => startSessionWithMode('FULL'), 50);
-                        } else {
-                            startSessionWithMode('FULL');
-                        }
+                        setContext({ ...context, speedPreset: 'interview' });
+                        startSessionWithMode('FULL');
                     }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
