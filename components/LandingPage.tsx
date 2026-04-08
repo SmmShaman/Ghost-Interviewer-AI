@@ -155,6 +155,17 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
             </div>
 
+            {/* Warning: FOCUS/FULL with YouTube preset */}
+            {(context.speedPreset === 'youtube') && (
+                <div className="w-full max-w-5xl px-6 mb-4">
+                    <div className="px-4 py-2.5 rounded-lg bg-amber-900/20 border border-amber-500/30 text-center">
+                        <span className="text-amber-300 text-xs">
+                            ⚠️ Пресет «YouTube» — AI-відповіді вимкнені. Для FOCUS/FULL з відповідями оберіть «Live інтерв'ю» нижче.
+                        </span>
+                    </div>
+                </div>
+            )}
+
             {/* Mode Selection Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-6 mb-12">
                 {/* SIMPLE Mode */}
@@ -183,7 +194,15 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FOCUS Mode */}
                 <button
-                    onClick={() => { setContext({ ...context, speedPreset: 'interview' }); startSessionWithMode('FOCUS'); }}
+                    onClick={() => {
+                        if (context.speedPreset === 'youtube') {
+                            setContext({ ...context, speedPreset: 'interview' });
+                            // Small delay to let state update before starting session
+                            setTimeout(() => startSessionWithMode('FOCUS'), 50);
+                        } else {
+                            startSessionWithMode('FOCUS');
+                        }
+                    }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
                         hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
@@ -207,7 +226,14 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FULL Mode */}
                 <button
-                    onClick={() => { setContext({ ...context, speedPreset: 'interview' }); startSessionWithMode('FULL'); }}
+                    onClick={() => {
+                        if (context.speedPreset === 'youtube') {
+                            setContext({ ...context, speedPreset: 'interview' });
+                            setTimeout(() => startSessionWithMode('FULL'), 50);
+                        } else {
+                            startSessionWithMode('FULL');
+                        }
+                    }}
                     disabled={!isModelReady}
                     className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
                         hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
