@@ -131,9 +131,15 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
 
     // Render conversation log entries with answers inserted after questions
     const renderConversationLog = () => {
-        if (!conversationLog) return null;
+        if (!conversationLog || typeof conversationLog !== 'string') return null;
 
-        const entries = conversationLog.split(/(?=📌|❓)/).filter(e => e.trim());
+        let entries: string[];
+        try {
+            entries = conversationLog.split(/(?=📌|❓)/).filter(e => e.trim());
+        } catch {
+            return null;
+        }
+        if (entries.length === 0) return null;
         let questionIndex = 0;
         const result: React.ReactNode[] = [];
 

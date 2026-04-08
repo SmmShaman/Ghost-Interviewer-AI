@@ -1758,7 +1758,7 @@ const App: React.FC = () => {
                  conversationLog={streamingMode.state.conversationLog}
                  lastDetectedQuestion={streamingMode.state.lastDetectedQuestion}
                  isProcessingConversation={streamingMode.state.isProcessingConversation}
-                 answeredQuestions={streamingMode.state.answeredQuestions}
+                 answeredQuestions={streamingMode.state.answeredQuestions || []}
              />
          )}
 
