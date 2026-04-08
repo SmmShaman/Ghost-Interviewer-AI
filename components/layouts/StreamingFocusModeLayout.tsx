@@ -46,6 +46,7 @@ interface StreamingFocusModeLayoutProps {
     conversationLog?: string;
     lastDetectedQuestion?: string;
     isProcessingConversation?: boolean;
+    answeredQuestions?: Array<{ question: string; answer: string; translation: string }>;
 }
 
 const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
@@ -59,7 +60,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     sessionDuration = 0,
     conversationLog = '',
     lastDetectedQuestion = '',
-    isProcessingConversation = false
+    isProcessingConversation = false,
+    answeredQuestions = []
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const logScrollRef = useRef<HTMLDivElement>(null);
@@ -127,38 +129,26 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         });
     };
 
-    // Render conversation log entries
+    // Render conversation log entries with answers inserted after questions
     const renderConversationLog = () => {
         if (!conversationLog) return null;
 
-        // Split by entry markers (📌, ❓, 💡)
-        const entries = conversationLog.split(/(?=📌|❓|💡)/).filter(e => e.trim());
+        const entries = conversationLog.split(/(?=📌|❓)/).filter(e => e.trim());
+        let questionIndex = 0;
+        const result: React.ReactNode[] = [];
 
-        return entries.map((entry, i) => {
+        entries.forEach((entry, i) => {
             const isQuestion = entry.startsWith('❓');
-            const isAnswer = entry.startsWith('💡');
-            const isInfo = entry.startsWith('📌');
-
             const lines = entry.trim().split('\n').filter(l => l.trim());
             const title = lines[0] || '';
             const body = lines.slice(1).join('\n').trim();
 
-            let bgClass = 'bg-gray-800/30';
-            let borderClass = 'border-gray-700/30';
-            let titleColor = 'text-gray-200';
+            const bgClass = isQuestion ? 'bg-amber-900/20' : 'bg-gray-800/30';
+            const borderClass = isQuestion ? 'border-amber-500/30' : 'border-gray-700/30';
+            const titleColor = isQuestion ? 'text-amber-300' : 'text-gray-200';
 
-            if (isQuestion) {
-                bgClass = 'bg-amber-900/20';
-                borderClass = 'border-amber-500/30';
-                titleColor = 'text-amber-300';
-            } else if (isAnswer) {
-                bgClass = 'bg-emerald-900/20';
-                borderClass = 'border-emerald-500/30';
-                titleColor = 'text-emerald-300';
-            }
-
-            return (
-                <div key={i} className={`mb-3 last:mb-0 rounded-lg ${bgClass} border ${borderClass} px-4 py-3`}>
+            result.push(
+                <div key={`entry-${i}`} className={`mb-3 rounded-lg ${bgClass} border ${borderClass} px-4 py-3`}>
                     <div className={`text-sm font-semibold ${titleColor} leading-snug`}>{title}</div>
                     {body && (
                         <div className="text-sm text-gray-300 leading-relaxed mt-1" style={{ whiteSpace: 'pre-line' }}>
@@ -167,7 +157,37 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                     )}
                 </div>
             );
+
+            // Insert answer after question (if available)
+            if (isQuestion) {
+                const answer = answeredQuestions[questionIndex];
+                if (answer) {
+                    result.push(
+                        <div key={`answer-${questionIndex}`} className="mb-3 rounded-lg bg-emerald-900/20 border border-emerald-500/30 px-4 py-3">
+                            <div className="text-sm font-semibold text-emerald-300 leading-snug">💡 Рекомендована відповідь</div>
+                            <div className="text-sm text-emerald-200 leading-relaxed mt-1">{answer.answer}</div>
+                            {answer.translation && (
+                                <div className="text-sm text-gray-400 italic leading-relaxed mt-2 pt-2 border-t border-emerald-800/30">
+                                    {answer.translation}
+                                </div>
+                            )}
+                        </div>
+                    );
+                } else if (isGeneratingAnswer && questionIndex === answeredQuestions.length) {
+                    result.push(
+                        <div key={`generating-${questionIndex}`} className="mb-3 rounded-lg bg-emerald-900/10 border border-emerald-500/20 px-4 py-3">
+                            <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="text-sm text-emerald-400">Генерую відповідь...</span>
+                            </div>
+                        </div>
+                    );
+                }
+                questionIndex++;
+            }
         });
+
+        return result;
     };
 
     return (

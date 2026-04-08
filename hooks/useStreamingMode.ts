@@ -58,6 +58,8 @@ export interface StreamingState {
     conversationLog: string;
     lastDetectedQuestion: string;
     isProcessingConversation: boolean;
+    // Answers stored separately (won't be overwritten by Flash-Lite)
+    answeredQuestions: Array<{ question: string; answer: string; translation: string }>;
 
     // Processing flags
     isListening: boolean;
@@ -140,6 +142,7 @@ export function useStreamingMode(
         conversationLog: '',
         lastDetectedQuestion: '',
         isProcessingConversation: false,
+        answeredQuestions: [],
         isGeneratingAnswer: false,
         isAnalyzing: false,
         isListening: false,
@@ -405,6 +408,9 @@ export function useStreamingMode(
 
     // === LLM TRANSLATION ===
     const executeLLMTranslation = useCallback(async () => {
+        // FOCUS mode: skip LLM translation — NMT handles it, conversation analyzer handles questions
+        if (contextRef.current.viewMode === 'FOCUS') return;
+
         // Skip if LLM translation is disabled
         if (!opts.llmTranslationEnabled) {
             console.log(`\n${'─'.repeat(50)}`);
@@ -852,12 +858,16 @@ export function useStreamingMode(
 
             debugLogger.log('ANSWER', result.answer.substring(0, 50));
 
-            // Append answer to conversation log
+            // Store answer separately (won't be overwritten by Flash-Lite)
             setState(prev => ({
                 ...prev,
                 generatedAnswer: result.answer,
                 answerTranslation: result.answerTranslation,
-                conversationLog: prev.conversationLog + `\n\n💡 **Відповідь:**\n${result.answerTranslation || result.answer}`,
+                answeredQuestions: [...prev.answeredQuestions, {
+                    question,
+                    answer: result.answer,
+                    translation: result.answerTranslation
+                }],
                 isGeneratingAnswer: false
             }));
         } catch (e: any) {
