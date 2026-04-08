@@ -1,13 +1,17 @@
 /**
- * STREAMING FOCUS MODE LAYOUT
+ * STREAMING FOCUS MODE LAYOUT — Interview Assistant
  *
- * Interview mode: Translation + Answer generation
- * Inherits SIMPLE mode improvements: NMT speed, stable text, no flickering
+ * Left panel: identical to SIMPLE (NMT subtitles, stable, block-based)
+ * Right panel: chronological conversation log
+ *   - 📌 INFO entries (company, conditions, requirements)
+ *   - ❓ QUESTION entries (detected questions to candidate)
+ *   - 💡 ANSWER entries (generated from candidate profile)
  *
  * ┌────────────────────────────┬────────────────────────────┐
- * │  Переклад (NMT, 200мс)    │  Відповідь + Topic Structure│
- * │  стабільний, block-based   │  (Gemini Flash/Flash-Lite)  │
- * │  word-by-word animation    │                             │
+ * │  Субтитри (NMT, 200мс)    │  📌 Про компанію           │
+ * │  стабільні, block-based    │  📌 Умови роботи           │
+ * │                            │  ❓ Розкажи про себе       │
+ * │                            │  💡 Відповідь: "Я маю..."  │
  * └────────────────────────────┴────────────────────────────┘
  */
 
@@ -18,9 +22,6 @@ interface StreamingFocusModeLayoutProps {
     accumulatedOriginal: string;
     accumulatedGhostTranslation: string;
     accumulatedLLMTranslation: string;
-
-    frozenTranslation?: string;
-    frozenWordCount?: number;
 
     interimText?: string;
     interimGhostTranslation?: string;
@@ -41,34 +42,36 @@ interface StreamingFocusModeLayoutProps {
 
     topicSummary?: string;
     isProcessingTopics?: boolean;
+
+    conversationLog?: string;
+    lastDetectedQuestion?: string;
+    isProcessingConversation?: boolean;
 }
 
 const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     accumulatedGhostTranslation,
     isListening,
     isProcessingLLM,
-    containsQuestion,
-    questionConfidence,
-    speechType,
     generatedAnswer = '',
     answerTranslation = '',
     isGeneratingAnswer = false,
     wordCount,
     sessionDuration = 0,
-    topicSummary = '',
-    isProcessingTopics = false
+    conversationLog = '',
+    lastDetectedQuestion = '',
+    isProcessingConversation = false
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const logScrollRef = useRef<HTMLDivElement>(null);
     const [displayedText, setDisplayedText] = useState('');
     const targetTextRef = useRef('');
 
-    // Strip placeholder tokens (from SIMPLE mode)
     const strip = (text: string): string =>
         text.replace(/⏳\.{0,3}/g, '').replace(/[❌⚠️]/g, '').trim();
 
     const mainText = strip(accumulatedGhostTranslation);
 
-    // Smooth word-by-word animation (from SIMPLE mode)
+    // Smooth word-by-word animation (from SIMPLE)
     useEffect(() => {
         targetTextRef.current = mainText;
         const interval = setInterval(() => {
@@ -83,12 +86,15 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         return () => clearInterval(interval);
     }, [mainText]);
 
-    // Auto-scroll translation
+    // Auto-scroll subtitles
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [displayedText]);
+
+    // Auto-scroll conversation log (new entries at bottom)
+    useEffect(() => {
+        if (logScrollRef.current) logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+    }, [conversationLog]);
 
     const getMethodLabel = (): { label: string; color: string } => {
         const status = localTranslator.getStatus();
@@ -104,7 +110,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         return `${m}:${(s % 60).toString().padStart(2, '0')}`;
     };
 
-    // Render blocks with alternating colors (from SIMPLE mode)
+    // Render blocks with alternating colors (from SIMPLE)
     const renderBlocks = () => {
         if (!displayedText) return null;
         return displayedText.split('｜').map((block, i) => {
@@ -121,17 +127,44 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         });
     };
 
-    // Parse topic summary
-    const renderTopics = () => {
-        if (!topicSummary) return null;
-        return topicSummary.split(/(?=📌)/).filter(b => b.trim()).map((block, i) => {
-            const lines = block.trim().split('\n').filter(l => l.trim());
+    // Render conversation log entries
+    const renderConversationLog = () => {
+        if (!conversationLog) return null;
+
+        // Split by entry markers (📌, ❓, 💡)
+        const entries = conversationLog.split(/(?=📌|❓|💡)/).filter(e => e.trim());
+
+        return entries.map((entry, i) => {
+            const isQuestion = entry.startsWith('❓');
+            const isAnswer = entry.startsWith('💡');
+            const isInfo = entry.startsWith('📌');
+
+            const lines = entry.trim().split('\n').filter(l => l.trim());
             const title = lines[0] || '';
-            const body = lines.slice(1).join(' ').trim();
+            const body = lines.slice(1).join('\n').trim();
+
+            let bgClass = 'bg-gray-800/30';
+            let borderClass = 'border-gray-700/30';
+            let titleColor = 'text-gray-200';
+
+            if (isQuestion) {
+                bgClass = 'bg-amber-900/20';
+                borderClass = 'border-amber-500/30';
+                titleColor = 'text-amber-300';
+            } else if (isAnswer) {
+                bgClass = 'bg-emerald-900/20';
+                borderClass = 'border-emerald-500/30';
+                titleColor = 'text-emerald-300';
+            }
+
             return (
-                <div key={i} className="mb-3 last:mb-0">
-                    <div className="text-sm font-semibold text-gray-200 leading-snug">{title}</div>
-                    {body && <div className="text-xs text-gray-400 leading-relaxed mt-0.5">{body}</div>}
+                <div key={i} className={`mb-3 last:mb-0 rounded-lg ${bgClass} border ${borderClass} px-4 py-3`}>
+                    <div className={`text-sm font-semibold ${titleColor} leading-snug`}>{title}</div>
+                    {body && (
+                        <div className="text-sm text-gray-300 leading-relaxed mt-1" style={{ whiteSpace: 'pre-line' }}>
+                            {body}
+                        </div>
+                    )}
                 </div>
             );
         });
@@ -141,82 +174,56 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT: Translation (stable, block-based) */}
-                <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden flex flex-col">
-                    <div
-                        ref={scrollRef}
-                        className="flex-1 overflow-y-auto scroll-smooth px-6 py-5"
-                    >
+                {/* LEFT: Subtitles (identical to SIMPLE) */}
+                <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden">
+                    <div ref={scrollRef} className="h-full overflow-y-auto scroll-smooth px-6 py-5">
                         {displayedText ? (
                             <div className="space-y-3">
                                 {renderBlocks()}
-                                {isListening && (
-                                    <div className="mt-2 text-emerald-400 animate-pulse text-lg">▊</div>
-                                )}
+                                {isListening && <div className="mt-2 text-emerald-400 animate-pulse text-lg">▊</div>}
                             </div>
                         ) : (
                             <div className="flex items-center justify-center h-full">
-                                <p className="text-gray-600 text-sm">
-                                    {isListening ? 'Слухаю інтерв\'юера...' : 'Натисніть Start'}
-                                </p>
+                                <p className="text-gray-600 text-sm">{isListening ? 'Слухаю інтерв\'юера...' : 'Натисніть Start'}</p>
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* RIGHT: Answer + Topics */}
+                {/* RIGHT: Conversation Log */}
                 <div className="flex-1 basis-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col">
-                    {/* Answer section */}
-                    <div className="shrink-0 border-b border-gray-800/30 px-5 py-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-bold">Відповідь</span>
-                            {isGeneratingAnswer && (
-                                <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                    AI
-                                </span>
-                            )}
-                        </div>
-
-                        {generatedAnswer ? (
-                            <div className="space-y-2">
-                                <div className="text-base font-semibold text-emerald-300 leading-relaxed">
-                                    {generatedAnswer}
-                                </div>
-                                {answerTranslation && (
-                                    <div className="text-sm text-gray-400 italic">{answerTranslation}</div>
-                                )}
-                            </div>
-                        ) : isGeneratingAnswer ? (
-                            <div className="space-y-2">
-                                <div className="animate-pulse bg-emerald-700/20 rounded h-5 w-full" />
-                                <div className="animate-pulse bg-emerald-700/20 rounded h-5 w-2/3" />
-                                <p className="text-[10px] text-emerald-500/50 mt-2">Генерую відповідь...</p>
-                            </div>
-                        ) : containsQuestion ? (
-                            <div className="text-sm text-amber-300">
-                                Виявлено питання ({questionConfidence}%) — відповідь після паузи
-                            </div>
-                        ) : (
-                            <div className="text-sm text-gray-600 italic">Очікую питання...</div>
-                        )}
-                    </div>
-
-                    {/* Topics section */}
-                    <div className="flex-1 overflow-y-auto px-5 py-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">Структура</span>
-                            {isProcessingTopics && (
+                    <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-gray-800/20">
+                        <span className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Хід розмови</span>
+                        <div className="flex items-center gap-2">
+                            {isProcessingConversation && (
                                 <span className="flex items-center gap-1 text-[9px] text-purple-400">
                                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
                                     AI
                                 </span>
                             )}
+                            {isGeneratingAnswer && (
+                                <span className="flex items-center gap-1 text-[9px] text-emerald-400">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    Відповідь
+                                </span>
+                            )}
                         </div>
-                        {topicSummary ? renderTopics() : (
-                            <p className="text-gray-700 text-xs italic">
-                                {wordCount > 0 ? 'Аналізую...' : 'Теми з\'являться тут'}
-                            </p>
+                    </div>
+
+                    <div ref={logScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+                        {conversationLog ? (
+                            renderConversationLog()
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <div className="text-center space-y-2">
+                                    <p className="text-gray-600 text-sm">
+                                        {wordCount > 0 ? 'Аналізую розмову...' : 'Тут з\'явиться хід розмови'}
+                                    </p>
+                                    <p className="text-gray-700 text-xs">
+                                        📌 інфо · ❓ питання · 💡 відповідь
+                                    </p>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -228,13 +235,6 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                     {wordCount > 0 && <span className="text-gray-400 font-mono">{wordCount} слів</span>}
                     {sessionDuration > 0 && <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>}
                     <span className={method.color}>{method.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                        speechType === 'QUESTION' ? 'bg-amber-500/20 text-amber-300' :
-                        speechType === 'INFO' ? 'bg-blue-500/20 text-blue-300' :
-                        'bg-gray-500/20 text-gray-400'
-                    }`}>
-                        {speechType === 'QUESTION' ? '❓' : speechType === 'INFO' ? 'ℹ️' : '🎤'} {speechType}
-                    </span>
                 </div>
                 <div className="flex items-center gap-3">
                     {isListening && (

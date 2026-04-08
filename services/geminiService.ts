@@ -370,6 +370,153 @@ export async function generateTopicSummary(
     }
 }
 
+// ========== INTERVIEW CONVERSATION ANALYZER (Flash-Lite) ==========
+
+const INTERVIEW_ANALYZER_PROMPT = `Ти асистент на співбесіді. Аналізуєш норвезьке мовлення інтерв'юера і ведеш хронологію розмови УКРАЇНСЬКОЮ.
+
+ДВА ТИПИ ЗАПИСІВ:
+
+1. 📌 ІНФО — коли інтерв'юер розповідає (про компанію, умови, проект):
+📌 **Заголовок**
+Короткий зміст 1-2 реченнями.
+
+2. ❓ ПИТАННЯ — коли інтерв'юер ставить питання кандидату:
+❓ **Питання кандидату**
+Точне формулювання питання українською.
+
+ПРАВИЛА:
+- Пиши ТІЛЬКИ записи (📌 або ❓), нічого іншого
+- Нові записи ДОДАВАЙ в кінець, старі НЕ змінюй
+- Питання розпізнавай за інтонацією (? в тексті) та змістом ("розкажи про себе", "які твої", "чому ти", "що ти думаєш")
+- Максимум 10 записів
+- Прямою мовою, без "Спікер каже..."`;
+
+export interface ConversationEntry {
+    type: 'info' | 'question';
+    text: string;
+    timestamp?: number;
+}
+
+/**
+ * Analyze interview conversation — detect topics and questions.
+ * Returns structured conversation log.
+ */
+export async function analyzeConversation(
+    norwegianText: string,
+    existingLog: string,
+    signal?: AbortSignal
+): Promise<{ log: string; hasNewQuestion: boolean; lastQuestion: string }> {
+    if (!ai || !norwegianText.trim()) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
+
+    try {
+        const userPrompt = existingLog
+            ? `ПОТОЧНИЙ ЛОГ:\n${existingLog}\n\nНОВИЙ ТЕКСТ (норвезька):\n${norwegianText}\n\nОновлений лог:`
+            : `ТЕКСТ (норвезька):\n${norwegianText}\n\nЛог розмови:`;
+
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL_LITE,
+            contents: userPrompt,
+            config: {
+                systemInstruction: INTERVIEW_ANALYZER_PROMPT,
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.1,
+                maxOutputTokens: 400,
+            }
+        });
+
+        if (signal?.aborted) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
+
+        const text = response?.text?.trim() || existingLog || '';
+
+        // Detect if new question appeared
+        const existingQuestions = (existingLog || '').match(/❓/g)?.length || 0;
+        const newQuestions = text.match(/❓/g)?.length || 0;
+        const hasNewQuestion = newQuestions > existingQuestions;
+
+        // Extract last question text
+        let lastQuestion = '';
+        if (hasNewQuestion) {
+            const questionBlocks = text.split('❓').filter(b => b.trim());
+            if (questionBlocks.length > 0) {
+                const lastBlock = questionBlocks[questionBlocks.length - 1].trim();
+                lastQuestion = lastBlock.split('\n').map(l => l.trim()).filter(l => l).join(' ');
+            }
+        }
+
+        return { log: text, hasNewQuestion, lastQuestion };
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            console.error('[ConversationAnalyzer] Error:', e?.message || e);
+        }
+        return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
+    }
+}
+
+/**
+ * Generate answer to interview question using candidate profile.
+ * Uses full Gemini Flash for quality.
+ */
+export async function generateInterviewAnswer(
+    question: string,
+    conversationContext: string,
+    resume: string,
+    knowledgeBase: string,
+    targetLanguage: string,
+    nativeLanguage: string,
+    signal?: AbortSignal
+): Promise<{ answer: string; answerTranslation: string }> {
+    if (!ai || !question.trim()) return { answer: '', answerTranslation: '' };
+
+    try {
+        const prompt = `Ти готуєш відповідь кандидата на співбесіді.
+
+ПИТАННЯ ІНТЕРВ'ЮЕРА: "${question}"
+
+КОНТЕКСТ РОЗМОВИ:
+${conversationContext.slice(-500)}
+
+ПРОФІЛЬ КАНДИДАТА:
+Резюме: ${resume?.slice(0, 1500) || '[не вказано]'}
+База знань: ${knowledgeBase?.slice(0, 1000) || '[не вказано]'}
+
+ЗАВДАННЯ:
+1. [ANSWER] — Відповідь мовою інтерв'ю (${targetLanguage}), 2-4 речення, професійно, на основі профілю кандидата
+2. [TRANSLATION] — Переклад відповіді на ${nativeLanguage}
+
+Формат:
+[ANSWER]
+відповідь мовою інтерв'ю
+[TRANSLATION]
+переклад`;
+
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: prompt,
+            config: {
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.4,
+                maxOutputTokens: 500,
+            }
+        });
+
+        if (signal?.aborted) return { answer: '', answerTranslation: '' };
+
+        const text = response?.text || '';
+        const answerMatch = text.match(/\[ANSWER\]\s*([\s\S]*?)(?:\[TRANSLATION\]|$)/i);
+        const translationMatch = text.match(/\[TRANSLATION\]\s*([\s\S]*?)$/i);
+
+        return {
+            answer: answerMatch?.[1]?.trim() || text.trim(),
+            answerTranslation: translationMatch?.[1]?.trim() || ''
+        };
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            console.error('[InterviewAnswer] Error:', e?.message || e);
+        }
+        return { answer: '', answerTranslation: '' };
+    }
+}
+
 // ========== STREAMING TRANSLATION (NEW) ==========
 
 export interface StreamingTranslationResult {

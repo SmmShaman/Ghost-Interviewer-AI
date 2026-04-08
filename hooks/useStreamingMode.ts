@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, analyzeConversation, generateInterviewAnswer } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -53,6 +53,11 @@ export interface StreamingState {
     // Topic structuring (Flash-Lite)
     topicSummary: string;
     isProcessingTopics: boolean;
+
+    // Interview conversation log (FOCUS mode)
+    conversationLog: string;
+    lastDetectedQuestion: string;
+    isProcessingConversation: boolean;
 
     // Processing flags
     isListening: boolean;
@@ -132,6 +137,9 @@ export function useStreamingMode(
         strategy: '',
         topicSummary: '',
         isProcessingTopics: false,
+        conversationLog: '',
+        lastDetectedQuestion: '',
+        isProcessingConversation: false,
         isGeneratingAnswer: false,
         isAnalyzing: false,
         isListening: false,
@@ -780,6 +788,91 @@ export function useStreamingMode(
         }
     }, [executeTopicSummary]);
 
+    // === CONVERSATION ANALYZER (FOCUS mode) ===
+
+    const conversationAbortRef = useRef<AbortController | null>(null);
+    const answerAbortRef = useRef<AbortController | null>(null);
+
+    const executeConversationAnalysis = useCallback(async () => {
+        const currentOriginal = originalTextRef.current;
+        const currentContext = contextRef.current;
+        if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 10) return;
+        if (currentContext.viewMode !== 'FOCUS') return; // Only in FOCUS mode
+
+        if (conversationAbortRef.current) conversationAbortRef.current.abort();
+        conversationAbortRef.current = new AbortController();
+
+        setState(prev => ({ ...prev, isProcessingConversation: true }));
+
+        try {
+            const result = await analyzeConversation(
+                currentOriginal,
+                state.conversationLog,
+                conversationAbortRef.current.signal
+            );
+
+            debugLogger.log('CONV', `q=${result.hasNewQuestion} | ${result.lastQuestion.substring(0, 40)}`, undefined, currentOriginal.split(/\s+/).length);
+
+            setState(prev => ({
+                ...prev,
+                conversationLog: result.log,
+                lastDetectedQuestion: result.hasNewQuestion ? result.lastQuestion : prev.lastDetectedQuestion,
+                isProcessingConversation: false
+            }));
+
+            // If new question detected — generate answer from candidate profile
+            if (result.hasNewQuestion && result.lastQuestion) {
+                generateAnswerForQuestion(result.lastQuestion, result.log);
+            }
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('[Conversation] Error:', e);
+            setState(prev => ({ ...prev, isProcessingConversation: false }));
+        }
+    }, [state.conversationLog]);
+
+    const generateAnswerForQuestion = useCallback(async (question: string, conversationContext: string) => {
+        const ctx = contextRef.current;
+
+        if (answerAbortRef.current) answerAbortRef.current.abort();
+        answerAbortRef.current = new AbortController();
+
+        setState(prev => ({ ...prev, isGeneratingAnswer: true }));
+        debugLogger.log('ANSWER_START', question.substring(0, 50));
+
+        try {
+            const result = await generateInterviewAnswer(
+                question,
+                conversationContext,
+                ctx.resume || '',
+                ctx.knowledgeBase || '',
+                ctx.targetLanguage || 'Norwegian',
+                ctx.nativeLanguage || 'Ukrainian',
+                answerAbortRef.current.signal
+            );
+
+            debugLogger.log('ANSWER', result.answer.substring(0, 50));
+
+            // Append answer to conversation log
+            setState(prev => ({
+                ...prev,
+                generatedAnswer: result.answer,
+                answerTranslation: result.answerTranslation,
+                conversationLog: prev.conversationLog + `\n\n💡 **Відповідь:**\n${result.answerTranslation || result.answer}`,
+                isGeneratingAnswer: false
+            }));
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('[Answer] Error:', e);
+            setState(prev => ({ ...prev, isGeneratingAnswer: false }));
+        }
+    }, []);
+
+    // Trigger conversation analysis alongside topics (for FOCUS mode)
+    const triggerConversationOnBlock = useCallback(() => {
+        if (contextRef.current.viewMode === 'FOCUS') {
+            executeConversationAnalysis();
+        }
+    }, [executeConversationAnalysis]);
+
     // === PUBLIC API ===
 
     /**
@@ -937,9 +1030,12 @@ export function useStreamingMode(
         triggerTopicOnBlock();
         scheduleTopicSummary();
 
+        // Conversation analysis (FOCUS mode): detect questions
+        triggerConversationOnBlock();
+
         // Schedule freeze flush (3s pause → move active to frozen)
         scheduleFreezeFLush();
-    }, [executeGhostTranslation, scheduleLLMTranslation, triggerTopicOnBlock, scheduleTopicSummary, scheduleFreezeFLush]);
+    }, [executeGhostTranslation, scheduleLLMTranslation, triggerTopicOnBlock, scheduleTopicSummary, triggerConversationOnBlock, scheduleFreezeFLush]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -1078,6 +1174,9 @@ export function useStreamingMode(
             strategy: '',
             topicSummary: '',
             isProcessingTopics: false,
+            conversationLog: '',
+            lastDetectedQuestion: '',
+            isProcessingConversation: false,
             isGeneratingAnswer: false,
             isAnalyzing: false,
             isListening: true,

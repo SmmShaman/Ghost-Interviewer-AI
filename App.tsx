@@ -1755,8 +1755,9 @@ const App: React.FC = () => {
                  isGeneratingAnswer={streamingMode.state.isGeneratingAnswer}
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
-                 topicSummary={streamingMode.state.topicSummary}
-                 isProcessingTopics={streamingMode.state.isProcessingTopics}
+                 conversationLog={streamingMode.state.conversationLog}
+                 lastDetectedQuestion={streamingMode.state.lastDetectedQuestion}
+                 isProcessingConversation={streamingMode.state.isProcessingConversation}
              />
          )}
 
