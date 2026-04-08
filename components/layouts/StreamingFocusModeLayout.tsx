@@ -238,7 +238,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
 
                     <div ref={logScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
                         {conversationLog ? (
-                            renderConversationLog()
+                            (() => { try { return renderConversationLog(); } catch (e) { return <p className="text-red-400 text-xs">Render error: {String(e)}</p>; } })()
                         ) : (
                             <div className="flex items-center justify-center h-full">
                                 <div className="text-center space-y-2">
