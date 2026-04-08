@@ -1077,7 +1077,10 @@ export function useStreamingMode(
             clearTimeout(interimGhostTimerRef.current);
         }
 
-        if (displayText.trim() && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
+        // Skip interim translation for SIMPLE/FOCUS — only show cursor, no flickering
+        // FULL mode may need interim translation for real-time display
+        const mode = contextRef.current.viewMode;
+        if (displayText.trim() && mode === 'FULL' && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
             interimGhostTimerRef.current = setTimeout(async () => {
                 try {
                     const wordsToTranslate = displayText.split(/\s+/);
