@@ -105,7 +105,10 @@ export function useStreamingMode(
     options: UseStreamingModeOptions = {}
 ) {
     // Resolve speed preset from context
-    const speedPreset: SpeedPresetConfig = SPEED_PRESETS[context.speedPreset || 'interview'];
+    // FOCUS mode: always use youtube preset for translation quality (big batches)
+    // but conversation analyzer still runs (detects questions)
+    const presetId = context.viewMode === 'FOCUS' ? 'youtube' : (context.speedPreset || 'interview');
+    const speedPreset: SpeedPresetConfig = SPEED_PRESETS[presetId];
 
     const opts = {
         ...DEFAULT_OPTIONS,
@@ -1218,8 +1221,9 @@ export function useStreamingMode(
         metricsCollector.startSession();
         debugLogger.startSession();
         // Use contextRef for fresh values (startSession has [] deps = stale closure)
-        const currentPreset = SPEED_PRESETS[contextRef.current.speedPreset || 'interview'];
-        debugLogger.log('PRESET', `${contextRef.current.speedPreset || 'interview'} | holdN=${currentPreset.holdN} ghostDb=${currentPreset.ghostDebounceMs}ms llm=${currentPreset.llmEnabled} activeWin=${currentPreset.activeWindowWords}`);
+        const effectivePresetId = contextRef.current.viewMode === 'FOCUS' ? 'youtube' : (contextRef.current.speedPreset || 'interview');
+        const currentPreset = SPEED_PRESETS[effectivePresetId];
+        debugLogger.log('PRESET', `${effectivePresetId} (mode=${contextRef.current.viewMode}) | holdN=${currentPreset.holdN} ghostDb=${currentPreset.ghostDebounceMs}ms llm=${currentPreset.llmEnabled} activeWin=${currentPreset.activeWindowWords}`);
 
         console.log('🎙️ [StreamingMode] Session started');
     }, []);
