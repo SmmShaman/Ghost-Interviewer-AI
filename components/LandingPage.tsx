@@ -7,15 +7,40 @@ import { useAudioDevices } from '../hooks/useAudioDevices';
 import type { GoogleUser } from '../services/apiClient.ts';
 
 // Tooltip component — hover over ? to see explanation
-// Uses group/tip to avoid conflicts with parent group classes
-const Tip: React.FC<{ text: string; color?: string }> = ({ text, color = 'gray' }) => (
-    <span className="relative group/tip inline-flex ml-1.5 cursor-help" onClick={(e) => e.stopPropagation()}>
-        <span className={`w-4 h-4 rounded-full border border-${color}-500/40 text-${color}-400 text-[9px] flex items-center justify-center shrink-0`}>?</span>
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-200 z-[100] shadow-2xl pointer-events-none text-left font-normal normal-case tracking-normal">
-            {text}
+// Uses fixed positioning to escape any overflow:hidden containers
+const Tip: React.FC<{ text: string; color?: string }> = ({ text, color = 'gray' }) => {
+    const [show, setShow] = React.useState(false);
+    const [pos, setPos] = React.useState({ top: 0, left: 0 });
+    const ref = React.useRef<HTMLSpanElement>(null);
+
+    const handleEnter = () => {
+        if (ref.current) {
+            const rect = ref.current.getBoundingClientRect();
+            setPos({ top: rect.top - 8, left: rect.left + rect.width / 2 });
+        }
+        setShow(true);
+    };
+
+    return (
+        <span
+            ref={ref}
+            className="inline-flex ml-1.5 cursor-help"
+            onMouseEnter={handleEnter}
+            onMouseLeave={() => setShow(false)}
+            onClick={(e) => e.stopPropagation()}
+        >
+            <span className={`w-4 h-4 rounded-full border border-${color}-500/40 text-${color}-400 text-[9px] flex items-center justify-center shrink-0`}>?</span>
+            {show && (
+                <span
+                    className="fixed w-64 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 leading-relaxed shadow-2xl text-left font-normal normal-case tracking-normal"
+                    style={{ top: pos.top, left: pos.left, transform: 'translate(-50%, -100%)', zIndex: 9999 }}
+                >
+                    {text}
+                </span>
+            )}
         </span>
-    </span>
-);
+    );
+};
 
 interface LandingPageProps {
     context: InterviewContext;
