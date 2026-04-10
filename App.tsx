@@ -19,6 +19,7 @@ import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
 import { useStreamingMode } from './hooks/useStreamingMode';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
+import { useAudioPassthrough } from './hooks/useAudioPassthrough';
 import {
     BLOCK_CONFIG,
     LLM_CONFIG,
@@ -68,6 +69,7 @@ const App: React.FC = () => {
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [inputLevel, setInputLevel] = useState(0); // For candidate visualizer
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [debugLog, setDebugLog] = useState<string[]>([]); // Debug overlay log
 
   // PENDING LLM BLOCKS: Visual queue for center column
   // Shows blocks at different stages: collecting → processing → completed
@@ -90,6 +92,14 @@ const App: React.FC = () => {
 
   // GOOGLE AUTH HOOK: Optional sign-in for cloud sync
   const googleAuth = useGoogleAuth();
+
+  // AUDIO PASSTHROUGH HOOK: Routes VB-Cable audio to selected output device
+  const isVBCablePreset = ['headphones-youtube', 'headphones-interview'].includes(context.activeAudioPreset);
+  const audioPassthrough = useAudioPassthrough({
+    inputDeviceId: context.audioDeviceId,
+    outputDeviceId: context.listenThroughDeviceId || '',
+    enabled: isVBCablePreset && !!context.listenThroughDeviceId,
+  });
 
   // STREAMING MODE HOOK: Manages accumulated text and translations
   // Speed preset controls llmTriggerWords/llmPauseMs — don't override here
@@ -119,6 +129,19 @@ const App: React.FC = () => {
   const audioHistoryRef = useRef<{left: number, right: number}[]>([]); // Stores recent volume levels
   const streamRef = useRef<MediaStream | null>(null);
   const speechStreamRef = useRef<MediaStream | null>(null); // Stream for SpeechRecognition (Chrome 135+)
+  const lastSpeechEventTimeRef = useRef<number>(0); // Watchdog: track last speech event
+  const watchdogTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRestartingRef = useRef<boolean>(false); // Prevent double-restart race condition
+
+  // Debug logger - writes to UI overlay
+  const debugLogRef = useRef<string[]>([]);
+  const addDebug = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const line = `[${ts}] ${msg}`;
+    console.log(line);
+    debugLogRef.current = [...debugLogRef.current.slice(-19), line];
+    setDebugLog([...debugLogRef.current]);
+  }, []);
 
   // --- SPEECH BUFFERING REFS (Delta Tracking Pattern) ---
   // Web Speech API gives FULL accumulated text each time, not deltas
@@ -887,6 +910,7 @@ const App: React.FC = () => {
         // DELTA TRACKING: Web Speech API gives FULL accumulated text
         // We extract only NEW words by tracking committedWordCountRef
         const eventTime = performance.now();
+        lastSpeechEventTimeRef.current = Date.now(); // Watchdog timestamp
 
         // Build FULL text from all results (final + interim)
         let fullFinalText = '';
@@ -921,48 +945,44 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // STREAMING: Add words continuously to accumulator
-            // No block splitting - just accumulate
+            // STREAMING: committedWordCountRef ONLY tracks API final words
+            // forceCommittedInterimRef tracks interim words already sent to addWords
             if (fullFinalText.trim()) {
-                // Only add finalized words (not interim) to avoid duplicates
                 const finalWords = fullFinalText.trim().split(/\s+/);
                 const newFinalWords = finalWords.slice(committedWordCountRef.current);
+
                 if (newFinalWords.length > 0) {
-                    streamingModeRef.current?.addWords(newFinalWords.join(' '));
+                    if (forceCommittedInterimRef.current > 0) {
+                        // Some finals overlap with force-committed interim — skip those
+                        const trulyNew = newFinalWords.length > forceCommittedInterimRef.current
+                            ? newFinalWords.slice(forceCommittedInterimRef.current)
+                            : [];
+                        forceCommittedInterimRef.current = Math.max(0, forceCommittedInterimRef.current - newFinalWords.length);
+                        if (trulyNew.length > 0) {
+                            streamingModeRef.current?.addWords(trulyNew.join(' '));
+                            addDebug(`🌊 +${trulyNew.length} new finals (skipped ${newFinalWords.length - trulyNew.length} overlap, force=${forceCommittedInterimRef.current})`);
+                        } else {
+                            addDebug(`🔄 API caught up ${newFinalWords.length} words (force=${forceCommittedInterimRef.current})`);
+                        }
+                    } else {
+                        streamingModeRef.current?.addWords(newFinalWords.join(' '));
+                        addDebug(`🌊 +${newFinalWords.length} final words (committed=${finalWords.length})`);
+                    }
                     committedWordCountRef.current = finalWords.length;
-                    // IMPORTANT: Reset force-committed interim counter when API finalizes
-                    // This prevents delta tracking from getting out of sync
-                    forceCommittedInterimRef.current = 0;
-                    console.log(`🌊 [${Math.round(performance.now())}ms] STREAMING: Added ${newFinalWords.length} words (reset interim tracker)`);
 
                     // Clear forced finalization timer - we got real finals
                     if (forcedFinalizationTimerRef.current) {
                         clearTimeout(forcedFinalizationTimerRef.current);
                         forcedFinalizationTimerRef.current = null;
                     }
-                } else if (finalWords.length > 0 && forceCommittedInterimRef.current > 0) {
-                    // FIX #2: API finalized words we already force-committed
-                    // Adjust forceCommittedInterimRef: words that moved from interim to final
-                    // are no longer in interim, so reduce our interim tracking accordingly
-                    const wordsMovedToFinal = finalWords.length - (committedWordCountRef.current - forceCommittedInterimRef.current);
-                    if (wordsMovedToFinal > 0) {
-                        const oldForceCommitted = forceCommittedInterimRef.current;
-                        forceCommittedInterimRef.current = Math.max(0, forceCommittedInterimRef.current - wordsMovedToFinal);
-                        committedWordCountRef.current = finalWords.length;
-                        console.log(`🔄 [API_CATCH_UP] ${wordsMovedToFinal} force-committed words moved to final. forceCommittedInterimRef: ${oldForceCommitted} → ${forceCommittedInterimRef.current}`);
-                    }
                 }
+                // If no new finals: don't touch forceCommittedInterimRef — API hasn't caught up
             }
 
             // DELTA TRACKING for interim: Only count NEW interim words (after force-committed ones)
-            // This MUST be calculated BEFORE setInterimText to show only uncommitted words
             const allInterimWords = currentInterim.trim().split(/\s+/).filter(w => w);
-
-            // FIX #2b: Clamp forceCommittedInterimRef if interim "shrank" (safety check)
-            // This handles edge cases where API behavior differs from our expectations
             const effectiveForceCommitted = Math.min(forceCommittedInterimRef.current, allInterimWords.length);
             if (effectiveForceCommitted < forceCommittedInterimRef.current) {
-                console.log(`🔄 [INTERIM_SHRINK] Interim has ${allInterimWords.length} words but forceCommittedInterimRef was ${forceCommittedInterimRef.current}. Clamping to ${effectiveForceCommitted}`);
                 forceCommittedInterimRef.current = effectiveForceCommitted;
             }
 
@@ -970,32 +990,20 @@ const App: React.FC = () => {
             const newInterimWordCount = newInterimWords.length;
             const newInterimText = newInterimWords.join(' ');
 
-            // REAL-TIME INTERIM: Update interim text for smooth subtitle-like display
-            // CRITICAL: Only show UNCOMMITTED interim words (after force-committed ones)
-            // Otherwise, words that were force-finalized will appear duplicated in interim zone
             streamingModeRef.current?.setInterimText(newInterimText);
-
-            // Update legacy interim display (for compatibility) - also use uncommitted text
             setInterimTranscript(newInterimText);
 
-            // FORCED FINALIZATION: Two triggers to prevent text getting stuck in interim:
-            // 1. MAX_INTERIM_WORDS: Force finalize when interim exceeds limit (for continuous speech)
-            // 2. PAUSE_TIMEOUT: Force finalize after 1.5s pause (for natural speech)
-            // SIMPLE/FOCUS: bigger batches (12) for translation quality
-            // FULL: smaller batches (7) for faster LLM response
+            // FORCED FINALIZATION: MAX_INTERIM_WORDS or PAUSE_TIMEOUT
             const MAX_INTERIM_WORDS = context.viewMode === 'FULL' ? 7 : 12;
 
             if (currentInterim.trim()) {
                 lastInterimTextRef.current = currentInterim;
 
-                // TRIGGER 1: MAX WORDS - Force finalize immediately if too many NEW interim words
-                // This handles continuous speech without pauses (like videos)
                 if (newInterimWordCount >= MAX_INTERIM_WORDS) {
-                    console.log(`📦 [MAX_WORDS] Force finalizing ${newInterimWordCount} NEW interim words (total interim: ${allInterimWords.length}, already committed: ${forceCommittedInterimRef.current})`);
+                    addDebug(`📦 FREEZE ${newInterimWordCount} interim (force=${forceCommittedInterimRef.current} committed=${committedWordCountRef.current})`);
                     streamingModeRef.current?.addWords(newInterimText);
-                    // Track force-finalized interim words for delta tracking
+                    // Track force-finalized — do NOT increment committedWordCountRef (API only)
                     forceCommittedInterimRef.current = allInterimWords.length;
-                    committedWordCountRef.current += newInterimWordCount;
                     lastInterimTextRef.current = '';
                     streamingModeRef.current?.setInterimText('');
                     setInterimTranscript('');
@@ -1025,11 +1033,10 @@ const App: React.FC = () => {
 
                         if (newInterimWords.length > 0) {
                             const newInterimText = newInterimWords.join(' ');
-                            console.log(`⏰ [PAUSE] Finalizing ${newInterimWords.length} NEW interim words after 1.5s pause (total: ${allInterimWords.length}, effective committed: ${effectiveForceCommitted})`);
+                            addDebug(`⏰ PAUSE freeze ${newInterimWords.length} words (force=${forceCommittedInterimRef.current})`);
                             streamingModeRef.current?.addWords(newInterimText);
-                            // Update tracking refs
+                            // Do NOT increment committedWordCountRef — API only
                             forceCommittedInterimRef.current = allInterimWords.length;
-                            committedWordCountRef.current += newInterimWords.length;
                             lastInterimTextRef.current = '';
                             streamingModeRef.current?.setInterimText(''); // Clear interim display
                             setInterimTranscript('');
@@ -1097,19 +1104,72 @@ const App: React.FC = () => {
         }
       };
 
+      const restartWithTrack = async () => {
+        if (isRestartingRef.current) return;
+        isRestartingRef.current = true;
+        try {
+          let track = speechStreamRef.current?.getAudioTracks()[0];
+
+          // If track is dead, recreate from selected device
+          if (!track || track.readyState !== 'live') {
+            const deviceId = contextRef.current.audioDeviceId;
+            if (deviceId) {
+              try {
+                if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
+                const stream = await navigator.mediaDevices.getUserMedia({
+                  audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                });
+                speechStreamRef.current = stream;
+                track = stream.getAudioTracks()[0];
+                addDebug(`▶️ recreated track: ${track.label.slice(0, 30)}`);
+              } catch (e) {
+                addDebug(`▶️ track recreate failed, using default`);
+                track = undefined;
+              }
+            }
+          }
+
+          if (track && track.readyState === 'live') {
+            recognition.start(track);
+            addDebug(`▶️ restarted with: ${track.label.slice(0, 30)}`);
+          } else {
+            recognition.start();
+            addDebug(`▶️ restarted with default mic`);
+          }
+        } catch (e: any) {
+          if (!e.message?.includes('already started')) {
+            addDebug(`▶️ restart error: ${e.message}`);
+          }
+        } finally {
+          setTimeout(() => { isRestartingRef.current = false; }, 500);
+        }
+      };
+
       recognition.onerror = (event: any) => {
-        if (event.error === 'no-speech') return;
-        console.warn("Speech recognition error:", event.error);
+        if (event.error === 'no-speech') {
+            addDebug(`⚠️ no-speech — restarting`);
+            if (shouldBeListening.current) {
+                setTimeout(() => { try { restartWithTrack(); } catch(e) {} }, 100);
+            }
+            return;
+        }
+        addDebug(`❌ Speech error: ${event.error}`);
         if (shouldBeListening.current && event.error !== 'aborted') {
-            setTimeout(() => { try { recognition.start(); } catch(e) {} }, 100);
+            setTimeout(() => { try { restartWithTrack(); } catch(e) {} }, 100);
         }
       };
 
       recognition.onend = () => {
+        addDebug(`🔚 recognition.onend — shouldListen=${shouldBeListening.current}`);
         if (shouldBeListening.current) {
-            try { recognition.start(); } catch (e) {
-                setTimeout(() => { if (shouldBeListening.current) try { recognition.start(); } catch(e) {} }, 200);
-            }
+            // Wait briefly before restart — give Google servers time to reset connection
+            setTimeout(() => {
+              if (!shouldBeListening.current) return;
+              lastSpeechEventTimeRef.current = Date.now(); // Reset watchdog timer
+              try { restartWithTrack(); } catch (e) {
+                setTimeout(() => { if (shouldBeListening.current) try { restartWithTrack(); } catch(e) {} }, 1000);
+              }
+            }, 500);
         } else {
             setAppState(AppState.IDLE);
         }
@@ -1243,6 +1303,32 @@ const App: React.FC = () => {
     }
   }, [context.targetLanguage]);
 
+  // Dynamic Audio Device Update — restart recognition when preset changes during session
+  useEffect(() => {
+    if (!shouldBeListening.current || !recognitionRef.current) return;
+    const deviceId = context.audioDeviceId;
+    addDebug(`🔄 audioDeviceId changed: ${deviceId ? deviceId.slice(0, 12) + '...' : 'default'}`);
+    // Stop current recognition — onend will restart with new device via restartWithTrack
+    try { recognitionRef.current.stop(); } catch (e) {}
+    // Force recreate stream with new device
+    if (deviceId) {
+      navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+      }).then(stream => {
+        if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
+        speechStreamRef.current = stream;
+        addDebug(`🔄 new stream: ${stream.getAudioTracks()[0]?.label.slice(0, 30)}`);
+      }).catch(e => {
+        addDebug(`🔄 stream failed: ${e.message}`);
+      });
+    } else {
+      if (speechStreamRef.current) {
+        speechStreamRef.current.getTracks().forEach(t => t.stop());
+        speechStreamRef.current = null;
+      }
+    }
+  }, [context.audioDeviceId]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, interimTranscript]);
@@ -1264,11 +1350,24 @@ const App: React.FC = () => {
       }
 
       try {
-          // Chrome 135+: Use MediaStreamTrack to select specific audio device
-          const deviceId = contextRef.current.audioDeviceId;
+          // Auto-detect VB-Cable if preset is selected but audioDeviceId is empty
+          let deviceId = contextRef.current.audioDeviceId;
+          if (!deviceId && contextRef.current.activeAudioPreset && contextRef.current.activeAudioPreset !== 'manual') {
+              try {
+                  const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                  tempStream.getTracks().forEach(t => t.stop());
+                  const allDevices = await navigator.mediaDevices.enumerateDevices();
+                  const cableOutput = allDevices.find(d => d.kind === 'audioinput' && d.label.toLowerCase().includes('cable output'));
+                  if (cableOutput) {
+                      deviceId = cableOutput.deviceId;
+                      handleContextChange({ ...contextRef.current, audioDeviceId: deviceId });
+                      addDebug(`🔌 Auto-detected: ${cableOutput.label}`);
+                  }
+              } catch (e) { /* ignore */ }
+          }
+          addDebug(`🎙️ START: device=${deviceId ? deviceId.slice(0,12)+'...' : 'default'} lang=${recognitionRef.current.lang}`);
           if (deviceId) {
               try {
-                  // Clean up previous speech stream
                   if (speechStreamRef.current) {
                       speechStreamRef.current.getTracks().forEach(t => t.stop());
                   }
@@ -1278,17 +1377,70 @@ const App: React.FC = () => {
                   speechStreamRef.current = stream;
                   const track = stream.getAudioTracks()[0];
                   recognitionRef.current.start(track);
-                  console.log(`🎙️ [${Math.round(performance.now())}ms] Started with device: ${track.label}`);
+                  addDebug(`🎙️ listening via: ${track.label}`);
               } catch (trackErr: any) {
-                  // Fallback: browser doesn't support MediaStreamTrack in start() or device unavailable
-                  console.warn(`⚠️ MediaStreamTrack start failed (${trackErr.message}), falling back to default mic`);
+                  addDebug(`⚠️ track failed: ${trackErr.message} — using default mic`);
                   recognitionRef.current.start();
               }
           } else {
               recognitionRef.current.start();
+              addDebug(`🎙️ listening via: default mic`);
           }
           shouldBeListening.current = true;
+          lastSpeechEventTimeRef.current = Date.now();
           setAppState(AppState.LISTENING);
+
+          // WATCHDOG: Auto-restart speech recognition if no events for 5 seconds
+          if (watchdogTimerRef.current) clearInterval(watchdogTimerRef.current);
+          watchdogTimerRef.current = setInterval(() => {
+              if (!shouldBeListening.current) {
+                  if (watchdogTimerRef.current) clearInterval(watchdogTimerRef.current);
+                  return;
+              }
+              const silenceMs = Date.now() - lastSpeechEventTimeRef.current;
+              if (silenceMs > 12000 && !isRestartingRef.current) {
+                  addDebug(`🐕 WATCHDOG: No events ${Math.round(silenceMs/1000)}s — force restart`);
+                  lastSpeechEventTimeRef.current = Date.now();
+                  isRestartingRef.current = true;
+                  try { recognitionRef.current?.stop(); } catch (e) {}
+                  // Wait for onend to fire, then restart if it didn't
+                  setTimeout(() => {
+                      isRestartingRef.current = false;
+                      if (!shouldBeListening.current || !recognitionRef.current) return;
+                      // Check if onend already restarted it (events should be flowing)
+                      if (Date.now() - lastSpeechEventTimeRef.current > 4000) {
+                          // onend didn't help — force direct restart
+                          const track = speechStreamRef.current?.getAudioTracks()[0];
+                          try {
+                              if (track && track.readyState === 'live') {
+                                  recognitionRef.current.start(track);
+                                  addDebug(`🐕 WATCHDOG: direct restart with track`);
+                              } else {
+                                  const deviceId = contextRef.current.audioDeviceId;
+                                  if (deviceId) {
+                                      navigator.mediaDevices.getUserMedia({
+                                          audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                                      }).then(stream => {
+                                          if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
+                                          speechStreamRef.current = stream;
+                                          const newTrack = stream.getAudioTracks()[0];
+                                          recognitionRef.current?.start(newTrack);
+                                          addDebug(`🐕 WATCHDOG: new track: ${newTrack.label}`);
+                                      }).catch(() => {
+                                          recognitionRef.current?.start();
+                                          addDebug(`🐕 WATCHDOG: fallback to default mic`);
+                                      });
+                                  } else {
+                                      recognitionRef.current.start();
+                                  }
+                              }
+                          } catch (e) {
+                              addDebug(`🐕 WATCHDOG: restart failed — ${(e as Error).message}`);
+                          }
+                      }
+                  }, 1000);
+              }
+          }, 3000);
       } catch(e: any) {
           if (e.name === 'InvalidStateError') {
               shouldBeListening.current = true;
@@ -1300,6 +1452,8 @@ const App: React.FC = () => {
   const stopListening = () => {
       console.log(`🛑 [${Math.round(performance.now())}ms] SESSION END: questionId=${sessionQuestionIdRef.current}`);
 
+      // Stop watchdog
+      if (watchdogTimerRef.current) { clearInterval(watchdogTimerRef.current); watchdogTimerRef.current = null; }
       shouldBeListening.current = false;
       try { recognitionRef.current?.stop(); } catch (e) {}
       // Clean up speech recognition stream (Chrome 135+ MediaStreamTrack)
@@ -1555,6 +1709,8 @@ const App: React.FC = () => {
         isSetupOpen={isSetupOpen}
         setIsSetupOpen={setIsSetupOpen}
         startSessionWithMode={startSessionWithMode}
+        listenThroughActive={audioPassthrough.isActive}
+        listenThroughError={audioPassthrough.error}
         googleUser={googleAuth.user}
         isAuthLoading={googleAuth.isLoading}
         onSignOut={googleAuth.signOut}
@@ -1603,7 +1759,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} />
+      <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} listenThroughActive={audioPassthrough.isActive} listenThroughError={audioPassthrough.error} />
 
       <div className={`flex justify-between items-center p-4 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
         <div className="flex items-center gap-4">
@@ -1631,6 +1787,7 @@ const App: React.FC = () => {
               onContextChange={handleContextChange}
               uiLang={uiLang}
               onOpenFullSettings={() => setIsSetupOpen(true)}
+              listenThroughActive={audioPassthrough.isActive}
             />
             <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
@@ -1842,6 +1999,14 @@ const App: React.FC = () => {
           </div>
       )}
 
+      {/* DEBUG OVERLAY */}
+      {debugLog.length > 0 && (
+        <div id="debug-overlay" className="fixed bottom-0 right-0 z-[9999] bg-black/90 border-t border-l border-yellow-500/50 px-2 py-1 max-h-[100px] w-[400px] overflow-y-auto font-mono text-[8px] leading-tight rounded-tl-lg">
+          {debugLog.map((line, i) => (
+            <div key={i} className={`${line.includes('❌') || line.includes('SAFETY') ? 'text-red-400' : line.includes('🐕') ? 'text-yellow-400' : line.includes('FREEZE') ? 'text-cyan-400' : 'text-green-400/70'}`}>{line}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

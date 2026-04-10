@@ -157,6 +157,7 @@ export interface InterviewContext {
   stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
   audioDeviceId: string; // Selected audio input device ID (empty = system default)
   activeAudioPreset: AudioPresetId; // Active audio routing preset
+  listenThroughDeviceId: string; // Output device for VB-Cable audio passthrough (empty = disabled)
   viewMode: ViewMode; // Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // Select local model type
   llmProvider: 'gemini'; // Cloud LLM Provider

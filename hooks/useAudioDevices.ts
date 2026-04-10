@@ -12,8 +12,10 @@ export interface ClassifiedDevice {
 export interface PresetInfo {
     id: AudioPresetId;
     available: boolean;
-    matchedDeviceId: string;
+    matchedDeviceId: string;       // Input device (CABLE Output)
     matchedDeviceLabel: string;
+    listenThroughDeviceId: string;  // Output device (Speakers/Headphones/Monitor)
+    listenThroughLabel: string;
     warning?: string;
 }
 
@@ -47,6 +49,7 @@ function findDeviceByType(devices: ClassifiedDevice[], ...types: DeviceType[]): 
 
 export function useAudioDevices() {
     const [rawDevices, setRawDevices] = useState<MediaDeviceInfo[]>([]);
+    const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
     const [classifiedDevices, setClassifiedDevices] = useState<ClassifiedDevice[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -61,8 +64,11 @@ export function useAudioDevices() {
 
             const devices = await navigator.mediaDevices.enumerateDevices();
             const audioInputs = devices.filter(d => d.kind === 'audioinput');
+            const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
             setRawDevices(audioInputs);
+            setOutputDevices(audioOutputs);
             setClassifiedDevices(audioInputs.map(classifyDevice));
+            console.log(`🔌 [AudioDevices] ${audioInputs.length} inputs, ${audioOutputs.length} outputs. VB-Cable: ${audioInputs.some(d => d.label.toLowerCase().includes('cable')) ? 'YES' : 'NO'}`);
         } catch (e) {
             console.error('Failed to enumerate audio devices', e);
         }
@@ -81,34 +87,50 @@ export function useAudioDevices() {
     const hasVoiceMeeter = classifiedDevices.some(d => d.type === 'voicemeeter');
     const hasAnyMic = classifiedDevices.length > 0;
 
+    // Find output device by pattern
+    const findOutput = useCallback((...patterns: string[]): { id: string; label: string } | null => {
+        for (const p of patterns) {
+            const found = outputDevices.find(d => d.label.toLowerCase().includes(p));
+            if (found) return { id: found.deviceId, label: found.label };
+        }
+        return null;
+    }, [outputDevices]);
+
     const getPresets = useCallback((): PresetInfo[] => {
-        // Headphones + YouTube: need Stereo Mix or VB-Cable to capture system audio
-        const systemCapture = findDeviceByType(classifiedDevices, 'vb-cable', 'stereo-mix', 'voicemeeter');
-        const headphonesYoutube: PresetInfo = systemCapture
-            ? { id: 'headphones-youtube', available: true, matchedDeviceId: systemCapture.device.deviceId, matchedDeviceLabel: systemCapture.friendlyName }
-            : { id: 'headphones-youtube', available: false, matchedDeviceId: '', matchedDeviceLabel: '', warning: 'vb-cable-needed' };
+        const vbCable = findDeviceByType(classifiedDevices, 'vb-cable', 'stereo-mix', 'voicemeeter');
+        const speakers = findOutput('speakers');
+        const headphones = findOutput('headphones');
+        const monitor = findOutput('phl', 'hdmi', 'monitor');
+        const noVBCable = { available: false, matchedDeviceId: '', matchedDeviceLabel: '', listenThroughDeviceId: '', listenThroughLabel: '', warning: 'vb-cable-needed' as const };
 
-        // Speakers: just use default mic, it picks up speaker sound
-        const speakers: PresetInfo = {
-            id: 'speakers', available: hasAnyMic, matchedDeviceId: '', matchedDeviceLabel: 'Default Microphone'
-        };
+        // 🔊 Speakers via VB-Cable: input=CABLE, output=Speakers
+        const speakersPreset: PresetInfo = vbCable && speakers
+            ? { id: 'speakers', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: speakers.id, listenThroughLabel: speakers.label }
+            : { id: 'speakers', ...noVBCable };
 
-        // Monitor speakers: same as speakers
-        const monitorSpeakers: PresetInfo = {
-            id: 'monitor-speakers', available: hasAnyMic, matchedDeviceId: '', matchedDeviceLabel: 'Default Microphone'
-        };
+        // 🎧 Headphones via VB-Cable: input=CABLE, output=Headphones
+        const headphonesPreset: PresetInfo = vbCable && headphones
+            ? { id: 'headphones-youtube', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: headphones.id, listenThroughLabel: headphones.label }
+            : { id: 'headphones-youtube', ...noVBCable };
 
-        // Interview mode: needs VB-Cable to route Teams/Zoom audio
-        const vbCable = findDeviceByType(classifiedDevices, 'vb-cable');
-        const headphonesInterview: PresetInfo = vbCable
-            ? { id: 'headphones-interview', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName }
-            : { id: 'headphones-interview', available: false, matchedDeviceId: '', matchedDeviceLabel: '', warning: 'vb-cable-required' };
+        // 🖥️ Monitor via VB-Cable: input=CABLE, output=Monitor
+        const monitorPreset: PresetInfo = vbCable && monitor
+            ? { id: 'monitor-speakers', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: monitor.id, listenThroughLabel: monitor.label }
+            : { id: 'monitor-speakers', ...noVBCable };
 
-        return [headphonesYoutube, speakers, monitorSpeakers, headphonesInterview];
-    }, [classifiedDevices, hasAnyMic]);
+        // 🎙️ Interview via VB-Cable: input=CABLE, output=Headphones (default for calls)
+        const interviewPreset: PresetInfo = vbCable && headphones
+            ? { id: 'headphones-interview', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: headphones.id, listenThroughLabel: headphones.label }
+            : vbCable && speakers
+                ? { id: 'headphones-interview', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: speakers.id, listenThroughLabel: speakers.label }
+                : { id: 'headphones-interview', ...noVBCable, warning: 'vb-cable-required' };
+
+        return [speakersPreset, headphonesPreset, monitorPreset, interviewPreset];
+    }, [classifiedDevices, outputDevices, findOutput]);
 
     return {
         rawDevices,
+        outputDevices,
         classifiedDevices,
         isLoading,
         refreshDevices: enumerate,

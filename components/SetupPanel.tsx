@@ -14,6 +14,8 @@ interface SetupPanelProps {
   isOpen: boolean;
   toggleOpen: () => void;
   uiLang: 'en' | 'uk';
+  listenThroughActive?: boolean;
+  listenThroughError?: string | null;
 }
 
 // Dropdown Section Component (expandable)
@@ -43,7 +45,7 @@ const DropdownSection: React.FC<{
   </div>
 );
 
-const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpen, toggleOpen, uiLang }) => {
+const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpen, toggleOpen, uiLang, listenThroughActive = false, listenThroughError = null }) => {
   const [showAudioGuide, setShowAudioGuide] = useState(false);
   const [showVMGuide, setShowVMGuide] = useState(false);
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
@@ -841,8 +843,12 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
               setSelectedDeviceId(ctx.audioDeviceId || '');
             }}
             presets={audioDevices.getPresets()}
+            outputDevices={audioDevices.outputDevices}
+            inputDevices={audioDevices.classifiedDevices}
             uiLang={uiLang}
             t={t}
+            listenThroughActive={listenThroughActive}
+            listenThroughError={listenThroughError}
           />
 
           {/* Manual Device Selection (collapsible) */}

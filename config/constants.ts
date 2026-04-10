@@ -123,6 +123,7 @@ export const DEFAULT_CONTEXT: InterviewContext = {
   stereoMode: false,
   audioDeviceId: '',
   activeAudioPreset: '',
+  listenThroughDeviceId: '',
   viewMode: 'FULL',
   ghostModel: 'opus',
   llmProvider: 'gemini',

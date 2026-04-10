@@ -57,7 +57,39 @@ export const translations = {
       presetVBCableNeeded: "Enable Stereo Mix in Windows Sound settings, or install VB-Cable (free): vb-audio.com/Cable/",
       presetVBCableRequired: "Install VB-Cable (free): vb-audio.com/Cable/ → restart PC",
       presetManualDevice: "Manual Device Selection",
+      presetShowSetup: "Setup Guide",
+      presetHideSetup: "Hide Guide",
+      presetSetupHeadphonesYoutube: [
+        "① Windows Sound → Output → set to «CABLE Input»",
+        "② Sound → Recording → «CABLE Output» → Properties → Listen → ✅ «Listen to this device» → select your Headphones",
+        "③ The app auto-selects «CABLE Output» as input",
+        "✦ Result: YouTube/video sound goes to the app AND your headphones simultaneously"
+      ],
+      presetSetupSpeakers: [
+        "① Windows Sound → Output → set to «Speakers»",
+        "② Place your microphone close to the speakers",
+        "③ The app uses your default microphone to pick up speaker audio",
+        "⚠ Increase speaker volume if recognition is poor"
+      ],
+      presetSetupMonitor: [
+        "① Windows Sound → Output → set to your monitor (e.g. «PHL 244E5 via HDMI»)",
+        "② Place your microphone close to the monitor speakers",
+        "③ The app uses your default microphone to pick up monitor audio",
+        "⚠ Monitor speakers are usually quiet — sit closer or increase volume"
+      ],
+      presetSetupInterview: [
+        "① In Teams/Zoom → Settings → Speaker → set to «CABLE Input»",
+        "② In Teams/Zoom → Settings → Microphone → keep your REAL mic (Webcam / Headset)",
+        "③ Sound → Recording → «CABLE Output» → Properties → Listen → ✅ «Listen to this device» → select your Headphones",
+        "④ The app auto-selects «CABLE Output» as input",
+        "✦ Result: Interviewer's voice goes to the app + your headphones. They hear your real mic."
+      ],
 
+      listenThrough: "Listen through",
+      listenThroughDesc: "Hear the audio in your headphones/speakers",
+      listenThroughNone: "None (use Windows settings)",
+      listenThroughActive: "Active",
+      listenThroughError: "Audio routing failed",
       inputSource: "APP INPUT SOURCE",
       defaultMic: "Default Microphone",
       testMic: "Test Input",
@@ -289,7 +321,39 @@ Example:
       presetVBCableNeeded: "Увімкніть Stereo Mix в налаштуваннях звуку Windows, або встановіть VB-Cable (безкоштовно): vb-audio.com/Cable/",
       presetVBCableRequired: "Встановіть VB-Cable (безкоштовно): vb-audio.com/Cable/ → перезавантажте ПК",
       presetManualDevice: "Ручний вибір пристрою",
+      presetShowSetup: "Інструкція",
+      presetHideSetup: "Сховати",
+      presetSetupHeadphonesYoutube: [
+        "① Звук Windows → Вивід → обрати «CABLE Input»",
+        "② Звук → Запис → «CABLE Output» → Властивості → Прослуховування → ✅ «Прослуховувати цей пристрій» → обрати навушники",
+        "③ Додаток автоматично обирає «CABLE Output» як вхід",
+        "✦ Результат: Звук YouTube/відео йде в додаток І в навушники одночасно"
+      ],
+      presetSetupSpeakers: [
+        "① Звук Windows → Вивід → обрати «Speakers (колонки)»",
+        "② Розмістіть мікрофон ближче до колонок",
+        "③ Додаток використовує мікрофон за замовчуванням для захоплення звуку",
+        "⚠ Збільшіть гучність колонок якщо розпізнавання слабке"
+      ],
+      presetSetupMonitor: [
+        "① Звук Windows → Вивід → обрати монітор (напр. «PHL 244E5 через HDMI»)",
+        "② Розмістіть мікрофон ближче до динаміків монітора",
+        "③ Додаток використовує мікрофон за замовчуванням для захоплення звуку",
+        "⚠ Динаміки монітора зазвичай тихі — сядьте ближче або збільшіть гучність"
+      ],
+      presetSetupInterview: [
+        "① В Teams/Zoom → Налаштування → Динамік → обрати «CABLE Input»",
+        "② В Teams/Zoom → Налаштування → Мікрофон → залишити РЕАЛЬНИЙ мікрофон (Webcam / Гарнітура)",
+        "③ Звук → Запис → «CABLE Output» → Властивості → Прослуховування → ✅ «Прослуховувати цей пристрій» → обрати навушники",
+        "④ Додаток автоматично обирає «CABLE Output» як вхід",
+        "✦ Результат: Голос інтерв'юера йде в додаток + навушники. Вони чують ваш реальний мікрофон."
+      ],
 
+      listenThrough: "Слухати через",
+      listenThroughDesc: "Чути аудіо у навушниках або колонках",
+      listenThroughNone: "Вимкнено (налаштуйте в Windows)",
+      listenThroughActive: "Активно",
+      listenThroughError: "Помилка маршрутизації",
       inputSource: "ВХІД ДОДАТКУ",
       defaultMic: "Мікрофон за замовчуванням",
       testMic: "Тест входу",

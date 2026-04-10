@@ -65,6 +65,9 @@ interface LandingPageProps {
     isSetupOpen: boolean;
     setIsSetupOpen: (open: boolean) => void;
     startSessionWithMode: (mode: ViewMode) => void;
+    // Audio passthrough
+    listenThroughActive?: boolean;
+    listenThroughError?: string | null;
     // Google Auth (optional)
     googleUser: GoogleUser | null;
     isAuthLoading: boolean;
@@ -83,6 +86,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
     isSetupOpen,
     setIsSetupOpen,
     startSessionWithMode,
+    listenThroughActive = false,
+    listenThroughError = null,
     googleUser,
     isAuthLoading,
     onSignOut,
@@ -91,8 +96,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
     const audioDevices = useAudioDevices();
     const presets = audioDevices.getPresets();
 
-    const selectPreset = (presetId: AudioPresetId, deviceId: string) => {
-        setContext({ ...context, audioDeviceId: deviceId, activeAudioPreset: presetId });
+    const selectPreset = (presetId: AudioPresetId, deviceId: string, listenThroughId?: string) => {
+        setContext({ ...context, audioDeviceId: deviceId, activeAudioPreset: presetId, listenThroughDeviceId: listenThroughId || '' });
     };
 
     // Render Google Sign-In button when not signed in
@@ -105,6 +110,17 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
     return (
         <div className="h-screen w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up">
+            {/* Settings Gear: top-left corner */}
+            <div className="absolute top-4 left-4 z-50">
+                <GearMenu
+                    context={context}
+                    onContextChange={setContext}
+                    uiLang={uiLang}
+                    onOpenFullSettings={() => setIsSetupOpen(true)}
+                    listenThroughActive={listenThroughActive}
+                />
+            </div>
+
             {/* Google Auth: top-right corner */}
             <div className="absolute top-4 right-4 z-50">
                 {isAuthLoading ? (
@@ -280,7 +296,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                 key={preset.id}
                                 onClick={() => {
                                     if (preset.available) {
-                                        selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId);
+                                        selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId, preset.listenThroughDeviceId);
                                     }
                                 }}
                                 className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
@@ -358,21 +374,12 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Footer hint */}
-            <div className="text-center space-y-4">
+            <div className="text-center">
                 <p className="text-xs text-gray-500 font-mono">{t.pressMic}</p>
-                {/* Animated Gear Menu on Landing Page */}
-                <div className="flex justify-center">
-                    <GearMenu
-                        context={context}
-                        onContextChange={setContext}
-                        uiLang={uiLang}
-                        onOpenFullSettings={() => setIsSetupOpen(true)}
-                    />
-                </div>
             </div>
 
             {/* Settings Panel (available from landing) */}
-            <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} />
+            <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} listenThroughActive={listenThroughActive} listenThroughError={listenThroughError} />
         </div>
     );
 };

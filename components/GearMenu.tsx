@@ -1,15 +1,17 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
-import { InterviewContext, ViewMode, SpeedPresetId, SPEED_PRESETS } from '../types';
+import { InterviewContext, ViewMode, SpeedPresetId, SPEED_PRESETS, AudioPresetId } from '../types';
 import { translations } from '../translations';
 import { SettingsIcon } from './Icons';
+import { useAudioDevices } from '../hooks/useAudioDevices';
 
 interface GearMenuProps {
   context: InterviewContext;
   onContextChange: (ctx: InterviewContext) => void;
   uiLang: 'en' | 'uk';
   onOpenFullSettings: () => void;
+  listenThroughActive?: boolean;
 }
 
 interface MenuItem {
@@ -27,10 +29,11 @@ interface SubMenuItem {
   isActive?: boolean;
 }
 
-const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, onOpenFullSettings }) => {
+const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, onOpenFullSettings, listenThroughActive = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const audioDevices = useAudioDevices();
 
   const t = translations[uiLang];
 
@@ -103,8 +106,10 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       label: t.settings.accordion?.audioSetup || 'Audio',
       color: 'orange',
       subItems: [
-        { id: 'stereo_on', label: 'Stereo ON', value: 'true', isActive: context.stereoMode === true },
-        { id: 'stereo_off', label: 'Stereo OFF', value: 'false', isActive: context.stereoMode === false },
+        { id: 'preset-speakers', label: '🔊 Колонки', value: 'speakers', isActive: context.activeAudioPreset === 'speakers' },
+        { id: 'preset-headphones', label: '🎧 Навушники', value: 'headphones-youtube', isActive: context.activeAudioPreset === 'headphones-youtube' },
+        { id: 'preset-monitor', label: '🖥️ Монітор', value: 'monitor-speakers', isActive: context.activeAudioPreset === 'monitor-speakers' },
+        { id: 'preset-interview', label: '🎙️ Інтерв\'ю', value: 'headphones-interview', isActive: context.activeAudioPreset === 'headphones-interview' },
       ]
     },
     {
@@ -138,9 +143,21 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       case 'ai':
         handleChange('llmProvider', subItem.value as 'gemini');
         break;
-      case 'audio':
-        handleChange('stereoMode', subItem.value === 'true');
+      case 'audio': {
+        const presetId = subItem.value as AudioPresetId;
+        const presets = audioDevices.getPresets();
+        const matched = presets.find(p => p.id === presetId);
+        console.log(`🎧 [GearMenu] Preset ${presetId}: available=${matched?.available}, deviceId=${matched?.matchedDeviceId?.slice(0,12) || 'EMPTY'}, label=${matched?.matchedDeviceLabel}, listenThrough=${matched?.listenThroughLabel || 'NONE'}, totalDevices=${audioDevices.rawDevices.length}`);
+        if (matched?.available) {
+          onContextChange({
+            ...context,
+            audioDeviceId: matched.matchedDeviceId,
+            activeAudioPreset: presetId,
+            listenThroughDeviceId: matched.listenThroughDeviceId,
+          });
+        }
         break;
+      }
       case 'speed':
         handleChange('speedPreset', subItem.value as SpeedPresetId);
         break;
@@ -279,6 +296,34 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
                       </button>
                     );
                   })}
+                  {/* Listen Through - appears for VB-Cable presets */}
+                  {item.id === 'audio' && ['headphones-youtube', 'headphones-interview'].includes(context.activeAudioPreset) && (
+                    <div className="px-3 py-2 border-t border-cyan-800/30 bg-cyan-950/20">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-cyan-400/70">
+                          {t.settings.listenThrough}
+                        </span>
+                        {listenThroughActive && (
+                          <span className="text-[7px] font-bold text-emerald-400 bg-emerald-500/20 px-1 py-0.5 rounded">ON</span>
+                        )}
+                      </div>
+                      <select
+                        className="w-full bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 focus:border-cyan-500 outline-none"
+                        value={context.listenThroughDeviceId || ''}
+                        onChange={(e) => { e.stopPropagation(); onContextChange({ ...context, listenThroughDeviceId: e.target.value }); }}
+                      >
+                        <option value="">{t.settings.listenThroughNone}</option>
+                        {audioDevices.outputDevices
+                          .filter(d => !d.label.toLowerCase().includes('cable input'))
+                          .map(d => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                              {d.label.length > 35 ? d.label.slice(0, 35) + '...' : d.label}
+                            </option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
