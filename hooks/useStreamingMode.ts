@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, analyzeConversation, generateInterviewAnswer } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, analyzeConversation, generateInterviewAnswer, refineTranslationPair } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -159,15 +159,17 @@ export function useStreamingMode(
     const llmPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const ghostDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const interimGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For interim translation debounce
+    const interimTranslatingRef = useRef<boolean>(false); // Lock: skip new interim while previous is in-flight
+    const interimLatestTextRef = useRef<string>(''); // Latest requested text (for coalescing)
     const answerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For answer generation pause
     const freezeFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For flushing active→frozen on 3s pause
     const topicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For topic summarization debounce
     const topicAbortRef = useRef<AbortController | null>(null);
     const lastTopicWordCountRef = useRef<number>(0); // Track words at last topic generation
     const wordsInCountRef = useRef<number>(0); // Count WORDS_IN events since last topic
-    const TOPIC_TRIGGER_BLOCKS = 2; // Generate topics every N finalized blocks (WORDS_IN)
+    const TOPIC_TRIGGER_WORDS = 20; // Generate topics every N words — bigger chunks = better context
     const TOPIC_MIN_WORDS = 15; // Minimum words before first topic
-    const TOPIC_PAUSE_MS = 8000; // Or after 8s pause (real silence)
+    const TOPIC_PAUSE_MS = 3000; // 3s pause triggers topic update
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
@@ -288,126 +290,122 @@ export function useStreamingMode(
     const pendingParagraphBreakRef = useRef<boolean>(false);
     // Track punctuation to add before paragraph break
     const pendingPunctuationRef = useRef<string>('');
+    // BLOCK TRANSLATION: Track how many words have been sent for translation
+    const translatedUpToWordRef = useRef<number>(0);
+    const BLOCK_SIZE = 7; // Words per translation block
+    const blockFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // === GHOST TRANSLATION ===
-    // STABLE APPROACH: Translate ONLY new words, append to existing translation
-    // This eliminates flickering caused by context-aware translation inconsistency
-    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string, addParagraphBreak: boolean = false, punctuation: string = '') => {
+    // LLM REFINEMENT: Track original + ghost blocks for sliding window
+    const originalBlocksRef = useRef<string[]>([]); // Original text blocks
+    const ghostBlocksRef = useRef<string[]>([]);     // Ghost translation blocks
+    const refinedUpToBlockRef = useRef<number>(0);   // How many blocks have been LLM-refined
+    const refineAbortRef = useRef<AbortController | null>(null);
+
+    // === GHOST TRANSLATION (HIDDEN — draft for LLM) ===
+    // Ghost translates blocks silently. User sees only LLM-refined text.
+    // First block shows ghost immediately (so user sees something), then LLM replaces it.
+    const executeGhostTranslation = useCallback(async (newWords: string, fullText: string) => {
         const ghostStartTime = performance.now();
-        // DUPLICATE CHECK: Skip if we already translated this text
-        if (lastTranslatedTextRef.current === newWords) {
-            console.log(`⚠️ [Ghost] Skipping duplicate translation: "${newWords.substring(0, 30)}..."`);
-            return;
-        }
-
-        // Also check if new text is mostly a duplicate of previous
-        // Only skip if > 60% of words were in the previous translation
-        if (lastTranslatedTextRef.current && newWords.length > 10) {
-            const newWordsArray = newWords.split(/\s+/);
-            const prevWordsSet = new Set(lastTranslatedTextRef.current.split(/\s+/));
-            const overlappingWords = newWordsArray.filter(w => prevWordsSet.has(w)).length;
-            const overlapRatio = overlappingWords / newWordsArray.length;
-
-            if (overlapRatio > 0.6) {
-                console.log(`⚠️ [Ghost] Skipping mostly-duplicate text (${Math.round(overlapRatio * 100)}% overlap): "${newWords.substring(0, 30)}..."`);
-                return;
-            } else if (overlappingWords > 0) {
-                console.log(`✅ [Ghost] Allowing translation despite ${overlappingWords}/${newWordsArray.length} overlapping words (${Math.round(overlapRatio * 100)}%)`);
-            }
-        }
+        if (lastTranslatedTextRef.current === newWords) return;
 
         setState(prev => ({ ...prev, isProcessingGhost: true }));
 
         try {
-            // SIMPLE: Translate only new words (no context)
-            // This gives CONSISTENT results - same input = same output
-            // Using translatePhraseChunked for built-in caching - repeated phrases return instantly
             const words = await localTranslator.translatePhraseChunked(newWords);
             const translation = words.map(w => w.ghostTranslation).join(' ');
-
-            // Remember what we translated to prevent duplicates
             lastTranslatedTextRef.current = newWords;
 
-            // DUPLICATE CHECK for translation result
-            setState(prev => {
-                // Skip placeholder results — model not loaded yet, schedule retry
-                if (translation === '⏳...' || translation === '❌' || translation === '⚠️') {
-                    console.log(`🔄 [Ghost] Model not ready, scheduling retry in 3s for: "${newWords.substring(0, 30)}..."`);
-                    setTimeout(() => {
-                        executeGhostTranslation(newWords, fullText, addParagraphBreak, punctuation);
-                    }, 3000);
-                    return { ...prev, isProcessingGhost: false };
-                }
+            if (translation === '⏳...' || translation === '❌' || translation === '⚠️') {
+                setTimeout(() => executeGhostTranslation(newWords, fullText), 3000);
+                setState(prev => ({ ...prev, isProcessingGhost: false }));
+                return;
+            }
 
-                // Check if this translation is already at the end
-                if (prev.ghostTranslation && prev.ghostTranslation.endsWith(translation)) {
-                    return { ...prev, isProcessingGhost: false };
-                }
+            // Store blocks for LLM refinement
+            const blockIndex = originalBlocksRef.current.length;
+            originalBlocksRef.current.push(newWords);
+            ghostBlocksRef.current.push(translation.trim());
 
-                // METRICS: Record words translated
-                const translatedWordCount = translation.split(/\s+/).length;
-                metricsCollector.recordWordsTranslated(translatedWordCount);
+            metricsCollector.recordWordsTranslated(translation.split(/\s+/).length);
 
-                // SMART APPEND: glue fragments into sentences
-                // Only start a new visual block (｜) when NMT ends with sentence punctuation
-                const BLOCK_SEP = '｜';
-                let cleanTranslation = translation.trim();
+            // Show ghost draft for the FIRST block (so user sees something immediately)
+            // For subsequent blocks, show ghost until LLM catches up
+            setState(prev => ({
+                ...prev,
+                ghostTranslation: ghostBlocksRef.current.join(' '),
+                isProcessingGhost: false
+            }));
 
-                // Check if this fragment completes a sentence (NMT placed punctuation)
-                const endsWithPunctuation = /[.!?]$/.test(cleanTranslation);
-                // Check if previous text already ends with punctuation (= ready for new block)
-                const prevText = prev.ghostTranslation || '';
-                const prevEndsPunctuation = /[.!?]\s*$/.test(prevText) || /｜\s*$/.test(prevText) || !prevText;
-
-                // Capitalize only if starting a new sentence
-                if (prevEndsPunctuation && cleanTranslation.length > 0) {
-                    cleanTranslation = cleanTranslation[0].toUpperCase() + cleanTranslation.slice(1);
-                }
-
-                let separator: string;
-                if (addParagraphBreak) {
-                    separator = punctuation + PARAGRAPH_MARKER;
-                } else if (prevEndsPunctuation && prevText) {
-                    // Previous sentence complete → start new visual block
-                    separator = ` ${BLOCK_SEP} `;
-                } else {
-                    // Mid-sentence → just append with space (no block break)
-                    separator = ' ';
-                }
-
-                // Add period at the end only if this looks like a complete thought
-                // (NMT didn't add punctuation, but we have 7+ words accumulated in this sentence)
-                const currentSentenceText = prevEndsPunctuation ? cleanTranslation : prevText.split(BLOCK_SEP).pop() + ' ' + cleanTranslation;
-                const currentSentenceWords = currentSentenceText.trim().split(/\s+/).length;
-                if (!endsWithPunctuation && currentSentenceWords >= 14) {
-                    // Force period after ~14 words without punctuation (2 blocks worth)
-                    cleanTranslation += '.';
-                }
-
-                return {
-                    ...prev,
-                    ghostTranslation: prevText
-                        ? `${prevText}${separator}${cleanTranslation}`
-                        : cleanTranslation,
-                    isProcessingGhost: false
-                };
-            });
-
-            // === GHOST LOG ===
             const ghostLatency = performance.now() - ghostStartTime;
             debugLogger.log('GHOST', `${newWords.substring(0, 40)} → ${translation.substring(0, 40)}`, ghostLatency, newWords.split(/\s+/).length);
-            console.log(`\n${'─'.repeat(50)}`);
-            console.log(`👻 [GHOST ПЕРЕКЛАД] ${Math.round(ghostLatency)}ms`);
-            console.log(`   📝 Вхід: "${newWords.substring(0, 100)}${newWords.length > 100 ? '...' : ''}"`);
-            console.log(`   🇺🇦 Вихід: "${translation.substring(0, 100)}${translation.length > 100 ? '...' : ''}"`);
-            console.log(`${'─'.repeat(50)}\n`);
 
             opts.onGhostUpdate(translation);
+
+            // TRIGGER LLM REFINEMENT: Every 2 blocks (pair = 14 words)
+            if (blockIndex >= 1 && blockIndex % 2 === 1) {
+                scheduleLLMRefinement();
+            }
         } catch (e) {
             console.error('Ghost translation error:', e);
             setState(prev => ({ ...prev, isProcessingGhost: false }));
         }
     }, [opts]);
+
+    // === LLM SLIDING WINDOW REFINEMENT ===
+    // Takes PAIRS of blocks (14 words), sends to Gemini for quality translation
+    // Result is a single coherent sentence that replaces both ghost drafts
+    // Refined sentences are joined into continuous text
+    const refinedSentencesRef = useRef<string[]>([]); // LLM-refined sentences (each from 2 blocks)
+
+    const scheduleLLMRefinement = useCallback(async () => {
+        const ctx = contextRef.current;
+        const totalBlocks = ghostBlocksRef.current.length;
+
+        // Process pairs: (0,1), (2,3), (4,5)...
+        while (refinedUpToBlockRef.current + 1 < totalBlocks) {
+            const i = refinedUpToBlockRef.current;
+            const origPair = originalBlocksRef.current[i] + ' ' + originalBlocksRef.current[i + 1];
+            const draftPair = ghostBlocksRef.current[i] + ' ' + ghostBlocksRef.current[i + 1];
+
+            if (refineAbortRef.current) refineAbortRef.current.abort();
+            refineAbortRef.current = new AbortController();
+
+            setState(prev => ({ ...prev, isProcessingLLM: true }));
+            const startTime = performance.now();
+
+            const refined = await refineTranslationPair(
+                origPair,
+                draftPair,
+                ctx.targetLanguage || 'Norwegian',
+                ctx.nativeLanguage || 'Ukrainian',
+                refineAbortRef.current.signal
+            );
+
+            if (refined) {
+                refinedSentencesRef.current.push(refined.trim());
+
+                // Build display: refined sentences + remaining unrefined ghost blocks
+                const refinedText = refinedSentencesRef.current.join(' ');
+                const unrefinedStart = refinedUpToBlockRef.current + 2;
+                const unrefinedBlocks = ghostBlocksRef.current.slice(unrefinedStart);
+                const fullText = unrefinedBlocks.length > 0
+                    ? refinedText + ' ' + unrefinedBlocks.join(' ')
+                    : refinedText;
+
+                setState(prev => ({
+                    ...prev,
+                    ghostTranslation: fullText,
+                    isProcessingLLM: false
+                }));
+
+                debugLogger.log('LLM_REFINE', `pair ${i}-${i+1}: "${refined.substring(0, 50)}"`, performance.now() - startTime);
+            } else {
+                setState(prev => ({ ...prev, isProcessingLLM: false }));
+            }
+
+            refinedUpToBlockRef.current = i + 2;
+        }
+    }, []);
 
     // === LLM TRANSLATION ===
     const executeLLMTranslation = useCallback(async () => {
@@ -745,11 +743,27 @@ export function useStreamingMode(
 
     // === TOPIC STRUCTURING (Flash-Lite) ===
 
+    const isTopicRunningRef = useRef<boolean>(false);
+    const topicProcessedUpToWordRef = useRef<number>(0); // Track which words were already processed
+
     const executeTopicSummary = useCallback(async () => {
         const currentOriginal = originalTextRef.current;
         if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 10) return;
 
-        // Abort previous
+        // Skip if previous Topics call still running
+        if (isTopicRunningRef.current) return;
+        isTopicRunningRef.current = true;
+
+        // Only send NEW words (after what was already processed)
+        const allWords = currentOriginal.split(/\s+/);
+        const newWords = allWords.slice(topicProcessedUpToWordRef.current);
+        if (newWords.length < 10) {
+            isTopicRunningRef.current = false;
+            return;
+        }
+        const newText = newWords.join(' ');
+        topicProcessedUpToWordRef.current = allWords.length;
+
         if (topicAbortRef.current) topicAbortRef.current.abort();
         topicAbortRef.current = new AbortController();
 
@@ -757,25 +771,35 @@ export function useStreamingMode(
         const startTime = performance.now();
 
         try {
+            // Send ONLY new text, no existing topics — LLM produces fresh output for this chunk
             const result = await generateTopicSummary(
-                currentOriginal,
-                state.topicSummary,
+                newText,
+                '', // No existing topics — each call produces independent output
                 topicAbortRef.current.signal
             );
 
-            debugLogger.log('TOPICS', `${Math.round(performance.now() - startTime)}ms`, performance.now() - startTime, currentOriginal.split(/\s+/).length);
+            debugLogger.log('TOPICS', `${Math.round(performance.now() - startTime)}ms`, performance.now() - startTime, newWords.length);
             lastTopicWordCountRef.current = wordCountRef.current;
 
-            setState(prev => ({
-                ...prev,
-                topicSummary: result,
-                isProcessingTopics: false
-            }));
+            if (result && result.trim()) {
+                // APPEND new result to existing — frozen text stays, new text added below
+                setState(prev => ({
+                    ...prev,
+                    topicSummary: prev.topicSummary
+                        ? `${prev.topicSummary}\n\n${result.trim()}`
+                        : result.trim(),
+                    isProcessingTopics: false
+                }));
+            } else {
+                setState(prev => ({ ...prev, isProcessingTopics: false }));
+            }
         } catch (e: any) {
             if (e.name !== 'AbortError') console.error('[Topics] Error:', e);
             setState(prev => ({ ...prev, isProcessingTopics: false }));
+        } finally {
+            isTopicRunningRef.current = false;
         }
-    }, [state.topicSummary]);
+    }, []);
 
     const scheduleTopicSummary = useCallback(() => {
         if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
@@ -788,10 +812,10 @@ export function useStreamingMode(
         }, TOPIC_PAUSE_MS);
     }, [executeTopicSummary]);
 
-    // Trigger topics after N finalized blocks (called from addWords)
+    // Trigger topics every TOPIC_TRIGGER_WORDS words (called from addWords)
     const triggerTopicOnBlock = useCallback(() => {
         wordsInCountRef.current++;
-        if (wordsInCountRef.current >= TOPIC_TRIGGER_BLOCKS && wordCountRef.current >= TOPIC_MIN_WORDS) {
+        if (wordsInCountRef.current >= TOPIC_TRIGGER_WORDS && wordCountRef.current >= TOPIC_MIN_WORDS) {
             wordsInCountRef.current = 0;
             executeTopicSummary();
         }
@@ -896,159 +920,32 @@ export function useStreamingMode(
     const addWords = useCallback((newWords: string) => {
         if (!newWords.trim()) return;
 
-        // Clean speech: remove fillers (eh, øh), duplicates, fragments
         const trimmedNew = cleanSpeechText(newWords);
         if (!trimmedNew) return;
 
-        // DUPLICATE DETECTION: Multiple checks to prevent text duplication
-        const currentOriginal = originalTextRef.current;
-
-        // Check 1: Exact match at end
-        if (currentOriginal && currentOriginal.endsWith(trimmedNew)) {
-            console.log(`⚠️ [addWords] Skipping duplicate (ends with): "${trimmedNew.substring(0, 30)}..."`);
-            return;
-        }
-
-        // Check 2: Word-level overlap detection
-        // Only skip if new text is MOSTLY a duplicate (not just starting with same words)
-        if (currentOriginal) {
-            const newWordsArray = trimmedNew.split(/\s+/);
-            const newWordCount = newWordsArray.length;
-            const lastOriginalWords = currentOriginal.split(/\s+/).slice(-30); // Last 30 words
-            const lastOriginalText = lastOriginalWords.join(' ');
-
-            // Find how many leading words of new text exist in recent original
-            let overlapWordCount = 0;
-            for (let i = Math.min(newWordCount, 10); i >= 3; i--) {
-                const firstNWords = newWordsArray.slice(0, i).join(' ');
-                if (lastOriginalText.includes(firstNWords)) {
-                    overlapWordCount = i;
-                    break;
-                }
-            }
-
-            // Only block if overlap is > 50% of new text (i.e., mostly duplicate)
-            if (overlapWordCount > 0) {
-                const overlapRatio = overlapWordCount / newWordCount;
-                if (overlapRatio > 0.5) {
-                    console.log(`⚠️ [addWords] Skipping overlap (${overlapWordCount}/${newWordCount} words = ${Math.round(overlapRatio * 100)}% overlap)`);
-                    return;
-                } else {
-                    console.log(`✅ [addWords] Allowing text despite ${overlapWordCount} overlapping words (only ${Math.round(overlapRatio * 100)}% of ${newWordCount} words)`);
-                }
-            }
-
-            // Check if entire new text is very short and contained in last part
-            if (trimmedNew.length <= 50) {
-                const last100Chars = currentOriginal.slice(-100);
-                if (last100Chars.includes(trimmedNew)) {
-                    console.log(`⚠️ [addWords] Skipping short duplicate: "${trimmedNew.substring(0, 30)}..."`);
-                    return;
-                }
-            }
-        }
-
-        // PARAGRAPH BREAK: Check if there was a significant pause since last word
-        const now = Date.now();
-        const timeSinceLastWord = now - lastWordAddedTimeRef.current;
-        const shouldAddParagraphBreak = currentOriginal && timeSinceLastWord >= PARAGRAPH_PAUSE_MS;
-        lastWordAddedTimeRef.current = now;
-
-        // PUNCTUATION: Determine what punctuation to add before paragraph break
-        let punctuationMark = '';
-        if (shouldAddParagraphBreak) {
-            punctuationMark = getPunctuationMark(
-                currentSentenceStartRef.current,
-                currentSentenceWordCountRef.current,
-                currentSentenceTextRef.current  // Pass full sentence for ? detection
-            );
-            console.log(`📝 [addWords] Adding paragraph break (${timeSinceLastWord}ms pause) with "${punctuationMark || 'no'}" punctuation`);
-            // Set flags for Ghost translation to also add paragraph break and punctuation
-            pendingParagraphBreakRef.current = true;
-            pendingPunctuationRef.current = punctuationMark;
-            // Reset LLM question detection for new sentence
-            llmQuestionDetectedRef.current = false;
-        }
-
-        // METRICS: Record words received
+        // METRICS
         const newWordCount = trimmedNew.split(/\s+/).length;
         metricsCollector.recordWordsReceived(newWordCount);
         debugLogger.log('WORDS_IN', trimmedNew, undefined, newWordCount);
 
-        // SENTENCE TRACKING: Track first word and full text of current sentence
-        if (!currentSentenceStartRef.current || shouldAddParagraphBreak) {
-            // Starting a new sentence - capture the first word(s) and full text
-            currentSentenceStartRef.current = trimmedNew.split(/\s+/)[0] || '';
-            currentSentenceWordCountRef.current = newWordCount;
-            currentSentenceTextRef.current = trimmedNew;
-            console.log(`📝 [Sentence] New sentence starting with: "${currentSentenceStartRef.current}"`);
-        } else {
-            // Continuing current sentence - increment word count and append text
-            currentSentenceWordCountRef.current += newWordCount;
-            currentSentenceTextRef.current = currentSentenceTextRef.current + ' ' + trimmedNew;
-        }
-
-        // Update state AND keep refs in sync
+        // Update original text — just append, no paragraph logic
         setState(prev => {
-            // Build separator: punctuation (if any) + paragraph marker (if pause)
-            let separator = ' ';
-            if (shouldAddParagraphBreak) {
-                separator = punctuationMark + PARAGRAPH_MARKER;
-            }
             const newOriginal = prev.originalText
-                ? `${prev.originalText}${separator}${trimmedNew}`
+                ? `${prev.originalText} ${trimmedNew}`
                 : trimmedNew;
-            const newWordCount = newOriginal.split(/\s+/).length;
+            const totalWords = newOriginal.split(/\s+/).length;
 
-            // Keep refs in sync for async operations
             originalTextRef.current = newOriginal;
-            wordCountRef.current = newWordCount;
+            wordCountRef.current = totalWords;
 
-            return {
-                ...prev,
-                originalText: newOriginal,
-                wordCount: newWordCount
-            };
+            return { ...prev, originalText: newOriginal, wordCount: totalWords };
         });
 
-        // ACCUMULATE words for debounce (prevents losing rapid finals)
-        pendingWordsRef.current.push(trimmedNew);
-
-        // Debounce ghost translation (100ms)
-        if (ghostDebounceTimerRef.current) {
-            clearTimeout(ghostDebounceTimerRef.current);
-        }
-
-        // Translate ALL accumulated words when debounce fires
-        ghostDebounceTimerRef.current = setTimeout(() => {
-            const allPendingWords = pendingWordsRef.current.join(' ');
-            pendingWordsRef.current = []; // Clear accumulator
-
-            // Capture and reset paragraph break and punctuation flags
-            const addParagraphBreak = pendingParagraphBreakRef.current;
-            const punctuation = pendingPunctuationRef.current;
-            pendingParagraphBreakRef.current = false;
-            pendingPunctuationRef.current = '';
-
-            if (allPendingWords.trim()) {
-                console.log(`📦 [Ghost] Translating ${allPendingWords.split(/\s+/).length} accumulated words${addParagraphBreak ? ` (with "${punctuation}" + paragraph break)` : ''}`);
-                executeGhostTranslation(allPendingWords, originalTextRef.current, addParagraphBreak, punctuation);
-            }
-        }, speedPreset.ghostDebounceMs);
-
-        // Schedule LLM translation
-        scheduleLLMTranslation();
-
-        // Topic structuring: trigger every 2 blocks + schedule on pause
+        // NO GHOST TRANSLATION — all resources go to Topics (Structure)
+        // Topics triggered on every block + on pause
         triggerTopicOnBlock();
         scheduleTopicSummary();
-
-        // Conversation analysis (FOCUS mode): detect questions
-        triggerConversationOnBlock();
-
-        // Schedule freeze flush (3s pause → move active to frozen)
-        scheduleFreezeFLush();
-    }, [executeGhostTranslation, scheduleLLMTranslation, triggerTopicOnBlock, scheduleTopicSummary, triggerConversationOnBlock, scheduleFreezeFLush]);
+    }, [triggerTopicOnBlock, scheduleTopicSummary]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -1075,91 +972,55 @@ export function useStreamingMode(
             interimText: displayText
         }));
 
-        // Debounce interim translation (100ms - slower to reduce flicker)
+        // Debounce interim translation
         if (interimGhostTimerRef.current) {
             clearTimeout(interimGhostTimerRef.current);
         }
 
-        // Skip interim translation for SIMPLE/FOCUS — only show cursor, no flickering
-        // FULL mode may need interim translation for real-time display
-        const mode = contextRef.current.viewMode;
-        if (displayText.trim() && mode === 'FULL' && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
+        // Interim ghost translation for real-time display
+        // OPTIMIZATION 1: Only translate last MAX_INTERIM_TRANSLATE words
+        // OPTIMIZATION 2: Coalescing — skip if previous translation still in-flight
+        //                  When it finishes, it re-translates with latest text
+        const MAX_INTERIM_TRANSLATE = 5;
+        interimLatestTextRef.current = displayText; // Always store latest
+
+        if (displayText.trim() && contextRef.current.targetLanguage !== contextRef.current.nativeLanguage) {
+            // Skip if already translating — coalescing will pick up latest when done
+            if (interimTranslatingRef.current) return;
+
             interimGhostTimerRef.current = setTimeout(async () => {
-                try {
-                    const wordsToTranslate = displayText.split(/\s+/);
-                    const totalWords = wordsToTranslate.length;
+                const translateLatest = async () => {
+                    const currentText = interimLatestTextRef.current;
+                    if (!currentText.trim()) return;
 
-                    // OPTIMIZATION: Check if we can use cached prefix
-                    const cache = interimCacheRef.current;
-                    const cacheHit = cache.prefixWordCount > 0 &&
-                                     totalWords > cache.prefixWordCount &&
-                                     displayText.startsWith(cache.originalPrefix);
+                    interimTranslatingRef.current = true;
+                    const startTime = performance.now();
+                    try {
+                        const words = currentText.split(/\s+/);
+                        const totalWords = words.length;
+                        const textToTranslate = totalWords > MAX_INTERIM_TRANSLATE
+                            ? words.slice(-MAX_INTERIM_TRANSLATE).join(' ')
+                            : currentText;
 
-                    let finalTranslation: string;
+                        const translated = await localTranslator.translatePhraseChunked(textToTranslate);
+                        const translation = translated.map(w => w.ghostTranslation).join(' ');
+                        const finalTranslation = totalWords > MAX_INTERIM_TRANSLATE
+                            ? '… ' + translation : translation;
 
-                    if (cacheHit && totalWords > TRANSLATE_LAST_N) {
-                        // Use cached prefix, translate only new words
-                        const newWordsCount = totalWords - cache.prefixWordCount;
-                        const wordsToActuallyTranslate = Math.min(newWordsCount + 2, TRANSLATE_LAST_N); // +2 for context
-                        const newText = wordsToTranslate.slice(-wordsToActuallyTranslate).join(' ');
+                        debugLogger.log('INTERIM', finalTranslation.trim().substring(0, 50), performance.now() - startTime, totalWords);
+                        setState(prev => ({ ...prev, interimGhostTranslation: finalTranslation.trim() }));
+                    } catch (e) { /* ignore */ }
+                    interimTranslatingRef.current = false;
 
-                        const translated = await localTranslator.translatePhraseChunked(newText);
-                        const newTranslation = translated.map(w => w.ghostTranslation).join(' ');
-
-                        // Combine: cached prefix + new translation
-                        finalTranslation = cache.translatedPrefix + ' ' + newTranslation;
-
-                        console.log(`🚀 [Interim] Cache HIT: ${cache.prefixWordCount} cached + ${wordsToActuallyTranslate} new words`);
-                    } else {
-                        // No cache or cache miss - translate from beginning
-                        // But only translate last TRANSLATE_LAST_N words for very long text
-                        if (totalWords > TRANSLATE_LAST_N * 2) {
-                            // Split: cache the stable prefix, translate only recent
-                            const prefixWordCount = totalWords - TRANSLATE_LAST_N;
-                            const prefixText = wordsToTranslate.slice(0, prefixWordCount).join(' ');
-                            const suffixText = wordsToTranslate.slice(prefixWordCount).join(' ');
-
-                            // Translate prefix once and cache
-                            const prefixTranslated = await localTranslator.translatePhraseChunked(prefixText);
-                            const prefixTranslation = prefixTranslated.map(w => w.ghostTranslation).join(' ');
-
-                            // Translate suffix
-                            const suffixTranslated = await localTranslator.translatePhraseChunked(suffixText);
-                            const suffixTranslation = suffixTranslated.map(w => w.ghostTranslation).join(' ');
-
-                            finalTranslation = prefixTranslation + ' ' + suffixTranslation;
-
-                            // Update cache
-                            interimCacheRef.current = {
-                                originalPrefix: prefixText,
-                                translatedPrefix: prefixTranslation,
-                                prefixWordCount: prefixWordCount
-                            };
-
-                            console.log(`📝 [Interim] Cache MISS: Created new cache with ${prefixWordCount} words`);
-                        } else {
-                            // Short text - translate all
-                            const translated = await localTranslator.translatePhraseChunked(displayText);
-                            finalTranslation = translated.map(w => w.ghostTranslation).join(' ');
-                        }
+                    // COALESCE: If text changed while translating, translate again with latest
+                    if (interimLatestTextRef.current !== currentText && interimLatestTextRef.current.trim()) {
+                        translateLatest();
                     }
-
-                    const interimLatency = performance.now() - interimStartTime;
-                    debugLogger.log('INTERIM', finalTranslation.trim().substring(0, 50), interimLatency, allWords.length);
-
-                    setState(prev => ({
-                        ...prev,
-                        interimGhostTranslation: finalTranslation.trim()
-                    }));
-                } catch (e) {
-                    // Ignore translation errors for interim text
-                }
+                };
+                translateLatest();
             }, speedPreset.interimDebounceMs);
         } else {
-            setState(prev => ({
-                ...prev,
-                interimGhostTranslation: ''
-            }));
+            setState(prev => ({ ...prev, interimGhostTranslation: '' }));
         }
     }, []);
 
@@ -1202,6 +1063,13 @@ export function useStreamingMode(
 
         llmTranslatedWordCountRef.current = 0;
         originalTextRef.current = '';
+        translatedUpToWordRef.current = 0;
+        originalBlocksRef.current = [];
+        ghostBlocksRef.current = [];
+        refinedUpToBlockRef.current = 0;
+        refinedSentencesRef.current = [];
+        topicProcessedUpToWordRef.current = 0;
+        if (refineAbortRef.current) { refineAbortRef.current.abort(); refineAbortRef.current = null; }
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
         lastAnswerTextRef.current = ''; // Reset answer text tracker
@@ -1416,6 +1284,13 @@ export function useStreamingMode(
 
         llmTranslatedWordCountRef.current = 0;
         originalTextRef.current = '';
+        translatedUpToWordRef.current = 0;
+        originalBlocksRef.current = [];
+        ghostBlocksRef.current = [];
+        refinedUpToBlockRef.current = 0;
+        refinedSentencesRef.current = [];
+        topicProcessedUpToWordRef.current = 0;
+        if (refineAbortRef.current) { refineAbortRef.current.abort(); refineAbortRef.current = null; }
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
         lastAnswerTextRef.current = '';

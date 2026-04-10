@@ -312,24 +312,96 @@ export const generateInterviewAssist = async (
 
 // ========== TOPIC STRUCTURING (Flash-Lite) ==========
 
-const TOPIC_SYSTEM_PROMPT = `Ти структурувальник мовлення. Отримуєш норвезький текст (транскрибація) і поточний список тем.
+const TOPIC_SYSTEM_PROMPT = `You process imperfect speech transcription (Norwegian + noise, errors, mixed languages).
 
-ПРАВИЛА:
-- Визнач теми/думки. Для кожної: 📌 заголовок + суть 1-2 реченнями УКРАЇНСЬКОЮ
-- Нова інформація доповнює існуючу тему або створює нову
-- Максимум 7 тем
-- Пиши прямою мовою: "Додай теорію", "Роби відступи", "Використовуй заголовки"
-- НЕ пиши пасивно: "Пропонується додати...", "Рекомендується...", "Починається з..."
-- НЕ пиши "Спікер каже...", "Далі йде..." — текст може бути з середини
-- НЕ додавай вступів чи висновків
-- Відповідай ТІЛЬКИ списком тем
+STEPS (perform internally):
+1. Clean the text from noise (repetitions, fragments, filler words).
+2. Reconstruct the meaning as close to the original as possible.
+3. Split into separate ideas in order of appearance.
 
-ФОРМАТ:
-📌 **Заголовок**
-Суть прямою мовою.
+RULES:
+- Write ONLY in Ukrainian
+- Do NOT limit the number of topics
+- Each topic = one complete idea
+- Use words as close to the original as possible (but translated)
+- Do NOT generalize when you can be more specific
+- Remove filler words and noise
+- If a phrase is unclear — simplify, but do not invent
+- Do NOT duplicate ideas — if two fragments are about the same thing, merge into one topic
 
-📌 **Заголовок**
-Суть прямою мовою.`;
+SCIENTIFIC NORMALIZATION:
+- If there is an obvious scientific context (climate, geology, biology, physics):
+  replace awkward or literal formulations with correct scientific terms,
+  but only when confidence is high
+- Examples:
+  "CO comes out" → "CO₂ emissions"
+  "got mass" → "mass accumulation"
+  "the other side" → "the other part of the system" (if context is clear)
+  "gets cold and blue" → "cooling and subsidence"
+- Do NOT overcomplicate the text unnecessarily
+- Keep it concise
+
+STYLE:
+- brief
+- specific
+- content is primary, scientific phrasing is secondary
+- no explanations or interpretations
+
+FORBIDDEN:
+- "The speaker says"
+- generalizations like "it is about the importance of..."
+- adding new meanings
+- merging different ideas into one
+
+FORMAT:
+📌 **Short heading (3–6 words)**
+The essence in 1-2 sentences, close to the original.
+
+📌 **Next idea**
+The essence.`;
+
+/**
+ * Refine translation of two adjacent blocks using LLM sliding window.
+ * Takes original + draft translation of 2 blocks (~14 words), returns quality translation.
+ * Uses Flash-Lite for speed.
+ */
+export async function refineTranslationPair(
+    originalText: string,
+    draftTranslation: string,
+    targetLanguage: string,
+    nativeLanguage: string,
+    signal?: AbortSignal
+): Promise<string | null> {
+    if (!ai || !originalText.trim()) return null;
+
+    try {
+        const prompt = `ОРИГІНАЛ (${targetLanguage}):
+${originalText}
+
+ЧОРНОВИЙ ПЕРЕКЛАД (${nativeLanguage}):
+${draftTranslation}
+
+Виправ переклад. Зроби його природним і граматично правильним ${nativeLanguage} мовою. Поверни ТІЛЬКИ виправлений переклад, без пояснень.`;
+
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL_LITE,
+            contents: prompt,
+            config: {
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.1,
+                maxOutputTokens: 200,
+            }
+        });
+
+        if (signal?.aborted) return null;
+        return response?.text?.trim() || null;
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            console.error('[RefineTranslation] Error:', e?.message || e);
+        }
+        return null;
+    }
+}
 
 /**
  * Generate structured topic summary from Norwegian speech transcript.
@@ -344,8 +416,8 @@ export async function generateTopicSummary(
 
     try {
         const userPrompt = existingTopics
-            ? `ПОТОЧНІ ТЕМИ:\n${existingTopics}\n\nНОВИЙ ТЕКСТ (норвезька):\n${norwegianText}\n\nОновлений список тем:`
-            : `ТЕКСТ (норвезька):\n${norwegianText}\n\nСтруктурований список тем:`;
+            ? `ПОТОЧНІ ТЕМИ:\n${existingTopics}\n\nНОВИЙ ТЕКСТ:\n${norwegianText}`
+            : `ТЕКСТ:\n${norwegianText}`;
 
         const response = await ai.models.generateContent({
             model: GEMINI_MODEL_LITE,
@@ -354,7 +426,7 @@ export async function generateTopicSummary(
                 systemInstruction: TOPIC_SYSTEM_PROMPT,
                 thinkingConfig: { thinkingBudget: 0 },
                 temperature: 0.1,
-                maxOutputTokens: 300,
+                maxOutputTokens: 600,
             }
         });
 

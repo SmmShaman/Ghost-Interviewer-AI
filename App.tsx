@@ -17,6 +17,7 @@ import { localTranslator } from './services/localTranslator';
 import { apiClient } from './services/apiClient';
 import { knowledgeSearch } from './services/knowledgeSearch';
 import { translations } from './translations';
+import { debugLogger } from './services/debugLogger';
 import { useStreamingMode } from './hooks/useStreamingMode';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { useAudioPassthrough } from './hooks/useAudioPassthrough';
@@ -132,6 +133,7 @@ const App: React.FC = () => {
   const lastSpeechEventTimeRef = useRef<number>(0); // Watchdog: track last speech event
   const watchdogTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRestartingRef = useRef<boolean>(false); // Prevent double-restart race condition
+  const noSpeechCountRef = useRef<number>(0); // Track consecutive no-speech errors
 
   // Debug logger - writes to UI overlay
   const debugLogRef = useRef<string[]>([]);
@@ -146,13 +148,12 @@ const App: React.FC = () => {
   // --- SPEECH BUFFERING REFS (Delta Tracking Pattern) ---
   // Web Speech API gives FULL accumulated text each time, not deltas
   // We track how many words we've already committed to extract only NEW words
-  const committedWordCountRef = useRef<number>(0); // Words already committed
+  const committedWordCountRef = useRef<number>(0); // Words already committed (API finals only)
   const lastFullTextRef = useRef<string>(""); // Last full text from API for delta calculation
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastInterimTextRef = useRef<string>(''); // Latest interim text for force-finalization
+  const forceCommittedInterimCountRef = useRef<number>(0); // Interim words already force-sent to addWords
   const isCommittingRef = useRef<boolean>(false); // Mutex for commit operation
-  const forcedFinalizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Force-finalize interim every 1.5s
-  const lastInterimTextRef = useRef<string>(""); // Track interim for forced finalization
-  const forceCommittedInterimRef = useRef<number>(0); // Track force-finalized interim words (reset when API finalizes)
   
   // --- AI QUEUE REFS ---
   // Stores actual data objects, not just IDs, to prevent Race Conditions with React State
@@ -911,6 +912,7 @@ const App: React.FC = () => {
         // We extract only NEW words by tracking committedWordCountRef
         const eventTime = performance.now();
         lastSpeechEventTimeRef.current = Date.now(); // Watchdog timestamp
+        noSpeechCountRef.current = 0; // Reset no-speech counter on successful event
 
         // Build FULL text from all results (final + interim)
         let fullFinalText = '';
@@ -945,107 +947,16 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // STREAMING: committedWordCountRef ONLY tracks API final words
-            // forceCommittedInterimRef tracks interim words already sent to addWords
-            if (fullFinalText.trim()) {
-                const finalWords = fullFinalText.trim().split(/\s+/);
-                const newFinalWords = finalWords.slice(committedWordCountRef.current);
+            // SIMPLIFIED STREAMING: Every word appears immediately
+            // No delta tracking, no force-finalization, no debounce
+            // Just: count total words from Speech API, send NEW ones to addWords
+            const fullText = (fullFinalText + currentInterim).trim();
+            const allWords = fullText.split(/\s+/).filter(w => w.length > 0);
 
-                if (newFinalWords.length > 0) {
-                    if (forceCommittedInterimRef.current > 0) {
-                        // Some finals overlap with force-committed interim — skip those
-                        const trulyNew = newFinalWords.length > forceCommittedInterimRef.current
-                            ? newFinalWords.slice(forceCommittedInterimRef.current)
-                            : [];
-                        forceCommittedInterimRef.current = Math.max(0, forceCommittedInterimRef.current - newFinalWords.length);
-                        if (trulyNew.length > 0) {
-                            streamingModeRef.current?.addWords(trulyNew.join(' '));
-                            addDebug(`🌊 +${trulyNew.length} new finals (skipped ${newFinalWords.length - trulyNew.length} overlap, force=${forceCommittedInterimRef.current})`);
-                        } else {
-                            addDebug(`🔄 API caught up ${newFinalWords.length} words (force=${forceCommittedInterimRef.current})`);
-                        }
-                    } else {
-                        streamingModeRef.current?.addWords(newFinalWords.join(' '));
-                        addDebug(`🌊 +${newFinalWords.length} final words (committed=${finalWords.length})`);
-                    }
-                    committedWordCountRef.current = finalWords.length;
-
-                    // Clear forced finalization timer - we got real finals
-                    if (forcedFinalizationTimerRef.current) {
-                        clearTimeout(forcedFinalizationTimerRef.current);
-                        forcedFinalizationTimerRef.current = null;
-                    }
-                }
-                // If no new finals: don't touch forceCommittedInterimRef — API hasn't caught up
-            }
-
-            // DELTA TRACKING for interim: Only count NEW interim words (after force-committed ones)
-            const allInterimWords = currentInterim.trim().split(/\s+/).filter(w => w);
-            const effectiveForceCommitted = Math.min(forceCommittedInterimRef.current, allInterimWords.length);
-            if (effectiveForceCommitted < forceCommittedInterimRef.current) {
-                forceCommittedInterimRef.current = effectiveForceCommitted;
-            }
-
-            const newInterimWords = allInterimWords.slice(effectiveForceCommitted);
-            const newInterimWordCount = newInterimWords.length;
-            const newInterimText = newInterimWords.join(' ');
-
-            streamingModeRef.current?.setInterimText(newInterimText);
-            setInterimTranscript(newInterimText);
-
-            // FORCED FINALIZATION: MAX_INTERIM_WORDS or PAUSE_TIMEOUT
-            const MAX_INTERIM_WORDS = context.viewMode === 'FULL' ? 7 : 12;
-
-            if (currentInterim.trim()) {
-                lastInterimTextRef.current = currentInterim;
-
-                if (newInterimWordCount >= MAX_INTERIM_WORDS) {
-                    addDebug(`📦 FREEZE ${newInterimWordCount} interim (force=${forceCommittedInterimRef.current} committed=${committedWordCountRef.current})`);
-                    streamingModeRef.current?.addWords(newInterimText);
-                    // Track force-finalized — do NOT increment committedWordCountRef (API only)
-                    forceCommittedInterimRef.current = allInterimWords.length;
-                    lastInterimTextRef.current = '';
-                    streamingModeRef.current?.setInterimText('');
-                    setInterimTranscript('');
-
-                    // Clear pause timer since we just finalized
-                    if (forcedFinalizationTimerRef.current) {
-                        clearTimeout(forcedFinalizationTimerRef.current);
-                        forcedFinalizationTimerRef.current = null;
-                    }
-                    return; // Skip pause-based finalization
-                }
-
-                // TRIGGER 2: PAUSE TIMEOUT - Reset/start forced finalization timer (1.5 seconds)
-                if (forcedFinalizationTimerRef.current) {
-                    clearTimeout(forcedFinalizationTimerRef.current);
-                }
-
-                forcedFinalizationTimerRef.current = setTimeout(() => {
-                    const interimToFinalize = lastInterimTextRef.current;
-                    if (interimToFinalize.trim() && shouldBeListening.current) {
-                        // DELTA TRACKING: Only finalize NEW interim words (after force-committed ones)
-                        const allInterimWords = interimToFinalize.trim().split(/\s+/).filter(w => w);
-
-                        // FIX #2b: Clamp forceCommittedInterimRef if interim shrank (same as in main loop)
-                        const effectiveForceCommitted = Math.min(forceCommittedInterimRef.current, allInterimWords.length);
-                        const newInterimWords = allInterimWords.slice(effectiveForceCommitted);
-
-                        if (newInterimWords.length > 0) {
-                            const newInterimText = newInterimWords.join(' ');
-                            addDebug(`⏰ PAUSE freeze ${newInterimWords.length} words (force=${forceCommittedInterimRef.current})`);
-                            streamingModeRef.current?.addWords(newInterimText);
-                            // Do NOT increment committedWordCountRef — API only
-                            forceCommittedInterimRef.current = allInterimWords.length;
-                            lastInterimTextRef.current = '';
-                            streamingModeRef.current?.setInterimText(''); // Clear interim display
-                            setInterimTranscript('');
-                        } else {
-                            console.log(`⏰ [PAUSE] No new interim words to finalize (all ${allInterimWords.length} already committed)`);
-                        }
-                    }
-                    forcedFinalizationTimerRef.current = null;
-                }, 1500);
+            if (allWords.length > committedWordCountRef.current) {
+                const newWords = allWords.slice(committedWordCountRef.current);
+                committedWordCountRef.current = allWords.length;
+                streamingModeRef.current?.addWords(newWords.join(' '));
             }
 
             return; // Skip block-based logic
@@ -1129,6 +1040,13 @@ const App: React.FC = () => {
             }
           }
 
+          // Reset delta tracking — new recognition instance starts with fresh event.results
+          debugLogger.log('RECOG', `restart (reset ${committedWordCountRef.current} words)`);
+          addDebug(`🔄 delta reset (was ${committedWordCountRef.current} words)`);
+          committedWordCountRef.current = 0;
+          forceCommittedInterimCountRef.current = 0;
+          lastFullTextRef.current = "";
+
           if (track && track.readyState === 'live') {
             recognition.start(track);
             addDebug(`▶️ restarted with: ${track.label.slice(0, 30)}`);
@@ -1147,12 +1065,22 @@ const App: React.FC = () => {
 
       recognition.onerror = (event: any) => {
         if (event.error === 'no-speech') {
-            addDebug(`⚠️ no-speech — restarting`);
-            if (shouldBeListening.current) {
-                setTimeout(() => { try { restartWithTrack(); } catch(e) {} }, 100);
+            noSpeechCountRef.current++;
+            debugLogger.log('RECOG', `no-speech #${noSpeechCountRef.current}`);
+            if (noSpeechCountRef.current <= 3) {
+                addDebug(`⚠️ no-speech #${noSpeechCountRef.current}`);
+            } else if (noSpeechCountRef.current === 4) {
+                addDebug(`⚠️ no-speech #${noSpeechCountRef.current} — will recreate stream`);
             }
+            // Don't restart here — let onend handle it
             return;
         }
+        if (event.error === 'network') {
+            debugLogger.log('RECOG', `network error`);
+            addDebug(`❌ network error — will restart`);
+            return; // Let onend handle restart
+        }
+        debugLogger.log('RECOG', `error: ${event.error}`);
         addDebug(`❌ Speech error: ${event.error}`);
         if (shouldBeListening.current && event.error !== 'aborted') {
             setTimeout(() => { try { restartWithTrack(); } catch(e) {} }, 100);
@@ -1160,16 +1088,36 @@ const App: React.FC = () => {
       };
 
       recognition.onend = () => {
-        addDebug(`🔚 recognition.onend — shouldListen=${shouldBeListening.current}`);
+        debugLogger.log('RECOG', `onend noSpeech=${noSpeechCountRef.current}`);
+        addDebug(`🔚 onend — shouldListen=${shouldBeListening.current} noSpeech=${noSpeechCountRef.current}`);
         if (shouldBeListening.current) {
-            // Wait briefly before restart — give Google servers time to reset connection
-            setTimeout(() => {
+            const delay = noSpeechCountRef.current >= 4 ? 2000 : noSpeechCountRef.current >= 2 ? 1000 : 300;
+            setTimeout(async () => {
               if (!shouldBeListening.current) return;
               lastSpeechEventTimeRef.current = Date.now(); // Reset watchdog timer
+
+              // After 4+ no-speech failures, recreate the audio stream
+              if (noSpeechCountRef.current >= 4) {
+                noSpeechCountRef.current = 0;
+                const deviceId = contextRef.current.audioDeviceId;
+                if (deviceId) {
+                  try {
+                    if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                      audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                    });
+                    speechStreamRef.current = stream;
+                    addDebug(`🔄 new stream created: ${stream.getAudioTracks()[0]?.label.slice(0, 25)}`);
+                  } catch (e) {
+                    addDebug(`🔄 stream recreate failed`);
+                  }
+                }
+              }
+
               try { restartWithTrack(); } catch (e) {
                 setTimeout(() => { if (shouldBeListening.current) try { restartWithTrack(); } catch(e) {} }, 1000);
               }
-            }, 500);
+            }, delay);
         } else {
             setAppState(AppState.IDLE);
         }
@@ -1398,18 +1346,21 @@ const App: React.FC = () => {
                   return;
               }
               const silenceMs = Date.now() - lastSpeechEventTimeRef.current;
-              if (silenceMs > 12000 && !isRestartingRef.current) {
+              if (silenceMs > 8000 && !isRestartingRef.current) {
+                  debugLogger.log('RECOG', `WATCHDOG ${Math.round(silenceMs/1000)}s silence`);
                   addDebug(`🐕 WATCHDOG: No events ${Math.round(silenceMs/1000)}s — force restart`);
                   lastSpeechEventTimeRef.current = Date.now();
-                  isRestartingRef.current = true;
+                  // DON'T set isRestartingRef here — let onend's restartWithTrack() proceed
                   try { recognitionRef.current?.stop(); } catch (e) {}
-                  // Wait for onend to fire, then restart if it didn't
+                  // Fallback: if onend didn't restart after 3s, force direct restart
                   setTimeout(() => {
-                      isRestartingRef.current = false;
                       if (!shouldBeListening.current || !recognitionRef.current) return;
-                      // Check if onend already restarted it (events should be flowing)
-                      if (Date.now() - lastSpeechEventTimeRef.current > 4000) {
+                      if (Date.now() - lastSpeechEventTimeRef.current > 2000) {
                           // onend didn't help — force direct restart
+                          debugLogger.log('RECOG', `WATCHDOG fallback — direct restart`);
+                          addDebug(`🐕 WATCHDOG: onend failed, direct restart`);
+                          committedWordCountRef.current = 0;
+                          lastFullTextRef.current = "";
                           const track = speechStreamRef.current?.getAudioTracks()[0];
                           try {
                               if (track && track.readyState === 'live') {
@@ -1438,7 +1389,7 @@ const App: React.FC = () => {
                               addDebug(`🐕 WATCHDOG: restart failed — ${(e as Error).message}`);
                           }
                       }
-                  }, 1000);
+                  }, 3000);
               }
           }, 3000);
       } catch(e: any) {
@@ -1466,13 +1417,9 @@ const App: React.FC = () => {
       setLiveTranslation("");
       // Reset delta tracking refs
       committedWordCountRef.current = 0;
+      forceCommittedInterimCountRef.current = 0;
       lastFullTextRef.current = "";
-      lastInterimTextRef.current = "";
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (forcedFinalizationTimerRef.current) {
-          clearTimeout(forcedFinalizationTimerRef.current);
-          forcedFinalizationTimerRef.current = null;
-      }
 
       // STREAMING MODE: Stop session and finalize translation (all modes)
       if (useStreamingUI) {
@@ -1626,6 +1573,7 @@ const App: React.FC = () => {
 
       // Clear delta tracking
       committedWordCountRef.current = 0;
+      forceCommittedInterimCountRef.current = 0;
       lastFullTextRef.current = "";
 
       // Clear visual states
@@ -1974,30 +1922,7 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* BOTTOM PANEL: Original Norwegian Text (6 lines max) */}
-      {useStreamingUI && (streamingMode.state.originalText || streamingMode.state.interimText) && (
-          <div className="shrink-0 border-t border-gray-800 bg-gray-900/80 backdrop-blur-sm">
-              <div className="px-4 md:px-8 py-3">
-                  <div className="flex items-start gap-3">
-                      <div className="shrink-0 mt-1">
-                          <span className="text-[10px] font-black text-red-400 uppercase tracking-widest">
-                              {context.targetLanguage === 'Norwegian' ? 'NO' : context.targetLanguage.substring(0, 2).toUpperCase()}
-                          </span>
-                      </div>
-                      <div
-                          ref={bottomPanelRef}
-                          className="flex-1 text-sm md:text-base text-gray-300 leading-relaxed max-h-36 overflow-y-auto"
-                          style={{ whiteSpace: 'pre-line' }}
-                      >
-                          <span>{streamingMode.state.originalText}</span>
-                          {streamingMode.state.interimText && (
-                              <span className="text-gray-500 italic ml-1">{streamingMode.state.interimText}</span>
-                          )}
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
+      {/* BOTTOM PANEL removed — original text now shown in layout's top section */}
 
       {/* DEBUG OVERLAY */}
       {debugLog.length > 0 && (

@@ -82,6 +82,9 @@ class LocalTranslator {
     private useConfidenceFilter: boolean = true;
     private lastConfidenceScore: number = 100;
 
+    // INCREMENTAL CACHE: Reuse prefix translation for growing text
+    private incrementalCache: { originalText: string; translatedText: string } = { originalText: '', translatedText: '' };
+
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
 
     async checkChromeTranslator(): Promise<boolean> {
@@ -547,6 +550,7 @@ class LocalTranslator {
     // Clear cache (call when switching languages or models)
     clearCache() {
         this.chunkCache.clear();
+        this.incrementalCache = { originalText: '', translatedText: '' };
     }
 
     // OPTIMIZED: Translate phrase using chunked approach with caching
@@ -562,11 +566,33 @@ class LocalTranslator {
         }
 
         // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
+        // INCREMENTAL CACHE: If text starts with previously translated prefix,
+        // only translate the new suffix and concatenate (keeps latency ~1-50ms)
+        const cache = this.incrementalCache;
+        if (cache.originalText && text.startsWith(cache.originalText) && text !== cache.originalText) {
+            const suffix = text.slice(cache.originalText.length).trim();
+            if (suffix) {
+                const suffixStart = performance.now();
+                const suffixResult = await this.translateWithChrome(suffix);
+                if (suffixResult !== null) {
+                    const fullTranslation = cache.translatedText + ' ' + suffixResult;
+                    const processedResult = glossaryProcessor.processTranslation(fullTranslation);
+                    // Update cache with full text
+                    this.incrementalCache = { originalText: text, translatedText: fullTranslation };
+                    debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - suffixStart, text.split(/\s+/).length);
+                    if (onProgress) onProgress(processedResult);
+                    return [{ original: text, ghostTranslation: processedResult, status: 'ghost' }];
+                }
+            }
+        }
+
         const chromeStart = performance.now();
         const chromeResult = await this.translateWithChrome(text);
         if (chromeResult !== null) {
             // POST-PROCESSING: Apply IT glossary
             const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            // Update incremental cache
+            this.incrementalCache = { originalText: text, translatedText: chromeResult };
             debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - chromeStart, text.split(/\s+/).length);
             if (onProgress) onProgress(processedResult);
             return [{

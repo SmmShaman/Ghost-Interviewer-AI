@@ -83,9 +83,9 @@ export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: s
   youtube: {
     label: 'YouTube / Підкасти',
     description: 'Ghost only, суцільний текст як субтитри',
-    ghostBatchWords: 8,
-    ghostDebounceMs: 80,
-    interimDebounceMs: 80,
+    ghostBatchWords: 10,
+    ghostDebounceMs: 50,
+    interimDebounceMs: 50,
     holdN: 2,
     llmEnabled: false,
     llmTriggerWords: 25,
@@ -97,7 +97,7 @@ export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: s
   interview: {
     label: 'Live інтерв\'ю',
     description: 'Максимальна швидкість Ghost + LLM для відповідей',
-    ghostBatchWords: 4,
+    ghostBatchWords: 6,
     ghostDebounceMs: 50,
     interimDebounceMs: 50,
     holdN: 1,
