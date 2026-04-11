@@ -175,9 +175,9 @@ export function useStreamingMode(
     const topicAbortRef = useRef<AbortController | null>(null);
     const lastTopicWordCountRef = useRef<number>(0); // Track words at last topic generation
     const wordsInCountRef = useRef<number>(0); // Count WORDS_IN events since last topic
-    const TOPIC_TRIGGER_WORDS = 20; // Generate topics every N words — bigger chunks = better context
-    const TOPIC_MIN_WORDS = 15; // Minimum words before first topic
-    const TOPIC_PAUSE_MS = 3000; // 3s pause triggers topic update
+    const TOPIC_TRIGGER_WORDS = 5; // Trigger topics on each final batch with >= 5 new words
+    const TOPIC_MIN_WORDS = 5; // Minimum words before first topic
+    const TOPIC_PAUSE_MS = 2000; // 2s pause triggers topic update (flush remaining)
     const llmTranslatedWordCountRef = useRef<number>(0);
     const sessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const contextRef = useRef(context);
@@ -756,7 +756,7 @@ export function useStreamingMode(
 
     const executeTopicSummary = useCallback(async () => {
         const currentOriginal = originalTextRef.current;
-        if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 10) return;
+        if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 5) return;
 
         // Skip if previous Topics call still running
         if (isTopicRunningRef.current) return;
@@ -765,7 +765,7 @@ export function useStreamingMode(
         // Only send NEW words (after what was already processed)
         const allWords = currentOriginal.split(/\s+/);
         const newWords = allWords.slice(topicProcessedUpToWordRef.current);
-        if (newWords.length < 10) {
+        if (newWords.length < 5) {
             isTopicRunningRef.current = false;
             return;
         }
@@ -826,9 +826,9 @@ export function useStreamingMode(
         }, TOPIC_PAUSE_MS);
     }, [executeTopicSummary]);
 
-    // Trigger topics every TOPIC_TRIGGER_WORDS words (called from addWords)
-    const triggerTopicOnBlock = useCallback(() => {
-        wordsInCountRef.current++;
+    // Trigger topics on each final batch if enough new words accumulated
+    const triggerTopicOnBlock = useCallback((batchWordCount: number) => {
+        wordsInCountRef.current += batchWordCount;
         if (wordsInCountRef.current >= TOPIC_TRIGGER_WORDS && wordCountRef.current >= TOPIC_MIN_WORDS) {
             wordsInCountRef.current = 0;
             executeTopicSummary();
@@ -1007,9 +1007,8 @@ export function useStreamingMode(
             return { ...prev, originalText: newOriginal, wordCount: totalWords };
         });
 
-        // NO GHOST TRANSLATION — all resources go to Topics (Structure)
-        // Topics triggered on every block + on pause
-        triggerTopicOnBlock();
+        // Topics triggered on every final batch + on pause
+        triggerTopicOnBlock(newWordCount);
         scheduleTopicSummary();
     }, [triggerTopicOnBlock, scheduleTopicSummary]);
 
