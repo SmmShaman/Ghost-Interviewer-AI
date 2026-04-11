@@ -171,6 +171,53 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
             </div>
 
+            {/* Language Selection — required before starting */}
+            <div className="w-full max-w-5xl px-6 mb-8">
+                <div className="flex items-center justify-center gap-4">
+                    {/* Source Language */}
+                    <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-gray-500 font-mono tracking-wider uppercase whitespace-nowrap">
+                            {uiLang === 'uk' ? 'ДЖЕРЕЛО' : 'SOURCE'}
+                        </label>
+                        <select
+                            className="bg-gray-900/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-cyan-500/50 transition-colors cursor-pointer"
+                            value={context.targetLanguage}
+                            onChange={(e) => setContext({ ...context, targetLanguage: e.target.value })}
+                        >
+                            <option className="bg-gray-900">Norwegian</option>
+                            <option className="bg-gray-900">English</option>
+                            <option className="bg-gray-900">Ukrainian</option>
+                            <option className="bg-gray-900">Russian</option>
+                            <option className="bg-gray-900">French</option>
+                            <option className="bg-gray-900">German</option>
+                            <option className="bg-gray-900">Spanish</option>
+                        </select>
+                    </div>
+
+                    <span className="text-gray-600 text-lg">→</span>
+
+                    {/* Target Language */}
+                    <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-gray-500 font-mono tracking-wider uppercase whitespace-nowrap">
+                            {uiLang === 'uk' ? 'ПЕРЕКЛАД' : 'TRANSLATE TO'}
+                        </label>
+                        <select
+                            className="bg-gray-900/80 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-cyan-500/50 transition-colors cursor-pointer"
+                            value={context.nativeLanguage}
+                            onChange={(e) => setContext({ ...context, nativeLanguage: e.target.value })}
+                        >
+                            <option className="bg-gray-900">Ukrainian</option>
+                            <option className="bg-gray-900">Russian</option>
+                            <option className="bg-gray-900">English</option>
+                            <option className="bg-gray-900">Norwegian</option>
+                            <option className="bg-gray-900">French</option>
+                            <option className="bg-gray-900">German</option>
+                            <option className="bg-gray-900">Spanish</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             {/* Warning: FOCUS/FULL with YouTube preset */}
             {(context.speedPreset === 'youtube') && (
                 <div className="w-full max-w-5xl px-6 mb-4">
