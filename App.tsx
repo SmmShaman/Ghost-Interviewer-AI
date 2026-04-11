@@ -947,39 +947,43 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // HYBRID: Commit final words immediately + stabilized interim words after 1s
-            // Final words = guaranteed correct by Speech API
-            const finalWords = fullFinalText.trim().split(/\s+/).filter(w => w.length > 0);
+            // SINGLE-COUNTER APPROACH: Track position in combined (final+interim) text
+            // Hold back last 2 words (may still change), commit the rest after 1s stability
+            // This prevents both: truncated words AND duplicate commits
 
-            if (finalWords.length > committedWordCountRef.current) {
-                const newFinalWords = finalWords.slice(committedWordCountRef.current);
-                committedWordCountRef.current = finalWords.length;
-                forceCommittedInterimCountRef.current = 0; // Reset interim commit counter on new final
-                streamingModeRef.current?.addWords(newFinalWords.join(' '));
-            }
+            // Safe zone = all words except last 2 (which Speech API may still revise)
+            const safeCount = Math.max(0, totalWordCount - 2);
 
-            // Stabilized interim: commit interim words that haven't changed for 1s
-            // This gives fast translation without waiting for Chrome's rare isFinal
-            const interimWords = currentInterim.trim().split(/\s+/).filter(w => w.length > 0);
-            const stableInterimCount = Math.max(0, interimWords.length - 2); // Keep last 2 words unstable (may still change)
-
-            if (stableInterimCount > forceCommittedInterimCountRef.current) {
-                // New stable interim words available — start/reset timer
+            if (safeCount > committedWordCountRef.current) {
+                // New safe words available — schedule commit after 1s stability
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 silenceTimerRef.current = setTimeout(() => {
-                    // After 1s of stability, commit interim words (except last 2)
-                    const currentInterimWords = currentInterim.trim().split(/\s+/).filter(w => w.length > 0);
-                    const toCommit = currentInterimWords.slice(forceCommittedInterimCountRef.current, Math.max(0, currentInterimWords.length - 2));
-                    if (toCommit.length > 0) {
-                        forceCommittedInterimCountRef.current += toCommit.length;
+                    // Re-read current state (may have changed since timer was set)
+                    const currentText = lastFullTextRef.current;
+                    const currentWords = currentText.split(/\s+/).filter(w => w.length > 0);
+                    const currentSafe = Math.max(0, currentWords.length - 2);
+
+                    if (currentSafe > committedWordCountRef.current) {
+                        const toCommit = currentWords.slice(committedWordCountRef.current, currentSafe);
+                        committedWordCountRef.current = currentSafe;
                         streamingModeRef.current?.addWords(toCommit.join(' '));
                     }
                 }, 1000);
             }
 
-            // Show remaining interim text as grey preview
-            const uncommittedInterim = interimWords.slice(forceCommittedInterimCountRef.current).join(' ');
-            streamingModeRef.current?.setInterimText(uncommittedInterim || '');
+            // Also commit immediately when Speech API marks words as final
+            // (final words won't change, so no need to wait)
+            const finalWords = fullFinalText.trim().split(/\s+/).filter(w => w.length > 0);
+            if (finalWords.length > committedWordCountRef.current) {
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                const toCommit = allWords.slice(committedWordCountRef.current, finalWords.length);
+                committedWordCountRef.current = finalWords.length;
+                streamingModeRef.current?.addWords(toCommit.join(' '));
+            }
+
+            // Show uncommitted words as grey preview
+            const uncommitted = allWords.slice(committedWordCountRef.current).join(' ');
+            streamingModeRef.current?.setInterimText(uncommitted || '');
 
             return; // Skip block-based logic
         }
