@@ -121,10 +121,10 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
                 {/* Column headers */}
                 <div className="px-4 py-2 border-b border-gray-800/30 flex gap-3 shrink-0">
-                    <div className="w-[35%] shrink-0">
+                    <div className="w-[20%] shrink-0">
                         <span className="text-[9px] text-purple-400/60 uppercase tracking-wider font-bold">Структура</span>
                     </div>
-                    <div className="w-[40%] shrink-0">
+                    <div className="w-[55%] shrink-0">
                         <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
                     </div>
                     <div className="flex-1">
@@ -145,22 +145,22 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                                         key={chunkIdx}
                                         className="flex gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
                                     >
-                                        {/* LEFT: Structured topics */}
-                                        <div className="w-[35%] shrink-0">
+                                        {/* LEFT: Structured topics (compact) */}
+                                        <div className="w-[20%] shrink-0">
                                             {blocks.map((block, blockIdx) => (
-                                                <div key={blockIdx} className={blockIdx > 0 ? 'mt-2' : ''}>
-                                                    <div className="text-sm font-semibold text-gray-200 leading-snug">{block.title}</div>
+                                                <div key={blockIdx} className={blockIdx > 0 ? 'mt-1' : ''}>
+                                                    <div className="text-[11px] font-semibold text-gray-300 leading-snug">{block.title}</div>
                                                     {block.body && (
-                                                        <div className="text-sm text-gray-400 leading-relaxed mt-0.5">{block.body}</div>
+                                                        <div className="text-[10px] text-gray-500 leading-relaxed mt-0.5">{block.body}</div>
                                                     )}
                                                 </div>
                                             ))}
                                         </div>
 
-                                        {/* MIDDLE: Literary translation */}
-                                        <div className="w-[40%] shrink-0">
+                                        {/* MIDDLE: Literary translation (primary) */}
+                                        <div className="w-[55%] shrink-0">
                                             {literary ? (
-                                                <p className="text-sm text-amber-200/90 leading-relaxed">
+                                                <p className="text-base text-amber-200/90 leading-relaxed">
                                                     {literary}
                                                 </p>
                                             ) : isLiteraryPending ? (
