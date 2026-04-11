@@ -947,16 +947,21 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // SIMPLIFIED STREAMING: Every word appears immediately
-            // No delta tracking, no force-finalization, no debounce
-            // Just: count total words from Speech API, send NEW ones to addWords
-            const fullText = (fullFinalText + currentInterim).trim();
-            const allWords = fullText.split(/\s+/).filter(w => w.length > 0);
+            // STREAMING: Commit ONLY final words, show interim separately
+            // This prevents half-words ("магни" instead of "магнитная") from being committed
+            const finalWords = fullFinalText.trim().split(/\s+/).filter(w => w.length > 0);
 
-            if (allWords.length > committedWordCountRef.current) {
-                const newWords = allWords.slice(committedWordCountRef.current);
-                committedWordCountRef.current = allWords.length;
-                streamingModeRef.current?.addWords(newWords.join(' '));
+            if (finalWords.length > committedWordCountRef.current) {
+                const newFinalWords = finalWords.slice(committedWordCountRef.current);
+                committedWordCountRef.current = finalWords.length;
+                streamingModeRef.current?.addWords(newFinalWords.join(' '));
+            }
+
+            // Show interim text as grey preview (will be replaced when finalized)
+            if (currentInterim.trim()) {
+                streamingModeRef.current?.setInterimText(currentInterim.trim());
+            } else {
+                streamingModeRef.current?.setInterimText('');
             }
 
             return; // Skip block-based logic
@@ -1346,7 +1351,7 @@ const App: React.FC = () => {
                   return;
               }
               const silenceMs = Date.now() - lastSpeechEventTimeRef.current;
-              if (silenceMs > 8000 && !isRestartingRef.current) {
+              if (silenceMs > 4000 && !isRestartingRef.current) {
                   debugLogger.log('RECOG', `WATCHDOG ${Math.round(silenceMs/1000)}s silence`);
                   addDebug(`🐕 WATCHDOG: No events ${Math.round(silenceMs/1000)}s — force restart`);
                   lastSpeechEventTimeRef.current = Date.now();
