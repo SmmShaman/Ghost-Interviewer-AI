@@ -1826,7 +1826,10 @@ const App: React.FC = () => {
                  wordCount={streamingMode.state.wordCount}
                  sessionDuration={streamingMode.state.sessionDuration}
                  topicSummary={streamingMode.state.topicSummary}
+                 topicChunks={streamingMode.state.topicChunks}
                  isProcessingTopics={streamingMode.state.isProcessingTopics}
+                 literaryChunks={streamingMode.state.literaryChunks}
+                 isProcessingLiterary={streamingMode.state.isProcessingLiterary}
              />
          )}
 

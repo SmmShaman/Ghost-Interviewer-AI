@@ -1,16 +1,31 @@
 /**
- * STREAMING SIMPLE MODE LAYOUT — Original + Structure
+ * STREAMING SIMPLE MODE LAYOUT — Topics + Literary Translation + Raw Words
  *
- * ┌──────────────────────────────┬──────────────────────────────┐
- * │  🔴 Оригінал                 │  📌 Структура               │
- * │  hele oppvarming som vi...   │  📌 **Тема 1**              │
- * │  (сірий, mono, auto-scroll) │  Опис теми...               │
- * │                              │  📌 **Тема 2**              │
- * │                              │  Опис теми...               │
- * └──────────────────────────────┴──────────────────────────────┘
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │  MAIN: Three columns aligned by chunks                              │
+ * │  ┌──────────────────┬──────────────────────┬───────────────────┐    │
+ * │  │ 📌 **Тема 1**    │ Literary rewrite     │ raw raw words...  │    │
+ * │  │ Structured topics│ flowing prose         │ (exact original)  │    │
+ * │  ├──────────────────┼──────────────────────┼───────────────────┤    │
+ * │  │ 📌 **Тема 2**    │ More literary text   │ more raw words    │    │
+ * │  └──────────────────┴──────────────────────┴───────────────────┘    │
+ * ├──────────────────────────────────────────────────────────────────────┤
+ * │  RAW LOG: continuous raw text                                       │
+ * └──────────────────────────────────────────────────────────────────────┘
  */
 
 import React, { useEffect, useRef } from 'react';
+
+interface TopicChunk {
+    rawText: string;
+    topics: string;
+}
+
+interface LiteraryChunk {
+    rawText: string;
+    topics: string;
+    literary: string;
+}
 
 interface StreamingSimpleModeLayoutProps {
     accumulatedOriginal: string;
@@ -30,7 +45,10 @@ interface StreamingSimpleModeLayoutProps {
     wordCount: number;
     sessionDuration?: number;
     topicSummary?: string;
+    topicChunks?: TopicChunk[];
     isProcessingTopics?: boolean;
+    literaryChunks?: LiteraryChunk[];
+    isProcessingLiterary?: boolean;
 }
 
 const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
@@ -38,30 +56,32 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     isListening,
     wordCount,
     sessionDuration = 0,
-    topicSummary = '',
-    isProcessingTopics = false
+    topicChunks = [],
+    isProcessingTopics = false,
+    literaryChunks = [],
+    isProcessingLiterary = false
 }) => {
-    const originalScrollRef = useRef<HTMLDivElement>(null);
-    const topicScrollRef = useRef<HTMLDivElement>(null);
+    const mainScrollRef = useRef<HTMLDivElement>(null);
+    const logScrollRef = useRef<HTMLDivElement>(null);
 
     const originalText = accumulatedOriginal || '';
 
-    // Auto-scroll original text
+    // Auto-scroll main area (topics)
     useEffect(() => {
-        if (originalScrollRef.current) {
-            originalScrollRef.current.scrollTop = originalScrollRef.current.scrollHeight;
-        }
-    }, [originalText]);
-
-    // Auto-scroll topics — smooth animation
-    useEffect(() => {
-        if (topicScrollRef.current && topicSummary) {
-            topicScrollRef.current.scrollTo({
-                top: topicScrollRef.current.scrollHeight,
+        if (mainScrollRef.current && (topicChunks.length > 0 || literaryChunks.length > 0)) {
+            mainScrollRef.current.scrollTo({
+                top: mainScrollRef.current.scrollHeight,
                 behavior: 'smooth'
             });
         }
-    }, [topicSummary]);
+    }, [topicChunks, literaryChunks]);
+
+    // Auto-scroll raw log
+    useEffect(() => {
+        if (logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        }
+    }, [originalText]);
 
     const formatDuration = (ms: number): string => {
         const s = Math.floor(ms / 1000);
@@ -69,62 +89,123 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         return `${m}:${(s % 60).toString().padStart(2, '0')}`;
     };
 
-    // Render topics: 📌 heading + body underneath
-    const renderTopics = () => {
-        if (!topicSummary) return null;
-        const blocks = topicSummary.split(/(?=📌)/).filter(b => b.trim());
-        return blocks.map((block, i) => {
+    // Parse a single chunk's topics into blocks
+    const parseTopicBlocks = (topicsStr: string) => {
+        return topicsStr.split(/(?=📌)/).filter(b => b.trim()).map(block => {
             const lines = block.trim().split('\n').filter(l => l.trim());
             const title = lines[0] || '';
             const body = lines.slice(1).join(' ').trim();
-            return (
-                <div key={i} className="mb-3 last:mb-0 animate-fade-in-up">
-                    <div className="text-sm font-semibold text-gray-200 leading-snug">{title}</div>
-                    {body && <div className="text-sm text-gray-400 leading-relaxed mt-0.5">{body}</div>}
-                </div>
-            );
+            return { title, body };
         });
     };
 
+    // Find literary text for a given chunk index
+    const getLiteraryForChunk = (chunkIdx: number): string | null => {
+        if (chunkIdx < literaryChunks.length) {
+            return literaryChunks[chunkIdx].literary;
+        }
+        return null;
+    };
+
+    const hasTopics = topicChunks.length > 0;
+
     return (
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
-            <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT: Original text */}
-                <div className="w-[35%] shrink-0 rounded-2xl bg-gray-950/60 border border-gray-800/30 overflow-hidden flex flex-col">
-                    <div className="px-3 py-1.5 border-b border-gray-800/20 shrink-0">
-                        <span className="text-[10px] text-gray-600 uppercase tracking-wider font-bold">Оригінал</span>
+            {/* MAIN: Topic blocks + Literary translation + Raw words */}
+            <div className="flex-1 min-h-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col shadow-2xl relative">
+                {(isProcessingTopics || isProcessingLiterary) && (
+                    <span className={`absolute top-2 right-3 w-1.5 h-1.5 rounded-full ${isProcessingLiterary ? 'bg-amber-400' : 'bg-purple-400'} animate-pulse z-10`} />
+                )}
+
+                {/* Column headers */}
+                <div className="px-4 py-2 border-b border-gray-800/30 flex gap-3 shrink-0">
+                    <div className="w-[35%] shrink-0">
+                        <span className="text-[9px] text-purple-400/60 uppercase tracking-wider font-bold">Структура</span>
                     </div>
-                    <div ref={originalScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 py-3">
-                        {originalText ? (
-                            <p className="text-sm text-gray-400 leading-relaxed font-mono">
-                                {originalText}
-                                {isListening && <span className="text-emerald-400 animate-pulse ml-1">▊</span>}
-                            </p>
-                        ) : (
-                            <p className="text-gray-700 text-sm italic">
-                                {isListening ? 'Слухаю...' : 'Натисніть Start'}
-                            </p>
-                        )}
+                    <div className="w-[40%] shrink-0">
+                        <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
+                    </div>
+                    <div className="flex-1">
+                        <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Оригінал</span>
                     </div>
                 </div>
 
-                {/* RIGHT: Clean flowing text — no headers, just content */}
-                <div className="flex-1 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col shadow-2xl relative">
-                    {isProcessingTopics && (
-                        <span className="absolute top-2 right-3 w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse z-10" />
+                <div ref={mainScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 py-4">
+                    {hasTopics ? (
+                        <div className="space-y-1">
+                            {topicChunks.map((chunk, chunkIdx) => {
+                                const blocks = parseTopicBlocks(chunk.topics);
+                                const literary = getLiteraryForChunk(chunkIdx);
+                                const isLiteraryPending = chunkIdx >= literaryChunks.length;
+
+                                return (
+                                    <div
+                                        key={chunkIdx}
+                                        className="flex gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
+                                    >
+                                        {/* LEFT: Structured topics */}
+                                        <div className="w-[35%] shrink-0">
+                                            {blocks.map((block, blockIdx) => (
+                                                <div key={blockIdx} className={blockIdx > 0 ? 'mt-2' : ''}>
+                                                    <div className="text-sm font-semibold text-gray-200 leading-snug">{block.title}</div>
+                                                    {block.body && (
+                                                        <div className="text-sm text-gray-400 leading-relaxed mt-0.5">{block.body}</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* MIDDLE: Literary translation */}
+                                        <div className="w-[40%] shrink-0">
+                                            {literary ? (
+                                                <p className="text-sm text-amber-200/90 leading-relaxed">
+                                                    {literary}
+                                                </p>
+                                            ) : isLiteraryPending ? (
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="w-1 h-1 rounded-full bg-amber-400/40 animate-pulse" />
+                                                    <span className="text-xs text-amber-400/30 italic">перекладаю...</span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        {/* RIGHT: Raw words */}
+                                        <div className="flex-1 flex items-start">
+                                            <p className="text-xs text-gray-600 leading-relaxed font-mono">
+                                                {chunk.rawText}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-center h-full">
+                            <p className="text-gray-700 text-sm italic">
+                                {isListening ? 'Слухаю...' : 'Натисніть Start'}
+                            </p>
+                        </div>
                     )}
-                    <div ref={topicScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-6 py-5">
-                        {topicSummary ? (
-                            <div>{renderTopics()}</div>
-                        ) : (
-                            <div className="flex items-center justify-center h-full">
-                                <p className="text-gray-700 text-sm italic">
-                                    {isListening ? 'Слухаю...' : 'Натисніть Start'}
-                                </p>
-                            </div>
-                        )}
-                    </div>
+                </div>
+            </div>
+
+            {/* RAW LOG: continuous raw text */}
+            <div className="h-[20%] shrink-0 mt-2 rounded-xl bg-gray-950/60 border border-gray-800/30 overflow-hidden flex flex-col">
+                <div className="px-3 py-1 border-b border-gray-800/20 shrink-0">
+                    <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Log</span>
+                </div>
+                <div ref={logScrollRef} className="flex-1 overflow-y-auto px-3 py-2">
+                    {originalText ? (
+                        <p className="text-xs text-gray-500 leading-relaxed font-mono">
+                            {originalText}
+                            {isListening && <span className="text-emerald-400 animate-pulse ml-1">▊</span>}
+                        </p>
+                    ) : (
+                        <p className="text-gray-700 text-xs italic">
+                            {isListening ? 'Слухаю...' : ''}
+                        </p>
+                    )}
                 </div>
             </div>
 
@@ -135,6 +216,12 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     {sessionDuration > 0 && <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>}
                 </div>
                 <div className="flex items-center gap-3">
+                    {isProcessingLiterary && (
+                        <span className="text-amber-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            LIT
+                        </span>
+                    )}
                     {isProcessingTopics && (
                         <span className="text-purple-400 flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />

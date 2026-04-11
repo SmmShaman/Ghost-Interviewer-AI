@@ -442,6 +442,77 @@ export async function generateTopicSummary(
     }
 }
 
+// ========== LITERARY TRANSLATION (Flash — quality rewrite) ==========
+
+const LITERARY_SYSTEM_PROMPT = `You are a professional literary translator and editor.
+
+INPUT: You receive two things:
+1. STRUCTURED TOPICS — already extracted ideas from speech (in Ukrainian)
+2. RAW TEXT — original speech transcription (Norwegian, with errors/noise)
+
+YOUR TASK:
+Rewrite the structured topics into a coherent, literary Ukrainian text that:
+- Preserves the EXACT meaning and order of ideas from topics
+- Uses the author's original words where possible (from raw text context)
+- Applies proper literary Ukrainian style: correct grammar, natural flow, connected sentences
+- Adds scientific/professional terminology where appropriate and confident
+- Removes all speech artifacts, repetitions, filler words
+- Creates smooth transitions between ideas
+
+STYLE:
+- Literary Ukrainian with scientific undertone
+- Formal but readable (like a well-written lecture transcript)
+- Paragraphs, not bullet points
+- No emoji, no markdown formatting, no headings
+- 2-4 sentences per paragraph
+- Preserve author's voice — do not add your own opinions or interpretations
+
+FORBIDDEN:
+- Inventing new information not present in topics
+- Changing the meaning or order of ideas
+- Adding "the speaker says", "it was mentioned that"
+- Over-academizing simple statements
+- Bullet points or lists — write flowing prose only
+
+OUTPUT: Clean Ukrainian literary text only. No explanations, no meta-commentary.`;
+
+/**
+ * Generate literary-quality Ukrainian translation from structured topics + raw text.
+ * Uses main Flash model (not Lite) for higher quality rewrite.
+ */
+export async function generateLiteraryTranslation(
+    rawText: string,
+    structuredTopics: string,
+    signal?: AbortSignal
+): Promise<string> {
+    if (!ai || !structuredTopics.trim()) return '';
+
+    try {
+        const userPrompt = `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (Norwegian):\n${rawText}`;
+
+        const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: userPrompt,
+            config: {
+                systemInstruction: LITERARY_SYSTEM_PROMPT,
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.3,
+                maxOutputTokens: 1000,
+            }
+        });
+
+        if (signal?.aborted) return '';
+
+        const text = response?.text?.trim();
+        return text || '';
+    } catch (e: any) {
+        if (e.name !== 'AbortError') {
+            console.error('[LiteraryTranslation] Error:', e?.message || e);
+        }
+        return '';
+    }
+}
+
 // ========== INTERVIEW CONVERSATION ANALYZER (Flash-Lite) ==========
 
 const INTERVIEW_ANALYZER_PROMPT = `Ти асистент на співбесіді. Аналізуєш норвезьке мовлення інтерв'юера і ведеш хронологію розмови УКРАЇНСЬКОЮ.

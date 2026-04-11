@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, analyzeConversation, generateInterviewAnswer, refineTranslationPair } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, generateLiteraryTranslation, analyzeConversation, generateInterviewAnswer, refineTranslationPair } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -52,7 +52,12 @@ export interface StreamingState {
 
     // Topic structuring (Flash-Lite)
     topicSummary: string;
+    topicChunks: Array<{ rawText: string; topics: string }>;
     isProcessingTopics: boolean;
+
+    // Literary translation (Flash — quality rewrite of topics)
+    literaryChunks: Array<{ rawText: string; topics: string; literary: string }>;
+    isProcessingLiterary: boolean;
 
     // Interview conversation log (FOCUS mode)
     conversationLog: string;
@@ -141,7 +146,10 @@ export function useStreamingMode(
         analysis: '',
         strategy: '',
         topicSummary: '',
+        topicChunks: [],
         isProcessingTopics: false,
+        literaryChunks: [],
+        isProcessingLiterary: false,
         conversationLog: '',
         lastDetectedQuestion: '',
         isProcessingConversation: false,
@@ -783,13 +791,17 @@ export function useStreamingMode(
 
             if (result && result.trim()) {
                 // APPEND new result to existing — frozen text stays, new text added below
+                const trimmedResult = result.trim();
                 setState(prev => ({
                     ...prev,
                     topicSummary: prev.topicSummary
-                        ? `${prev.topicSummary}\n\n${result.trim()}`
-                        : result.trim(),
+                        ? `${prev.topicSummary}\n\n${trimmedResult}`
+                        : trimmedResult,
+                    topicChunks: [...prev.topicChunks, { rawText: newText, topics: trimmedResult }],
                     isProcessingTopics: false
                 }));
+                // Trigger literary translation for this chunk
+                executeLiteraryTranslation(newText, trimmedResult);
             } else {
                 setState(prev => ({ ...prev, isProcessingTopics: false }));
             }
@@ -799,7 +811,7 @@ export function useStreamingMode(
         } finally {
             isTopicRunningRef.current = false;
         }
-    }, []);
+    }, [executeLiteraryTranslation]);
 
     const scheduleTopicSummary = useCallback(() => {
         if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
@@ -820,6 +832,54 @@ export function useStreamingMode(
             executeTopicSummary();
         }
     }, [executeTopicSummary]);
+
+    // === LITERARY TRANSLATION (Flash — quality rewrite after topics) ===
+
+    const literaryAbortRef = useRef<AbortController | null>(null);
+    const isLiteraryRunningRef = useRef<boolean>(false);
+    const literaryQueueRef = useRef<Array<{ rawText: string; topics: string }>>([]);
+
+    const executeLiteraryTranslation = useCallback(async (rawText: string, topics: string) => {
+        if (isLiteraryRunningRef.current) {
+            // Queue for later processing
+            literaryQueueRef.current.push({ rawText, topics });
+            return;
+        }
+        isLiteraryRunningRef.current = true;
+
+        if (literaryAbortRef.current) literaryAbortRef.current.abort();
+        literaryAbortRef.current = new AbortController();
+
+        setState(prev => ({ ...prev, isProcessingLiterary: true }));
+
+        try {
+            const result = await generateLiteraryTranslation(
+                rawText,
+                topics,
+                literaryAbortRef.current.signal
+            );
+
+            if (result && result.trim()) {
+                setState(prev => ({
+                    ...prev,
+                    literaryChunks: [...prev.literaryChunks, { rawText, topics, literary: result.trim() }],
+                    isProcessingLiterary: false
+                }));
+            } else {
+                setState(prev => ({ ...prev, isProcessingLiterary: false }));
+            }
+        } catch (e: any) {
+            if (e.name !== 'AbortError') console.error('[Literary] Error:', e);
+            setState(prev => ({ ...prev, isProcessingLiterary: false }));
+        } finally {
+            isLiteraryRunningRef.current = false;
+            // Process queued items
+            const next = literaryQueueRef.current.shift();
+            if (next) {
+                executeLiteraryTranslation(next.rawText, next.topics);
+            }
+        }
+    }, []);
 
     // === CONVERSATION ANALYZER (FOCUS mode) ===
 
@@ -1050,7 +1110,10 @@ export function useStreamingMode(
             analysis: '',
             strategy: '',
             topicSummary: '',
+            topicChunks: [],
             isProcessingTopics: false,
+            literaryChunks: [],
+            isProcessingLiterary: false,
             conversationLog: '',
             lastDetectedQuestion: '',
             isProcessingConversation: false,
@@ -1069,6 +1132,9 @@ export function useStreamingMode(
         refinedUpToBlockRef.current = 0;
         refinedSentencesRef.current = [];
         topicProcessedUpToWordRef.current = 0;
+        if (literaryAbortRef.current) { literaryAbortRef.current.abort(); literaryAbortRef.current = null; }
+        isLiteraryRunningRef.current = false;
+        literaryQueueRef.current = [];
         if (refineAbortRef.current) { refineAbortRef.current.abort(); refineAbortRef.current = null; }
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
@@ -1275,6 +1341,15 @@ export function useStreamingMode(
             answerTranslation: '',
             analysis: '',
             strategy: '',
+            topicSummary: '',
+            topicChunks: [],
+            isProcessingTopics: false,
+            literaryChunks: [],
+            isProcessingLiterary: false,
+            conversationLog: '',
+            lastDetectedQuestion: '',
+            isProcessingConversation: false,
+            answeredQuestions: [],
             isGeneratingAnswer: false,
             isAnalyzing: false,
             isListening: false,
@@ -1290,6 +1365,9 @@ export function useStreamingMode(
         refinedUpToBlockRef.current = 0;
         refinedSentencesRef.current = [];
         topicProcessedUpToWordRef.current = 0;
+        if (literaryAbortRef.current) { literaryAbortRef.current.abort(); literaryAbortRef.current = null; }
+        isLiteraryRunningRef.current = false;
+        literaryQueueRef.current = [];
         if (refineAbortRef.current) { refineAbortRef.current.abort(); refineAbortRef.current = null; }
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
