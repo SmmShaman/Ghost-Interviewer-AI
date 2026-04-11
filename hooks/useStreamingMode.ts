@@ -751,6 +751,7 @@ export function useStreamingMode(
 
     // === TOPIC STRUCTURING (Flash-Lite) ===
 
+    const executeLiteraryRef = useRef<(rawText: string, topics: string) => void>(() => {});
     const isTopicRunningRef = useRef<boolean>(false);
     const topicProcessedUpToWordRef = useRef<number>(0); // Track which words were already processed
 
@@ -801,7 +802,7 @@ export function useStreamingMode(
                     isProcessingTopics: false
                 }));
                 // Trigger literary translation for this chunk
-                executeLiteraryTranslation(newText, trimmedResult);
+                executeLiteraryRef.current(newText, trimmedResult);
             } else {
                 setState(prev => ({ ...prev, isProcessingTopics: false }));
             }
@@ -811,7 +812,7 @@ export function useStreamingMode(
         } finally {
             isTopicRunningRef.current = false;
         }
-    }, [executeLiteraryTranslation]);
+    }, []);
 
     const scheduleTopicSummary = useCallback(() => {
         if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
@@ -880,6 +881,11 @@ export function useStreamingMode(
             }
         }
     }, []);
+
+    // Keep ref updated for executeTopicSummary to call
+    useEffect(() => {
+        executeLiteraryRef.current = executeLiteraryTranslation;
+    }, [executeLiteraryTranslation]);
 
     // === CONVERSATION ANALYZER (FOCUS mode) ===
 
