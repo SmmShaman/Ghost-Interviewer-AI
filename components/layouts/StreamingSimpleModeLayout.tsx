@@ -53,6 +53,7 @@ interface StreamingSimpleModeLayoutProps {
 
 const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     accumulatedOriginal,
+    interimText = '',
     isListening,
     wordCount,
     sessionDuration = 0,
@@ -81,7 +82,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         if (logScrollRef.current) {
             logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
         }
-    }, [originalText]);
+    }, [originalText, interimText]);
 
     const formatDuration = (ms: number): string => {
         const s = Math.floor(ms / 1000);
@@ -196,9 +197,12 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                     <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Log</span>
                 </div>
                 <div ref={logScrollRef} className="flex-1 overflow-y-auto px-3 py-2">
-                    {originalText ? (
-                        <p className="text-xs text-gray-500 leading-relaxed font-mono">
-                            {originalText}
+                    {(originalText || interimText) ? (
+                        <p className="text-xs leading-relaxed font-mono">
+                            <span className="text-gray-500">{originalText}</span>
+                            {interimText && (
+                                <span className="text-gray-600 italic">{originalText ? ' ' : ''}{interimText}</span>
+                            )}
                             {isListening && <span className="text-emerald-400 animate-pulse ml-1">▊</span>}
                         </p>
                     ) : (
