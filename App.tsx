@@ -947,22 +947,39 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // STREAMING: Commit ONLY final words, show interim separately
-            // This prevents half-words ("магни" instead of "магнитная") from being committed
+            // HYBRID: Commit final words immediately + stabilized interim words after 1s
+            // Final words = guaranteed correct by Speech API
             const finalWords = fullFinalText.trim().split(/\s+/).filter(w => w.length > 0);
 
             if (finalWords.length > committedWordCountRef.current) {
                 const newFinalWords = finalWords.slice(committedWordCountRef.current);
                 committedWordCountRef.current = finalWords.length;
+                forceCommittedInterimCountRef.current = 0; // Reset interim commit counter on new final
                 streamingModeRef.current?.addWords(newFinalWords.join(' '));
             }
 
-            // Show interim text as grey preview (will be replaced when finalized)
-            if (currentInterim.trim()) {
-                streamingModeRef.current?.setInterimText(currentInterim.trim());
-            } else {
-                streamingModeRef.current?.setInterimText('');
+            // Stabilized interim: commit interim words that haven't changed for 1s
+            // This gives fast translation without waiting for Chrome's rare isFinal
+            const interimWords = currentInterim.trim().split(/\s+/).filter(w => w.length > 0);
+            const stableInterimCount = Math.max(0, interimWords.length - 2); // Keep last 2 words unstable (may still change)
+
+            if (stableInterimCount > forceCommittedInterimCountRef.current) {
+                // New stable interim words available — start/reset timer
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                silenceTimerRef.current = setTimeout(() => {
+                    // After 1s of stability, commit interim words (except last 2)
+                    const currentInterimWords = currentInterim.trim().split(/\s+/).filter(w => w.length > 0);
+                    const toCommit = currentInterimWords.slice(forceCommittedInterimCountRef.current, Math.max(0, currentInterimWords.length - 2));
+                    if (toCommit.length > 0) {
+                        forceCommittedInterimCountRef.current += toCommit.length;
+                        streamingModeRef.current?.addWords(toCommit.join(' '));
+                    }
+                }, 1000);
             }
+
+            // Show remaining interim text as grey preview
+            const uncommittedInterim = interimWords.slice(forceCommittedInterimCountRef.current).join(' ');
+            streamingModeRef.current?.setInterimText(uncommittedInterim || '');
 
             return; // Skip block-based logic
         }
@@ -1351,7 +1368,7 @@ const App: React.FC = () => {
                   return;
               }
               const silenceMs = Date.now() - lastSpeechEventTimeRef.current;
-              if (silenceMs > 4000 && !isRestartingRef.current) {
+              if (silenceMs > 6000 && !isRestartingRef.current) {
                   debugLogger.log('RECOG', `WATCHDOG ${Math.round(silenceMs/1000)}s silence`);
                   addDebug(`🐕 WATCHDOG: No events ${Math.round(silenceMs/1000)}s — force restart`);
                   lastSpeechEventTimeRef.current = Date.now();
