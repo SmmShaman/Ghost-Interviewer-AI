@@ -87,8 +87,11 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       subItems: [
         { id: 'no', label: '🇳🇴 Norwegian', value: 'Norwegian', isActive: context.targetLanguage === 'Norwegian' },
         { id: 'en', label: '🇬🇧 English', value: 'English', isActive: context.targetLanguage === 'English' },
-        { id: 'de', label: '🇩🇪 German', value: 'German', isActive: context.targetLanguage === 'German' },
+        { id: 'ua', label: '🇺🇦 Ukrainian', value: 'Ukrainian', isActive: context.targetLanguage === 'Ukrainian' },
+        { id: 'ru', label: '🇷🇺 Russian', value: 'Russian', isActive: context.targetLanguage === 'Russian' },
         { id: 'fr', label: '🇫🇷 French', value: 'French', isActive: context.targetLanguage === 'French' },
+        { id: 'de', label: '🇩🇪 German', value: 'German', isActive: context.targetLanguage === 'German' },
+        { id: 'es', label: '🇪🇸 Spanish', value: 'Spanish', isActive: context.targetLanguage === 'Spanish' },
       ]
     },
     {
