@@ -312,7 +312,8 @@ export const generateInterviewAssist = async (
 
 // ========== TOPIC STRUCTURING (Flash-Lite) ==========
 
-const TOPIC_SYSTEM_PROMPT = `You process imperfect speech transcription (Norwegian + noise, errors, mixed languages).
+function buildTopicSystemPrompt(sourceLanguage: string, targetLanguage: string): string {
+    return `You process imperfect speech transcription (${sourceLanguage} + noise, errors, mixed languages).
 
 STEPS (perform internally):
 1. Clean the text from noise (repetitions, fragments, filler words).
@@ -320,10 +321,10 @@ STEPS (perform internally):
 3. Split into separate ideas in order of appearance.
 
 RULES:
-- Write ONLY in Ukrainian
+- Write ONLY in ${targetLanguage}
 - Do NOT limit the number of topics
 - Each topic = one complete idea
-- Use words as close to the original as possible (but translated)
+- Use words as close to the original as possible (but translated to ${targetLanguage})
 - Do NOT generalize when you can be more specific
 - Remove filler words and noise
 - If a phrase is unclear — simplify, but do not invent
@@ -333,11 +334,6 @@ SCIENTIFIC NORMALIZATION:
 - If there is an obvious scientific context (climate, geology, biology, physics):
   replace awkward or literal formulations with correct scientific terms,
   but only when confidence is high
-- Examples:
-  "CO comes out" → "CO₂ emissions"
-  "got mass" → "mass accumulation"
-  "the other side" → "the other part of the system" (if context is clear)
-  "gets cold and blue" → "cooling and subsidence"
 - Do NOT overcomplicate the text unnecessarily
 - Keep it concise
 
@@ -359,6 +355,7 @@ The essence in 1-2 sentences, close to the original.
 
 📌 **Next idea**
 The essence.`;
+}
 
 /**
  * Refine translation of two adjacent blocks using LLM sliding window.
@@ -408,22 +405,24 @@ ${draftTranslation}
  * Uses Flash-Lite (fast, cheap) with thinking disabled.
  */
 export async function generateTopicSummary(
-    norwegianText: string,
+    sourceText: string,
     existingTopics: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sourceLanguage: string = 'Norwegian',
+    targetLanguage: string = 'Ukrainian'
 ): Promise<string> {
-    if (!ai || !norwegianText.trim()) return existingTopics || '';
+    if (!ai || !sourceText.trim()) return existingTopics || '';
 
     try {
         const userPrompt = existingTopics
-            ? `ПОТОЧНІ ТЕМИ:\n${existingTopics}\n\nНОВИЙ ТЕКСТ:\n${norwegianText}`
-            : `ТЕКСТ:\n${norwegianText}`;
+            ? `CURRENT TOPICS:\n${existingTopics}\n\nNEW TEXT (${sourceLanguage}):\n${sourceText}`
+            : `TEXT (${sourceLanguage}):\n${sourceText}`;
 
         const response = await ai.models.generateContent({
             model: GEMINI_MODEL_LITE,
             contents: userPrompt,
             config: {
-                systemInstruction: TOPIC_SYSTEM_PROMPT,
+                systemInstruction: buildTopicSystemPrompt(sourceLanguage, targetLanguage),
                 thinkingConfig: { thinkingBudget: 0 },
                 temperature: 0.1,
                 maxOutputTokens: 600,
@@ -444,23 +443,24 @@ export async function generateTopicSummary(
 
 // ========== LITERARY TRANSLATION (Flash — quality rewrite) ==========
 
-const LITERARY_SYSTEM_PROMPT = `You are a professional literary translator and editor.
+function buildLiterarySystemPrompt(sourceLanguage: string, targetLanguage: string): string {
+    return `You are a professional literary translator and editor.
 
 INPUT: You receive two things:
-1. STRUCTURED TOPICS — already extracted ideas from speech (in Ukrainian)
-2. RAW TEXT — original speech transcription (Norwegian, with errors/noise)
+1. STRUCTURED TOPICS — already extracted ideas from speech (in ${targetLanguage})
+2. RAW TEXT — original speech transcription (${sourceLanguage}, with errors/noise)
 
 YOUR TASK:
-Rewrite the structured topics into a coherent, literary Ukrainian text that:
+Rewrite the structured topics into a coherent, literary ${targetLanguage} text that:
 - Preserves the EXACT meaning and order of ideas from topics
 - Uses the author's original words where possible (from raw text context)
-- Applies proper literary Ukrainian style: correct grammar, natural flow, connected sentences
+- Applies proper literary ${targetLanguage} style: correct grammar, natural flow, connected sentences
 - Adds scientific/professional terminology where appropriate and confident
 - Removes all speech artifacts, repetitions, filler words
 - Creates smooth transitions between ideas
 
 STYLE:
-- Literary Ukrainian with scientific undertone
+- Literary ${targetLanguage} with scientific undertone
 - Formal but readable (like a well-written lecture transcript)
 - Paragraphs, not bullet points
 - No emoji, no markdown formatting, no headings
@@ -474,27 +474,30 @@ FORBIDDEN:
 - Over-academizing simple statements
 - Bullet points or lists — write flowing prose only
 
-OUTPUT: Clean Ukrainian literary text only. No explanations, no meta-commentary.`;
+OUTPUT: Clean ${targetLanguage} literary text only. No explanations, no meta-commentary.`;
+}
 
 /**
- * Generate literary-quality Ukrainian translation from structured topics + raw text.
+ * Generate literary-quality translation from structured topics + raw text.
  * Uses main Flash model (not Lite) for higher quality rewrite.
  */
 export async function generateLiteraryTranslation(
     rawText: string,
     structuredTopics: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sourceLanguage: string = 'Norwegian',
+    targetLanguage: string = 'Ukrainian'
 ): Promise<string> {
     if (!ai || !structuredTopics.trim()) return '';
 
     try {
-        const userPrompt = `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (Norwegian):\n${rawText}`;
+        const userPrompt = `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (${sourceLanguage}):\n${rawText}`;
 
         const response = await ai.models.generateContent({
             model: GEMINI_MODEL,
             contents: userPrompt,
             config: {
-                systemInstruction: LITERARY_SYSTEM_PROMPT,
+                systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage),
                 thinkingConfig: { thinkingBudget: 0 },
                 temperature: 0.3,
                 maxOutputTokens: 1000,

@@ -805,8 +805,10 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
               >
                 <option className="bg-gray-900">Norwegian</option>
                 <option className="bg-gray-900">English</option>
-                <option className="bg-gray-900">German</option>
+                <option className="bg-gray-900">Ukrainian</option>
+                <option className="bg-gray-900">Russian</option>
                 <option className="bg-gray-900">French</option>
+                <option className="bg-gray-900">German</option>
                 <option className="bg-gray-900">Spanish</option>
               </select>
             </div>
@@ -818,9 +820,12 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
                 onChange={(e) => handleChange('nativeLanguage', e.target.value)}
               >
                 <option className="bg-gray-900">Ukrainian</option>
-                <option className="bg-gray-900">English</option>
                 <option className="bg-gray-900">Russian</option>
-                <option className="bg-gray-900">Polish</option>
+                <option className="bg-gray-900">English</option>
+                <option className="bg-gray-900">Norwegian</option>
+                <option className="bg-gray-900">French</option>
+                <option className="bg-gray-900">German</option>
+                <option className="bg-gray-900">Spanish</option>
               </select>
             </div>
           </div>

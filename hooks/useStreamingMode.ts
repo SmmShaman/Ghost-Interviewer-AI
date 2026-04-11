@@ -783,7 +783,9 @@ export function useStreamingMode(
             const result = await generateTopicSummary(
                 newText,
                 '', // No existing topics — each call produces independent output
-                topicAbortRef.current.signal
+                topicAbortRef.current.signal,
+                contextRef.current.targetLanguage,
+                contextRef.current.nativeLanguage
             );
 
             debugLogger.log('TOPICS', `${Math.round(performance.now() - startTime)}ms`, performance.now() - startTime, newWords.length);
@@ -849,7 +851,9 @@ export function useStreamingMode(
             const result = await generateLiteraryTranslation(
                 rawText,
                 topics,
-                literaryAbortRef.current.signal
+                literaryAbortRef.current.signal,
+                contextRef.current.targetLanguage,
+                contextRef.current.nativeLanguage
             );
 
             if (result && result.trim()) {
