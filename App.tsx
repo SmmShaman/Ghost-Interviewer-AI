@@ -947,18 +947,26 @@ const App: React.FC = () => {
         const isStreamingMode = useStreamingUIRef.current;
 
         if (isStreamingMode) {
-            // SINGLE-COUNTER APPROACH: Track position in combined (final+interim) text
-            // Hold back last 2 words (may still change), commit the rest after 1s stability
-            // This prevents both: truncated words AND duplicate commits
+            // SINGLE-COUNTER with word-count trigger + pause fallback
+            // Hold back last 2 words (may still change), commit when:
+            // 1) 8+ new safe words accumulated (word-count trigger during speech)
+            // 2) 1s pause in speech (flush remaining on silence)
+            // 3) Speech API marks words as isFinal (immediate commit)
 
-            // Safe zone = all words except last 2 (which Speech API may still revise)
             const safeCount = Math.max(0, totalWordCount - 2);
+            const uncommittedSafe = safeCount - committedWordCountRef.current;
 
-            if (safeCount > committedWordCountRef.current) {
-                // New safe words available — schedule commit after 1s stability
+            // Trigger 1: Word-count — commit immediately when 8+ safe words accumulated
+            if (uncommittedSafe >= 8) {
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                const toCommit = allWords.slice(committedWordCountRef.current, safeCount);
+                committedWordCountRef.current = safeCount;
+                streamingModeRef.current?.addWords(toCommit.join(' '));
+            }
+            // Trigger 2: Pause — schedule commit on 1s silence (flush remaining words)
+            else if (uncommittedSafe > 0) {
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 silenceTimerRef.current = setTimeout(() => {
-                    // Re-read current state (may have changed since timer was set)
                     const currentText = lastFullTextRef.current;
                     const currentWords = currentText.split(/\s+/).filter(w => w.length > 0);
                     const currentSafe = Math.max(0, currentWords.length - 2);
@@ -971,8 +979,7 @@ const App: React.FC = () => {
                 }, 1000);
             }
 
-            // Also commit immediately when Speech API marks words as final
-            // (final words won't change, so no need to wait)
+            // Trigger 3: isFinal — commit immediately (Speech API is certain)
             const finalWords = fullFinalText.trim().split(/\s+/).filter(w => w.length > 0);
             if (finalWords.length > committedWordCountRef.current) {
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
