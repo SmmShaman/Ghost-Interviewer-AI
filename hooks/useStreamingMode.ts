@@ -754,13 +754,19 @@ export function useStreamingMode(
     const isTopicRunningRef = useRef<boolean>(false);
     const topicProcessedUpToWordRef = useRef<number>(0); // Track which words were already processed
 
+    const topicQueuedRef = useRef<boolean>(false); // Flag: new words arrived while Topics was running
+
     const executeTopicSummary = useCallback(async () => {
         const currentOriginal = originalTextRef.current;
         if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 5) return;
 
-        // Skip if previous Topics call still running
-        if (isTopicRunningRef.current) return;
+        // If previous Topics call still running — mark queued, will re-run after completion
+        if (isTopicRunningRef.current) {
+            topicQueuedRef.current = true;
+            return;
+        }
         isTopicRunningRef.current = true;
+        topicQueuedRef.current = false;
 
         // Only send NEW words (after what was already processed)
         const allWords = currentOriginal.split(/\s+/);
@@ -812,6 +818,11 @@ export function useStreamingMode(
             setState(prev => ({ ...prev, isProcessingTopics: false }));
         } finally {
             isTopicRunningRef.current = false;
+            // Process queued words that arrived while we were busy
+            if (topicQueuedRef.current) {
+                topicQueuedRef.current = false;
+                executeTopicSummary();
+            }
         }
     }, []);
 
