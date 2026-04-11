@@ -751,7 +751,6 @@ export function useStreamingMode(
 
     // === TOPIC STRUCTURING (Flash-Lite) ===
 
-    const executeLiteraryRef = useRef<(rawText: string, topics: string) => void>(() => {});
     const isTopicRunningRef = useRef<boolean>(false);
     const topicProcessedUpToWordRef = useRef<number>(0); // Track which words were already processed
 
@@ -801,8 +800,8 @@ export function useStreamingMode(
                     topicChunks: [...prev.topicChunks, { rawText: newText, topics: trimmedResult }],
                     isProcessingTopics: false
                 }));
-                // Trigger literary translation for this chunk
-                executeLiteraryRef.current(newText, trimmedResult);
+                // Trigger literary translation for this chunk (fire-and-forget)
+                triggerLiterary(newText, trimmedResult);
             } else {
                 setState(prev => ({ ...prev, isProcessingTopics: false }));
             }
@@ -840,14 +839,7 @@ export function useStreamingMode(
     const isLiteraryRunningRef = useRef<boolean>(false);
     const literaryQueueRef = useRef<Array<{ rawText: string; topics: string }>>([]);
 
-    const executeLiteraryTranslation = useCallback(async (rawText: string, topics: string) => {
-        if (isLiteraryRunningRef.current) {
-            // Queue for later processing
-            literaryQueueRef.current.push({ rawText, topics });
-            return;
-        }
-        isLiteraryRunningRef.current = true;
-
+    const processLiteraryItem = async (rawText: string, topics: string) => {
         if (literaryAbortRef.current) literaryAbortRef.current.abort();
         literaryAbortRef.current = new AbortController();
 
@@ -877,15 +869,19 @@ export function useStreamingMode(
             // Process queued items
             const next = literaryQueueRef.current.shift();
             if (next) {
-                executeLiteraryTranslation(next.rawText, next.topics);
+                triggerLiterary(next.rawText, next.topics);
             }
         }
-    }, []);
+    };
 
-    // Keep ref updated for executeTopicSummary to call
-    useEffect(() => {
-        executeLiteraryRef.current = executeLiteraryTranslation;
-    }, [executeLiteraryTranslation]);
+    const triggerLiterary = (rawText: string, topics: string) => {
+        if (isLiteraryRunningRef.current) {
+            literaryQueueRef.current.push({ rawText, topics });
+            return;
+        }
+        isLiteraryRunningRef.current = true;
+        processLiteraryItem(rawText, topics);
+    };
 
     // === CONVERSATION ANALYZER (FOCUS mode) ===
 
