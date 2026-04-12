@@ -57,8 +57,6 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
     isListening,
     wordCount,
     sessionDuration = 0,
-    topicChunks = [],
-    isProcessingTopics = false,
     literaryChunks = [],
     isProcessingLiterary = false
 }) => {
@@ -67,15 +65,15 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
 
     const originalText = accumulatedOriginal || '';
 
-    // Auto-scroll main area (topics)
+    // Auto-scroll main area
     useEffect(() => {
-        if (mainScrollRef.current && (topicChunks.length > 0 || literaryChunks.length > 0)) {
+        if (mainScrollRef.current && literaryChunks.length > 0) {
             mainScrollRef.current.scrollTo({
                 top: mainScrollRef.current.scrollHeight,
                 behavior: 'smooth'
             });
         }
-    }, [topicChunks, literaryChunks]);
+    }, [literaryChunks]);
 
     // Auto-scroll raw log
     useEffect(() => {
@@ -90,41 +88,20 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
         return `${m}:${(s % 60).toString().padStart(2, '0')}`;
     };
 
-    // Parse a single chunk's topics into blocks
-    const parseTopicBlocks = (topicsStr: string) => {
-        return topicsStr.split(/(?=📌)/).filter(b => b.trim()).map(block => {
-            const lines = block.trim().split('\n').filter(l => l.trim());
-            const title = lines[0] || '';
-            const body = lines.slice(1).join(' ').trim();
-            return { title, body };
-        });
-    };
-
-    // Find literary text for a given chunk index
-    const getLiteraryForChunk = (chunkIdx: number): string | null => {
-        if (chunkIdx < literaryChunks.length) {
-            return literaryChunks[chunkIdx].literary;
-        }
-        return null;
-    };
-
-    const hasTopics = topicChunks.length > 0;
+    const hasContent = literaryChunks.length > 0;
 
     return (
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
 
-            {/* MAIN: Topic blocks + Literary translation + Raw words */}
+            {/* MAIN: Literary translation + Raw words */}
             <div className="flex-1 min-h-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col shadow-2xl relative">
-                {(isProcessingTopics || isProcessingLiterary) && (
-                    <span className={`absolute top-2 right-3 w-1.5 h-1.5 rounded-full ${isProcessingLiterary ? 'bg-amber-400' : 'bg-purple-400'} animate-pulse z-10`} />
+                {isProcessingLiterary && (
+                    <span className="absolute top-2 right-3 w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse z-10" />
                 )}
 
                 {/* Column headers */}
                 <div className="px-4 py-2 border-b border-gray-800/30 flex gap-3 shrink-0">
-                    <div className="w-[20%] shrink-0">
-                        <span className="text-[9px] text-purple-400/60 uppercase tracking-wider font-bold">Структура</span>
-                    </div>
-                    <div className="w-[55%] shrink-0">
+                    <div className="w-[70%] shrink-0">
                         <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
                     </div>
                     <div className="flex-1">
@@ -133,42 +110,18 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                 </div>
 
                 <div ref={mainScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 py-4">
-                    {hasTopics ? (
+                    {literaryChunks.length > 0 ? (
                         <div className="space-y-1">
-                            {topicChunks.map((chunk, chunkIdx) => {
-                                const blocks = parseTopicBlocks(chunk.topics);
-                                const literary = getLiteraryForChunk(chunkIdx);
-                                const isLiteraryPending = chunkIdx >= literaryChunks.length;
-
-                                return (
+                            {literaryChunks.map((chunk, chunkIdx) => (
                                     <div
                                         key={chunkIdx}
                                         className="flex gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
                                     >
-                                        {/* LEFT: Structured topics (compact) */}
-                                        <div className="w-[20%] shrink-0">
-                                            {blocks.map((block, blockIdx) => (
-                                                <div key={blockIdx} className={blockIdx > 0 ? 'mt-1' : ''}>
-                                                    <div className="text-[11px] font-semibold text-gray-300 leading-snug">{block.title}</div>
-                                                    {block.body && (
-                                                        <div className="text-[10px] text-gray-500 leading-relaxed mt-0.5">{block.body}</div>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-
-                                        {/* MIDDLE: Literary translation (primary) */}
-                                        <div className="w-[55%] shrink-0">
-                                            {literary ? (
-                                                <p className="text-base text-amber-200/90 leading-relaxed">
-                                                    {literary}
-                                                </p>
-                                            ) : isLiteraryPending ? (
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="w-1 h-1 rounded-full bg-amber-400/40 animate-pulse" />
-                                                    <span className="text-xs text-amber-400/30 italic">перекладаю...</span>
-                                                </div>
-                                            ) : null}
+                                        {/* LEFT: Literary translation (primary) */}
+                                        <div className="w-[70%] shrink-0">
+                                            <p className="text-base text-amber-200/90 leading-relaxed">
+                                                {chunk.literary}
+                                            </p>
                                         </div>
 
                                         {/* RIGHT: Raw words */}
@@ -178,8 +131,7 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                                             </p>
                                         </div>
                                     </div>
-                                );
-                            })}
+                                ))}
                         </div>
                     ) : (
                         <div className="flex items-center justify-center h-full">
@@ -224,12 +176,6 @@ const StreamingSimpleModeLayout: React.FC<StreamingSimpleModeLayoutProps> = ({
                         <span className="text-amber-400 flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                             LIT
-                        </span>
-                    )}
-                    {isProcessingTopics && (
-                        <span className="text-purple-400 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
-                            AI
                         </span>
                     )}
                     {isListening && (

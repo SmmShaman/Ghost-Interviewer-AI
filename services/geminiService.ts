@@ -443,17 +443,26 @@ export async function generateTopicSummary(
 
 // ========== LITERARY TRANSLATION (Flash — quality rewrite) ==========
 
-function buildLiterarySystemPrompt(sourceLanguage: string, targetLanguage: string): string {
+function buildLiterarySystemPrompt(sourceLanguage: string, targetLanguage: string, hasTopics: boolean): string {
+    const inputSection = hasTopics
+        ? `INPUT: You receive two things:
+1. STRUCTURED TOPICS — already extracted ideas from speech (in ${targetLanguage})
+2. RAW TEXT — original speech transcription (${sourceLanguage}, with errors/noise)`
+        : `INPUT: You receive RAW TEXT — original speech transcription (${sourceLanguage}, with errors/noise)`;
+
+    const taskSection = hasTopics
+        ? `Rewrite the structured topics into a coherent, literary ${targetLanguage} text that:
+- Preserves the EXACT meaning and order of ideas from topics
+- Uses the author's original words where possible (from raw text context)`
+        : `Translate the raw text into a coherent, literary ${targetLanguage} text that:
+- Preserves the EXACT meaning and order of ideas from the original speech`;
+
     return `You are a professional literary translator and editor.
 
-INPUT: You receive two things:
-1. STRUCTURED TOPICS — already extracted ideas from speech (in ${targetLanguage})
-2. RAW TEXT — original speech transcription (${sourceLanguage}, with errors/noise)
+${inputSection}
 
 YOUR TASK:
-Rewrite the structured topics into a coherent, literary ${targetLanguage} text that:
-- Preserves the EXACT meaning and order of ideas from topics
-- Uses the author's original words where possible (from raw text context)
+${taskSection}
 - Applies proper literary ${targetLanguage} style: correct grammar, natural flow, connected sentences
 - Adds scientific/professional terminology where appropriate and confident
 - Removes all speech artifacts, repetitions, filler words
@@ -468,7 +477,7 @@ STYLE:
 - Preserve author's voice — do not add your own opinions or interpretations
 
 FORBIDDEN:
-- Inventing new information not present in topics
+- Inventing new information not present in the source
 - Changing the meaning or order of ideas
 - Adding "the speaker says", "it was mentioned that"
 - Over-academizing simple statements
@@ -488,16 +497,19 @@ export async function generateLiteraryTranslation(
     sourceLanguage: string = 'Norwegian',
     targetLanguage: string = 'Ukrainian'
 ): Promise<string> {
-    if (!ai || !structuredTopics.trim()) return '';
+    if (!ai || !rawText.trim()) return '';
 
+    const hasTopics = !!structuredTopics.trim();
     try {
-        const userPrompt = `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (${sourceLanguage}):\n${rawText}`;
+        const userPrompt = hasTopics
+            ? `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (${sourceLanguage}):\n${rawText}`
+            : `RAW TEXT (${sourceLanguage}):\n${rawText}`;
 
         const response = await ai.models.generateContent({
             model: GEMINI_MODEL,
             contents: userPrompt,
             config: {
-                systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage),
+                systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage, hasTopics),
                 thinkingConfig: { thinkingBudget: 0 },
                 temperature: 0.3,
                 maxOutputTokens: 1000,

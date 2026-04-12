@@ -749,110 +749,31 @@ export function useStreamingMode(
         scheduleAnswerGenerationRef.current = scheduleAnswerGeneration;
     }, [scheduleAnswerGeneration]);
 
-    // === TOPIC STRUCTURING (Flash-Lite) ===
+    // === DIRECT LITERARY TRANSLATION (no topic pre-processing) ===
 
-    const isTopicRunningRef = useRef<boolean>(false);
-    const topicProcessedUpToWordRef = useRef<number>(0); // Track which words were already processed
+    const literaryProcessedUpToWordRef = useRef<number>(0);
+    const literaryQueuedRef = useRef<boolean>(false);
 
-    const topicQueuedRef = useRef<boolean>(false); // Flag: new words arrived while Topics was running
-
-    const executeTopicSummary = useCallback(async () => {
+    const executeLiteraryDirect = useCallback(async () => {
         const currentOriginal = originalTextRef.current;
         if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 5) return;
 
-        // If previous Topics call still running — mark queued, will re-run after completion
-        if (isTopicRunningRef.current) {
-            topicQueuedRef.current = true;
+        if (isLiteraryRunningRef.current) {
+            literaryQueuedRef.current = true;
             return;
         }
-        isTopicRunningRef.current = true;
-        topicQueuedRef.current = false;
+        isLiteraryRunningRef.current = true;
+        literaryQueuedRef.current = false;
 
-        // Only send NEW words (after what was already processed)
         const allWords = currentOriginal.split(/\s+/);
-        const newWords = allWords.slice(topicProcessedUpToWordRef.current);
+        const newWords = allWords.slice(literaryProcessedUpToWordRef.current);
         if (newWords.length < 5) {
-            isTopicRunningRef.current = false;
+            isLiteraryRunningRef.current = false;
             return;
         }
         const newText = newWords.join(' ');
-        topicProcessedUpToWordRef.current = allWords.length;
+        literaryProcessedUpToWordRef.current = allWords.length;
 
-        if (topicAbortRef.current) topicAbortRef.current.abort();
-        topicAbortRef.current = new AbortController();
-
-        setState(prev => ({ ...prev, isProcessingTopics: true }));
-        const startTime = performance.now();
-
-        try {
-            // Send ONLY new text, no existing topics — LLM produces fresh output for this chunk
-            const result = await generateTopicSummary(
-                newText,
-                '', // No existing topics — each call produces independent output
-                topicAbortRef.current.signal,
-                contextRef.current.targetLanguage,
-                contextRef.current.nativeLanguage
-            );
-
-            debugLogger.log('TOPICS', `${Math.round(performance.now() - startTime)}ms`, performance.now() - startTime, newWords.length);
-            lastTopicWordCountRef.current = wordCountRef.current;
-
-            if (result && result.trim()) {
-                // APPEND new result to existing — frozen text stays, new text added below
-                const trimmedResult = result.trim();
-                setState(prev => ({
-                    ...prev,
-                    topicSummary: prev.topicSummary
-                        ? `${prev.topicSummary}\n\n${trimmedResult}`
-                        : trimmedResult,
-                    topicChunks: [...prev.topicChunks, { rawText: newText, topics: trimmedResult }],
-                    isProcessingTopics: false
-                }));
-                // Trigger literary translation for this chunk (fire-and-forget)
-                triggerLiterary(newText, trimmedResult);
-            } else {
-                setState(prev => ({ ...prev, isProcessingTopics: false }));
-            }
-        } catch (e: any) {
-            if (e.name !== 'AbortError') console.error('[Topics] Error:', e);
-            setState(prev => ({ ...prev, isProcessingTopics: false }));
-        } finally {
-            isTopicRunningRef.current = false;
-            // Process queued words that arrived while we were busy
-            if (topicQueuedRef.current) {
-                topicQueuedRef.current = false;
-                executeTopicSummary();
-            }
-        }
-    }, []);
-
-    const scheduleTopicSummary = useCallback(() => {
-        if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
-
-        // Schedule on long pause
-        topicTimerRef.current = setTimeout(() => {
-            if (wordCountRef.current >= TOPIC_MIN_WORDS) {
-                executeTopicSummary();
-            }
-        }, TOPIC_PAUSE_MS);
-    }, [executeTopicSummary]);
-
-    // Trigger topics on each final batch if enough new words accumulated
-    const triggerTopicOnBlock = useCallback((batchWordCount: number) => {
-        wordsInCountRef.current += batchWordCount;
-        if (wordsInCountRef.current >= TOPIC_TRIGGER_WORDS && wordCountRef.current >= TOPIC_MIN_WORDS) {
-            wordsInCountRef.current = 0;
-            executeTopicSummary();
-        }
-    }, [executeTopicSummary]);
-
-    // === LITERARY TRANSLATION (Flash — quality rewrite after topics) ===
-
-    const literaryAbortRef = useRef<AbortController | null>(null);
-    const isLiteraryRunningRef = useRef<boolean>(false);
-    const literaryQueueRef = useRef<Array<{ rawText: string; topics: string }>>([]);
-
-    const processLiteraryItem = async (rawText: string, topics: string) => {
         if (literaryAbortRef.current) literaryAbortRef.current.abort();
         literaryAbortRef.current = new AbortController();
 
@@ -860,8 +781,8 @@ export function useStreamingMode(
 
         try {
             const result = await generateLiteraryTranslation(
-                rawText,
-                topics,
+                newText,
+                '',
                 literaryAbortRef.current.signal,
                 contextRef.current.targetLanguage,
                 contextRef.current.nativeLanguage
@@ -870,7 +791,7 @@ export function useStreamingMode(
             if (result && result.trim()) {
                 setState(prev => ({
                     ...prev,
-                    literaryChunks: [...prev.literaryChunks, { rawText, topics, literary: result.trim() }],
+                    literaryChunks: [...prev.literaryChunks, { rawText: newText, topics: '', literary: result.trim() }],
                     isProcessingLiterary: false
                 }));
             } else {
@@ -881,21 +802,46 @@ export function useStreamingMode(
             setState(prev => ({ ...prev, isProcessingLiterary: false }));
         } finally {
             isLiteraryRunningRef.current = false;
-            // Process queued items
             const next = literaryQueueRef.current.shift();
             if (next) {
                 triggerLiterary(next.rawText, next.topics);
+            } else if (literaryQueuedRef.current) {
+                literaryQueuedRef.current = false;
+                executeLiteraryDirect();
             }
         }
-    };
+    }, []);
 
+    const scheduleLiterary = useCallback(() => {
+        if (topicTimerRef.current) clearTimeout(topicTimerRef.current);
+        topicTimerRef.current = setTimeout(() => {
+            if (wordCountRef.current >= TOPIC_MIN_WORDS) {
+                executeLiteraryDirect();
+            }
+        }, TOPIC_PAUSE_MS);
+    }, [executeLiteraryDirect]);
+
+    const triggerLiteraryOnBlock = useCallback((batchWordCount: number) => {
+        wordsInCountRef.current += batchWordCount;
+        if (wordsInCountRef.current >= TOPIC_TRIGGER_WORDS && wordCountRef.current >= TOPIC_MIN_WORDS) {
+            wordsInCountRef.current = 0;
+            executeLiteraryDirect();
+        }
+    }, [executeLiteraryDirect]);
+
+    // Literary refs (used by executeLiteraryDirect above)
+    const literaryAbortRef = useRef<AbortController | null>(null);
+    const isLiteraryRunningRef = useRef<boolean>(false);
+    const literaryQueueRef = useRef<Array<{ rawText: string; topics: string }>>([]);
+
+    // Legacy triggerLiterary — kept for FOCUS/FULL mode compatibility
     const triggerLiterary = (rawText: string, topics: string) => {
         if (isLiteraryRunningRef.current) {
             literaryQueueRef.current.push({ rawText, topics });
             return;
         }
         isLiteraryRunningRef.current = true;
-        processLiteraryItem(rawText, topics);
+        executeLiteraryDirect();
     };
 
     // === CONVERSATION ANALYZER (FOCUS mode) ===
@@ -1018,10 +964,10 @@ export function useStreamingMode(
             return { ...prev, originalText: newOriginal, wordCount: totalWords };
         });
 
-        // Topics triggered on every final batch + on pause
-        triggerTopicOnBlock(newWordCount);
-        scheduleTopicSummary();
-    }, [triggerTopicOnBlock, scheduleTopicSummary]);
+        // Literary translation triggered directly on every final batch + on pause
+        triggerLiteraryOnBlock(newWordCount);
+        scheduleLiterary();
+    }, [triggerLiteraryOnBlock, scheduleLiterary]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -1147,7 +1093,7 @@ export function useStreamingMode(
         ghostBlocksRef.current = [];
         refinedUpToBlockRef.current = 0;
         refinedSentencesRef.current = [];
-        topicProcessedUpToWordRef.current = 0;
+        literaryProcessedUpToWordRef.current = 0;
         if (literaryAbortRef.current) { literaryAbortRef.current.abort(); literaryAbortRef.current = null; }
         isLiteraryRunningRef.current = false;
         literaryQueueRef.current = [];
@@ -1380,7 +1326,7 @@ export function useStreamingMode(
         ghostBlocksRef.current = [];
         refinedUpToBlockRef.current = 0;
         refinedSentencesRef.current = [];
-        topicProcessedUpToWordRef.current = 0;
+        literaryProcessedUpToWordRef.current = 0;
         if (literaryAbortRef.current) { literaryAbortRef.current.abort(); literaryAbortRef.current = null; }
         isLiteraryRunningRef.current = false;
         literaryQueueRef.current = [];
