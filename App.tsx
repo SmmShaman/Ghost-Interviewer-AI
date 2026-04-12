@@ -1888,6 +1888,7 @@ const App: React.FC = () => {
                  accumulatedOriginal={streamingMode.state.originalText}
                  accumulatedGhostTranslation={streamingMode.state.ghostTranslation}
                  accumulatedLLMTranslation={streamingMode.state.llmTranslation}
+                 interimText={streamingMode.state.interimText}
                  isListening={streamingMode.state.isListening}
                  isProcessingLLM={streamingMode.state.isProcessingLLM}
                  containsQuestion={streamingMode.state.containsQuestion}
@@ -1902,6 +1903,8 @@ const App: React.FC = () => {
                  lastDetectedQuestion={streamingMode.state.lastDetectedQuestion}
                  isProcessingConversation={streamingMode.state.isProcessingConversation}
                  answeredQuestions={streamingMode.state.answeredQuestions || []}
+                 literaryChunks={streamingMode.state.literaryChunks}
+                 isProcessingLiterary={streamingMode.state.isProcessingLiterary}
              />
          )}
 

@@ -1,22 +1,23 @@
 /**
- * STREAMING FOCUS MODE LAYOUT — Interview Assistant
- *
- * Left panel: identical to SIMPLE (NMT subtitles, stable, block-based)
- * Right panel: chronological conversation log
- *   - 📌 INFO entries (company, conditions, requirements)
- *   - ❓ QUESTION entries (detected questions to candidate)
- *   - 💡 ANSWER entries (generated from candidate profile)
+ * STREAMING FOCUS MODE LAYOUT — Literary Translation + Conversation Log
  *
  * ┌────────────────────────────┬────────────────────────────┐
- * │  Субтитри (NMT, 200мс)    │  📌 Про компанію           │
- * │  стабільні, block-based    │  📌 Умови роботи           │
+ * │  Літературний переклад     │  📌 Про компанію           │
+ * │  (70%) + Оригінал (30%)   │  📌 Умови роботи           │
  * │                            │  ❓ Розкажи про себе       │
  * │                            │  💡 Відповідь: "Я маю..."  │
- * └────────────────────────────┴────────────────────────────┘
+ * ├────────────────────────────┴────────────────────────────┤
+ * │  Log: continuous raw text                               │
+ * └─────────────────────────────────────────────────────────┘
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { localTranslator } from '../../services/localTranslator';
+import React, { useEffect, useRef } from 'react';
+
+interface LiteraryChunk {
+    rawText: string;
+    topics: string;
+    literary: string;
+}
 
 interface StreamingFocusModeLayoutProps {
     accumulatedOriginal: string;
@@ -24,7 +25,6 @@ interface StreamingFocusModeLayoutProps {
     accumulatedLLMTranslation: string;
 
     interimText?: string;
-    interimGhostTranslation?: string;
 
     isListening: boolean;
     isProcessingLLM: boolean;
@@ -47,86 +47,58 @@ interface StreamingFocusModeLayoutProps {
     lastDetectedQuestion?: string;
     isProcessingConversation?: boolean;
     answeredQuestions?: Array<{ question: string; answer: string; translation: string }>;
+
+    literaryChunks?: LiteraryChunk[];
+    isProcessingLiterary?: boolean;
 }
 
 const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
-    accumulatedGhostTranslation,
+    accumulatedOriginal,
+    interimText = '',
     isListening,
-    isProcessingLLM,
-    generatedAnswer = '',
-    answerTranslation = '',
     isGeneratingAnswer = false,
     wordCount,
     sessionDuration = 0,
     conversationLog = '',
-    lastDetectedQuestion = '',
     isProcessingConversation = false,
-    answeredQuestions = []
+    answeredQuestions = [],
+    literaryChunks = [],
+    isProcessingLiterary = false
 }) => {
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const literaryScrollRef = useRef<HTMLDivElement>(null);
     const logScrollRef = useRef<HTMLDivElement>(null);
-    const [displayedText, setDisplayedText] = useState('');
-    const targetTextRef = useRef('');
+    const conversationScrollRef = useRef<HTMLDivElement>(null);
 
-    const strip = (text: string): string =>
-        text.replace(/⏳\.{0,3}/g, '').replace(/[❌⚠️]/g, '').trim();
+    const originalText = accumulatedOriginal || '';
 
-    const mainText = strip(accumulatedGhostTranslation);
-
-    // Smooth word-by-word animation (from SIMPLE)
+    // Auto-scroll literary
     useEffect(() => {
-        targetTextRef.current = mainText;
-        const interval = setInterval(() => {
-            setDisplayedText(prev => {
-                const target = targetTextRef.current;
-                if (!target) return '';
-                if (prev.length >= target.length) return target;
-                const nextSpace = target.indexOf(' ', prev.length + 1);
-                return target.substring(0, nextSpace === -1 ? target.length : nextSpace);
+        if (literaryScrollRef.current && literaryChunks.length > 0) {
+            literaryScrollRef.current.scrollTo({
+                top: literaryScrollRef.current.scrollHeight,
+                behavior: 'smooth'
             });
-        }, 200);
-        return () => clearInterval(interval);
-    }, [mainText]);
+        }
+    }, [literaryChunks]);
 
-    // Auto-scroll subtitles
+    // Auto-scroll raw log
     useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, [displayedText]);
+        if (logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        }
+    }, [originalText, interimText]);
 
-    // Auto-scroll conversation log (new entries at bottom)
+    // Auto-scroll conversation log
     useEffect(() => {
-        if (logScrollRef.current) logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
-    }, [conversationLog]);
-
-    const getMethodLabel = (): { label: string; color: string } => {
-        const status = localTranslator.getStatus();
-        if (status.useChromeAPI) return { label: 'Chrome', color: 'text-blue-400' };
-        if (status.useGoogleNMT) return { label: 'NMT', color: 'text-green-400' };
-        return { label: 'Opus', color: 'text-cyan-400' };
-    };
-    const method = getMethodLabel();
+        if (conversationScrollRef.current) {
+            conversationScrollRef.current.scrollTop = conversationScrollRef.current.scrollHeight;
+        }
+    }, [conversationLog, answeredQuestions]);
 
     const formatDuration = (ms: number): string => {
         const s = Math.floor(ms / 1000);
         const m = Math.floor(s / 60);
         return `${m}:${(s % 60).toString().padStart(2, '0')}`;
-    };
-
-    // Render blocks with alternating colors (from SIMPLE)
-    const renderBlocks = () => {
-        if (!displayedText) return null;
-        return displayedText.split('｜').map((block, i) => {
-            const trimmed = block.trim();
-            if (!trimmed) return null;
-            const isEven = i % 2 === 0;
-            return (
-                <div key={i} className={`text-base md:text-lg leading-relaxed font-medium py-1 ${
-                    isEven ? 'text-gray-100' : 'text-sky-200 pl-3 border-l-2 border-sky-800/40'
-                }`}>
-                    {trimmed}
-                </div>
-            );
-        });
     };
 
     // Render conversation log entries with answers inserted after questions
@@ -198,19 +170,55 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
 
     return (
         <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
+
+            {/* TOP: Two columns — Literary + Conversation */}
             <div className="flex-1 flex gap-3 min-h-0">
 
-                {/* LEFT: Subtitles (identical to SIMPLE) */}
-                <div className="flex-1 basis-0 rounded-2xl bg-gray-950/80 border border-gray-800/50 shadow-2xl overflow-hidden">
-                    <div ref={scrollRef} className="h-full overflow-y-auto scroll-smooth px-6 py-5">
-                        {displayedText ? (
-                            <div className="space-y-3">
-                                {renderBlocks()}
-                                {isListening && <div className="mt-2 text-emerald-400 animate-pulse text-lg">▊</div>}
+                {/* LEFT: Literary translation + Original */}
+                <div className="flex-1 basis-0 rounded-2xl bg-gray-900/50 border border-gray-800/30 overflow-hidden flex flex-col shadow-2xl relative">
+                    {isProcessingLiterary && (
+                        <span className="absolute top-2 right-3 w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse z-10" />
+                    )}
+
+                    {/* Column headers */}
+                    <div className="px-4 py-2 border-b border-gray-800/30 flex gap-3 shrink-0">
+                        <div className="w-[70%] shrink-0">
+                            <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
+                        </div>
+                        <div className="flex-1">
+                            <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Оригінал</span>
+                        </div>
+                    </div>
+
+                    <div ref={literaryScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 py-4">
+                        {literaryChunks.length > 0 ? (
+                            <div className="space-y-1">
+                                {literaryChunks.map((chunk, chunkIdx) => (
+                                    <div
+                                        key={chunkIdx}
+                                        className="flex gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
+                                    >
+                                        {/* Literary translation */}
+                                        <div className="w-[70%] shrink-0">
+                                            <p className="text-base text-amber-200/90 leading-relaxed">
+                                                {chunk.literary}
+                                            </p>
+                                        </div>
+
+                                        {/* Raw words */}
+                                        <div className="flex-1 flex items-start">
+                                            <p className="text-xs text-gray-600 leading-relaxed font-mono">
+                                                {chunk.rawText}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         ) : (
                             <div className="flex items-center justify-center h-full">
-                                <p className="text-gray-600 text-sm">{isListening ? 'Слухаю інтерв\'юера...' : 'Натисніть Start'}</p>
+                                <p className="text-gray-700 text-sm italic">
+                                    {isListening ? 'Слухаю...' : 'Натисніть Start'}
+                                </p>
                             </div>
                         )}
                     </div>
@@ -236,7 +244,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                         </div>
                     </div>
 
-                    <div ref={logScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+                    <div ref={conversationScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
                         {conversationLog ? (
                             (() => { try { return renderConversationLog(); } catch (e) { return <p className="text-red-400 text-xs">Render error: {String(e)}</p>; } })()
                         ) : (
@@ -255,14 +263,41 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                 </div>
             </div>
 
+            {/* RAW LOG: continuous raw text */}
+            <div className="h-[15%] shrink-0 mt-2 rounded-xl bg-gray-950/60 border border-gray-800/30 overflow-hidden flex flex-col">
+                <div className="px-3 py-1 border-b border-gray-800/20 shrink-0">
+                    <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Log</span>
+                </div>
+                <div ref={logScrollRef} className="flex-1 overflow-y-auto px-3 py-2">
+                    {(originalText || interimText) ? (
+                        <p className="text-xs leading-relaxed font-mono">
+                            <span className="text-gray-500">{originalText}</span>
+                            {interimText && (
+                                <span className="text-gray-600 italic">{originalText ? ' ' : ''}{interimText}</span>
+                            )}
+                            {isListening && <span className="text-emerald-400 animate-pulse ml-1">▊</span>}
+                        </p>
+                    ) : (
+                        <p className="text-gray-700 text-xs italic">
+                            {isListening ? 'Слухаю...' : ''}
+                        </p>
+                    )}
+                </div>
+            </div>
+
             {/* Status bar */}
             <div className="mt-2 px-4 py-2 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-4">
                     {wordCount > 0 && <span className="text-gray-400 font-mono">{wordCount} слів</span>}
                     {sessionDuration > 0 && <span className="text-gray-500 font-mono">{formatDuration(sessionDuration)}</span>}
-                    <span className={method.color}>{method.label}</span>
                 </div>
                 <div className="flex items-center gap-3">
+                    {isProcessingLiterary && (
+                        <span className="text-amber-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            LIT
+                        </span>
+                    )}
                     {isListening && (
                         <span className="text-red-400 flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
