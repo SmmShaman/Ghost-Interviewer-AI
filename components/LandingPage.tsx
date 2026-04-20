@@ -408,11 +408,11 @@ const LandingPage: React.FC<LandingPageProps> = ({
             })()}
 
             {/* Speed Preset Buttons */}
-            <div className="w-full max-w-5xl px-6 mb-8">
+            <div className="w-full max-w-5xl px-3 sm:px-6 mb-8">
                 <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
-                    {uiLang === 'uk' ? 'ШВИДКІСТЬ ПЕРЕКЛАДУ' : 'TRANSLATION SPEED'}
+                    {uiLang === 'uk' ? 'ШВИДКІСТЬ' : 'SPEED'}
                 </p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     {(Object.entries(SPEED_PRESETS) as [SpeedPresetId, typeof SPEED_PRESETS[SpeedPresetId]][]).map(([id, preset]) => {
                         const active = (context.speedPreset || 'interview') === id;
                         const icons: Record<SpeedPresetId, string> = {
@@ -429,18 +429,18 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             <button
                                 key={id}
                                 onClick={() => setContext({ ...context, speedPreset: id })}
-                                className={`group/btn relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                                className={`group/btn relative p-2.5 sm:p-4 rounded-xl border-2 transition-all duration-300 text-center
                                     ${active
                                         ? 'border-amber-400 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
                                         : 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
                                     }`}
                             >
-                                <div className="text-2xl mb-2">{icons[id]}</div>
-                                <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-amber-300' : 'text-gray-400'}`}>
+                                <div className="text-xl sm:text-2xl mb-1 sm:mb-2">{icons[id]}</div>
+                                <div className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-amber-300' : 'text-gray-400'}`}>
                                     {preset.label}
                                     <Tip color="amber" text={tips[id]} />
                                 </div>
-                                <div className="text-[8px] text-gray-500 mt-1">
+                                <div className="text-[7px] sm:text-[8px] text-gray-500 mt-1 hidden sm:block">
                                     {preset.description}
                                 </div>
                                 {active && (
