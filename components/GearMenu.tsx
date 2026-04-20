@@ -208,12 +208,14 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         <SettingsIcon className={`w-5 h-5 transition-transform duration-500 ${isOpen ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Menu Items Container - Horizontal Slide Out */}
+      {/* Menu Items Container - Horizontal on desktop, dropdown on mobile */}
       <div className={`
-        absolute left-14 flex items-center gap-2 transition-all duration-500 ease-out
+        absolute left-0 top-full mt-2 sm:left-14 sm:top-auto sm:mt-0
+        flex flex-col sm:flex-row items-start sm:items-center gap-2
+        transition-all duration-500 ease-out z-[60]
         ${isOpen
-          ? 'opacity-100 translate-x-0'
-          : 'opacity-0 -translate-x-8 pointer-events-none'
+          ? 'opacity-100 translate-x-0 sm:translate-x-0 translate-y-0'
+          : 'opacity-0 -translate-x-8 sm:-translate-x-8 -translate-y-2 sm:translate-y-0 pointer-events-none'
         }
       `}>
         {menuItems.map((item, index) => {

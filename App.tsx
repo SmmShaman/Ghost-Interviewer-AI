@@ -1742,20 +1742,20 @@ const App: React.FC = () => {
 
       <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} listenThroughActive={audioPassthrough.isActive} listenThroughError={audioPassthrough.error} />
 
-      <div className={`flex flex-wrap justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
-        <div className="flex items-center gap-2 sm:gap-4">
+      <div className={`shrink-0 flex justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 overflow-x-auto ${!isModelReady ? 'mt-10' : ''}`}>
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {/* Back to Home */}
             <button
               onClick={() => { stopListening(); setHasSessionStarted(false); setMessages([]); }}
-              className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700"
+              className="p-1.5 sm:p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-all border border-gray-700"
               title="Back to mode selection"
             >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                 </svg>
             </button>
             {/* Current Mode Indicator */}
-            <div className={`px-3 py-1.5 rounded-lg border text-xs font-black uppercase tracking-widest ${
+            <div className={`hidden sm:block px-3 py-1.5 rounded-lg border text-xs font-black uppercase tracking-widest ${
               context.viewMode === 'SIMPLE' ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' :
               context.viewMode === 'FOCUS' ? 'border-blue-500/50 bg-blue-500/10 text-blue-400' :
               'border-emerald-500/50 bg-emerald-500/10 text-emerald-400'
@@ -1770,12 +1770,12 @@ const App: React.FC = () => {
               onOpenFullSettings={() => setIsSetupOpen(true)}
               listenThroughActive={audioPassthrough.isActive}
             />
-            <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
+            <button onClick={toggleLanguage} className="hidden sm:block px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
             {/* Audio preset indicator (compact) — hidden on mobile */}
             {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && (
-              <div className="hidden sm:block px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
+              <div className="hidden md:block px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
                 {context.activeAudioPreset === 'headphones-youtube' ? '🎧' :
                  context.activeAudioPreset === 'speakers' ? '🔊' :
                  context.activeAudioPreset === 'monitor-speakers' ? '🖥️' :
@@ -1784,7 +1784,7 @@ const App: React.FC = () => {
             )}
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
              {/* Google user avatar (if signed in) */}
              {googleAuth.isSignedIn && googleAuth.user && (
                <div className="hidden sm:flex items-center gap-1.5 mr-2" title={googleAuth.user.email}>
@@ -1795,17 +1795,17 @@ const App: React.FC = () => {
                </div>
              )}
              <div className="flex items-center gap-1 mr-1 sm:mr-4 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
-                 <button onClick={handleSaveSession} className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-emerald-400 transition-colors" title={t.saveSession}>
-                    <DownloadIcon className="w-5 h-5" />
+                 <button onClick={handleSaveSession} className="p-1.5 sm:p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-emerald-400 transition-colors" title={t.saveSession}>
+                    <DownloadIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                  </button>
-                 <div className="w-px h-6 bg-gray-800"></div>
-                 <button onClick={confirmClear} className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-red-400 transition-colors" title={t.clearSession}>
-                    <TrashIcon className="w-5 h-5" />
+                 <div className="w-px h-5 sm:h-6 bg-gray-800"></div>
+                 <button onClick={confirmClear} className="p-1.5 sm:p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-red-400 transition-colors" title={t.clearSession}>
+                    <TrashIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                  </button>
              </div>
              {/* Listening/Pause Indicator */}
-             <div className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
-                <div className={`w-2.5 h-2.5 rounded-full shadow-lg shrink-0 ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
+             <div className={`flex items-center gap-2 px-2 py-1.5 sm:py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
+                <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shadow-lg shrink-0 ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
                 <span className="text-xs font-mono font-bold tracking-wider text-gray-200 hidden sm:inline">
                     {isUserSpeaking ? "YOU ARE SPEAKING" : appState === AppState.LISTENING ? (context.stereoMode ? "LISTENING (STEREO)" : t.listening) : appState === AppState.PROCESSING ? t.generating : t.paused}
                 </span>
@@ -1815,7 +1815,7 @@ const App: React.FC = () => {
                 onClick={toggleListening}
                 disabled={!isModelReady}
                 title={!isModelReady ? "Waiting for translation model to load..." : (shouldBeListening.current ? t.paused : t.listening)}
-                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-lg transition-all transform ${
+                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-lg transition-all transform shrink-0 ${
                     !isModelReady
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
                         : shouldBeListening.current
