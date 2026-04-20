@@ -1331,18 +1331,40 @@ const App: React.FC = () => {
       }
 
       try {
-          // Auto-detect VB-Cable if preset is selected but audioDeviceId is empty
+          // Auto-detect audio device based on preset
           let deviceId = contextRef.current.audioDeviceId;
-          if (!deviceId && contextRef.current.activeAudioPreset && contextRef.current.activeAudioPreset !== 'manual') {
+          const preset = contextRef.current.activeAudioPreset;
+          if (preset && preset !== 'manual') {
               try {
                   const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                   tempStream.getTracks().forEach(t => t.stop());
                   const allDevices = await navigator.mediaDevices.enumerateDevices();
-                  const cableOutput = allDevices.find(d => d.kind === 'audioinput' && d.label.toLowerCase().includes('cable output'));
-                  if (cableOutput) {
-                      deviceId = cableOutput.deviceId;
-                      handleContextChange({ ...contextRef.current, audioDeviceId: deviceId });
-                      addDebug(`🔌 Auto-detected: ${cableOutput.label}`);
+                  const audioInputs = allDevices.filter(d => d.kind === 'audioinput');
+
+                  if (preset === 'default-mic') {
+                      // System default — no specific device
+                      deviceId = '';
+                  } else if (preset === 'best-available') {
+                      // Auto-detect best mic: USB > headset > webcam > built-in > any
+                      const priority = ['usb', 'blue yeti', 'at2020', 'fifine', 'rode', 'headset', 'airpods', 'jabra', 'webcam', 'camera', 'realtek', 'high definition', 'built-in', 'internal mic'];
+                      let bestDevice: MediaDeviceInfo | undefined;
+                      for (const pattern of priority) {
+                          bestDevice = audioInputs.find(d => d.label.toLowerCase().includes(pattern));
+                          if (bestDevice) break;
+                      }
+                      deviceId = bestDevice?.deviceId || (audioInputs[0]?.deviceId || '');
+                      if (deviceId !== contextRef.current.audioDeviceId) {
+                          handleContextChange({ ...contextRef.current, audioDeviceId: deviceId });
+                          addDebug(`🎤 Auto-detected best mic: ${bestDevice?.label || audioInputs[0]?.label || 'default'}`);
+                      }
+                  } else if (!deviceId) {
+                      // VB-Cable presets — find cable output
+                      const cableOutput = audioInputs.find(d => d.label.toLowerCase().includes('cable output'));
+                      if (cableOutput) {
+                          deviceId = cableOutput.deviceId;
+                          handleContextChange({ ...contextRef.current, audioDeviceId: deviceId });
+                          addDebug(`🔌 Auto-detected: ${cableOutput.label}`);
+                      }
                   }
               } catch (e) { /* ignore */ }
           }

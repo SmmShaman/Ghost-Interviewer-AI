@@ -56,12 +56,14 @@ export interface ModeConfig {
 }
 
 export type AudioPresetId =
-  | 'headphones-youtube'    // Stereo Mix / VB-Cable for system audio capture
-  | 'speakers'              // Default mic captures speaker output
-  | 'monitor-speakers'      // Monitor built-in speakers + mic capture
-  | 'headphones-interview'  // VB-Cable routing for Teams/Zoom calls
-  | 'manual'                // User manually selected from dropdown
-  | '';                     // No preset selected
+  | 'best-available'          // Auto-detect best mic (USB > headset > built-in > default)
+  | 'default-mic'             // System default microphone (no device selection)
+  | 'headphones-youtube'      // VB-Cable: system audio capture to headphones
+  | 'speakers'                // VB-Cable: system audio to speakers
+  | 'monitor-speakers'        // VB-Cable: system audio to monitor speakers
+  | 'headphones-interview'    // VB-Cable: interview call routing
+  | 'manual'                  // User manually selected from dropdown
+  | '';                       // No preset selected
 
 // Speed preset for translation pipeline tuning
 export type SpeedPresetId = 'youtube' | 'interview' | 'custom';

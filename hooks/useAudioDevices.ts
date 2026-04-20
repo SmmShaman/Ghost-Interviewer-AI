@@ -96,12 +96,43 @@ export function useAudioDevices() {
         return null;
     }, [outputDevices]);
 
+    // Rank microphones by quality: USB > headset > webcam > realtek > unknown
+    const getBestMic = useCallback((): ClassifiedDevice | undefined => {
+        const priority: DeviceType[] = ['usb-mic', 'headset-mic', 'webcam-mic', 'realtek-mic', 'unknown'];
+        return findDeviceByType(classifiedDevices, ...priority);
+    }, [classifiedDevices]);
+
     const getPresets = useCallback((): PresetInfo[] => {
         const vbCable = findDeviceByType(classifiedDevices, 'vb-cable', 'stereo-mix', 'voicemeeter');
         const speakers = findOutput('speakers');
         const headphones = findOutput('headphones');
         const monitor = findOutput('phl', 'hdmi', 'monitor');
         const noVBCable = { available: false, matchedDeviceId: '', matchedDeviceLabel: '', listenThroughDeviceId: '', listenThroughLabel: '', warning: 'vb-cable-needed' as const };
+
+        // === UNIVERSAL PRESETS (always available) ===
+
+        // 🎤 Best Available: auto-detect best mic
+        const bestMic = getBestMic();
+        const bestAvailablePreset: PresetInfo = {
+            id: 'best-available',
+            available: classifiedDevices.length > 0,
+            matchedDeviceId: bestMic?.device.deviceId || '',
+            matchedDeviceLabel: bestMic?.friendlyName || 'System default',
+            listenThroughDeviceId: '',
+            listenThroughLabel: '',
+        };
+
+        // 🔇 Default Mic: system default (no device selection)
+        const defaultMicPreset: PresetInfo = {
+            id: 'default-mic',
+            available: true,
+            matchedDeviceId: '',
+            matchedDeviceLabel: 'System default',
+            listenThroughDeviceId: '',
+            listenThroughLabel: '',
+        };
+
+        // === VB-CABLE PRESETS (require virtual audio driver) ===
 
         // 🔊 Speakers via VB-Cable: input=CABLE, output=Speakers
         const speakersPreset: PresetInfo = vbCable && speakers
@@ -125,8 +156,8 @@ export function useAudioDevices() {
                 ? { id: 'headphones-interview', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: speakers.id, listenThroughLabel: speakers.label }
                 : { id: 'headphones-interview', ...noVBCable, warning: 'vb-cable-required' };
 
-        return [speakersPreset, headphonesPreset, monitorPreset, interviewPreset];
-    }, [classifiedDevices, outputDevices, findOutput]);
+        return [bestAvailablePreset, defaultMicPreset, speakersPreset, headphonesPreset, monitorPreset, interviewPreset];
+    }, [classifiedDevices, outputDevices, findOutput, getBestMic]);
 
     return {
         rawDevices,

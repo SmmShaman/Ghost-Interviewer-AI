@@ -311,69 +311,101 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Audio Preset Buttons */}
-            <div className="w-full max-w-5xl px-6 mb-8">
-                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
-                    {uiLang === 'uk' ? 'РЕЖИМ АУДІО' : 'AUDIO MODE'}
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {presets.map(preset => {
-                        const active = context.activeAudioPreset === preset.id;
-                        const meta: Record<string, { icon: string; label: string; labelUk: string; tip: string }> = {
-                            'headphones-youtube': {
-                                icon: '🎧', label: 'Headphones + Video', labelUk: 'Навушники + Відео',
-                                tip: 'Звук з відео/підкасту йде через VB-Cable в навушники. Додаток слухає цей же звук і перекладає. Потрібен VB-Cable.'
-                            },
-                            'speakers': {
-                                icon: '🔊', label: 'Speakers', labelUk: 'Колонки',
-                                tip: 'Звук йде з колонок, мікрофон ловить його і перекладає. Найпростіший варіант — не потрібне додаткове ПЗ.'
-                            },
-                            'monitor-speakers': {
-                                icon: '🖥️', label: 'Monitor', labelUk: 'Монітор',
-                                tip: 'Звук з динаміків монітора + мікрофон. Для ситуацій коли колонки вбудовані в монітор.'
-                            },
-                            'headphones-interview': {
-                                icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда',
-                                tip: 'Для Zoom/Teams/Meet дзвінків. Звук співрозмовника через VB-Cable направляється в додаток. Ви чуєте і бачите переклад одночасно.'
-                            },
-                        };
-                        const m = meta[preset.id] || { icon: '?', label: preset.id, labelUk: preset.id, tip: '' };
+            {(() => {
+                const meta: Record<string, { icon: string; label: string; labelUk: string; tip: string }> = {
+                    'best-available': {
+                        icon: '🎤', label: 'Best Mic', labelUk: 'Найкращий мік',
+                        tip: 'Автоматично обирає найкращий мікрофон: USB > гарнітура > вбудований. Працює на будь-якому пристрої.'
+                    },
+                    'default-mic': {
+                        icon: '🔇', label: 'System Default', labelUk: 'Системний',
+                        tip: 'Використовує мікрофон за замовчуванням системи. Найпростіший варіант, працює завжди.'
+                    },
+                    'headphones-youtube': {
+                        icon: '🎧', label: 'Headphones + Video', labelUk: 'Навушники + Відео',
+                        tip: 'Звук з відео/підкасту йде через VB-Cable в навушники. Додаток слухає цей же звук і перекладає.'
+                    },
+                    'speakers': {
+                        icon: '🔊', label: 'Speakers', labelUk: 'Колонки',
+                        tip: 'Звук через VB-Cable на колонки. Додаток перехоплює і перекладає.'
+                    },
+                    'monitor-speakers': {
+                        icon: '🖥️', label: 'Monitor', labelUk: 'Монітор',
+                        tip: 'Звук з динаміків монітора через VB-Cable.'
+                    },
+                    'headphones-interview': {
+                        icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда',
+                        tip: 'Для Zoom/Teams/Meet. Звук співрозмовника через VB-Cable.'
+                    },
+                };
 
-                        return (
-                            <button
-                                key={preset.id}
-                                onClick={() => {
-                                    if (preset.available) {
-                                        selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId, preset.listenThroughDeviceId);
-                                    }
-                                }}
-                                className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
-                                    ${active
-                                        ? 'border-cyan-400 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]'
-                                        : preset.available
-                                            ? 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
-                                            : 'border-gray-800/50 bg-gray-900/20 opacity-40 cursor-not-allowed'
-                                    }`}
-                                disabled={!preset.available}
-                                title={!preset.available
-                                    ? (uiLang === 'uk' ? 'Потрібен VB-Cable (vb-audio.com/Cable/)' : 'Requires VB-Cable (vb-audio.com/Cable/)')
-                                    : preset.matchedDeviceLabel}
-                            >
-                                <div className="text-2xl mb-2">{m.icon}</div>
-                                <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
-                                    {uiLang === 'uk' ? m.labelUk : m.label}
-                                    {m.tip && <Tip color="cyan" text={m.tip} />}
+                const universalPresets = presets.filter(p => p.id === 'best-available' || p.id === 'default-mic');
+                const vbCablePresets = presets.filter(p => p.id !== 'best-available' && p.id !== 'default-mic');
+                const hasAnyVBCable = vbCablePresets.some(p => p.available);
+
+                const renderPresetButton = (preset: typeof presets[0]) => {
+                    const active = context.activeAudioPreset === preset.id;
+                    const m = meta[preset.id] || { icon: '?', label: preset.id, labelUk: preset.id, tip: '' };
+                    return (
+                        <button
+                            key={preset.id}
+                            onClick={() => {
+                                if (preset.available) {
+                                    selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId, preset.listenThroughDeviceId);
+                                }
+                            }}
+                            className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                                ${active
+                                    ? 'border-cyan-400 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]'
+                                    : preset.available
+                                        ? 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
+                                        : 'border-gray-800/50 bg-gray-900/20 opacity-40 cursor-not-allowed'
+                                }`}
+                            disabled={!preset.available}
+                            title={preset.available ? preset.matchedDeviceLabel : (uiLang === 'uk' ? 'Потрібен VB-Cable' : 'Requires VB-Cable')}
+                        >
+                            <div className="text-2xl mb-2">{m.icon}</div>
+                            <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
+                                {uiLang === 'uk' ? m.labelUk : m.label}
+                                {m.tip && <Tip color="cyan" text={m.tip} />}
+                            </div>
+                            {preset.matchedDeviceLabel && preset.available && preset.id !== 'default-mic' && (
+                                <div className="text-[8px] text-gray-500 mt-1 truncate">{preset.matchedDeviceLabel}</div>
+                            )}
+                            {active && (
+                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-gray-950" />
+                            )}
+                            {!preset.available && (
+                                <div className="text-[8px] text-amber-500/70 mt-1">VB-Cable</div>
+                            )}
+                        </button>
+                    );
+                };
+
+                return (
+                    <div className="w-full max-w-5xl px-3 sm:px-6 mb-8">
+                        {/* Universal presets — always available */}
+                        <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+                            {uiLang === 'uk' ? 'МІКРОФОН' : 'MICROPHONE'}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3 mb-6">
+                            {universalPresets.map(renderPresetButton)}
+                        </div>
+
+                        {/* VB-Cable presets — shown only if any VB-Cable device detected */}
+                        {hasAnyVBCable && (
+                            <>
+                                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+                                    {uiLang === 'uk' ? 'VB-CABLE МАРШРУТИЗАЦІЯ' : 'VB-CABLE ROUTING'}
+                                </p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {vbCablePresets.map(renderPresetButton)}
                                 </div>
-                                {active && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-gray-950" />
-                                )}
-                                {!preset.available && (
-                                    <div className="text-[8px] text-amber-500/70 mt-1">VB-Cable</div>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
+                            </>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Speed Preset Buttons */}
             <div className="w-full max-w-5xl px-6 mb-8">

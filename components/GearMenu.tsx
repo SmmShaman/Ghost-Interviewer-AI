@@ -109,6 +109,8 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       label: t.settings.accordion?.audioSetup || 'Audio',
       color: 'orange',
       subItems: [
+        { id: 'preset-best', label: '🎤 Найкращий', value: 'best-available', isActive: context.activeAudioPreset === 'best-available' },
+        { id: 'preset-default', label: '🔇 Системний', value: 'default-mic', isActive: context.activeAudioPreset === 'default-mic' },
         { id: 'preset-speakers', label: '🔊 Колонки', value: 'speakers', isActive: context.activeAudioPreset === 'speakers' },
         { id: 'preset-headphones', label: '🎧 Навушники', value: 'headphones-youtube', isActive: context.activeAudioPreset === 'headphones-youtube' },
         { id: 'preset-monitor', label: '🖥️ Монітор', value: 'monitor-speakers', isActive: context.activeAudioPreset === 'monitor-speakers' },
