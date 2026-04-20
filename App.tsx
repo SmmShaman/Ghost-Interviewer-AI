@@ -1702,7 +1702,7 @@ const App: React.FC = () => {
 
   // WORKING VIEW: Show after mode is selected
   return (
-    <div className="relative h-screen w-screen flex flex-col bg-gray-950">
+    <div className="relative h-dvh w-screen flex flex-col bg-gray-950" style={{ height: '100dvh' }}>
       {!isModelReady && (
         <div className={`absolute top-0 left-0 right-0 z-[100] backdrop-blur-md border-b text-center py-2 transition-all ${modelError ? 'bg-red-900/95 border-red-500' : 'bg-blue-900/80 border-blue-500/30'}`}>
              <div className="flex flex-col items-center justify-center gap-1">
@@ -1828,8 +1828,8 @@ const App: React.FC = () => {
       </div>
 
       {isUserSpeaking && (
-          <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
-              <div className="bg-blue-600/90 text-white px-8 py-3 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.5)] animate-bounce font-bold tracking-widest text-sm backdrop-blur-sm border border-blue-400 flex items-center gap-3">
+          <div className="absolute top-16 sm:top-24 left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+              <div className="bg-blue-600/90 text-white px-4 sm:px-8 py-2 sm:py-3 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.5)] animate-bounce font-bold tracking-widest text-xs sm:text-sm backdrop-blur-sm border border-blue-400 flex items-center gap-2 sm:gap-3">
                   <span>{t.candidateSpeaking}</span>
                   <div className="h-4 w-16 bg-blue-900/50 rounded-full overflow-hidden border border-blue-400/30">
                        <div className="h-full bg-white transition-all duration-75" style={{ width: `${inputLevel}%` }} />

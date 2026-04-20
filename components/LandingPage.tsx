@@ -109,7 +109,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
     }, [googleUser, isAuthLoading, renderGoogleButton]);
 
     return (
-        <div className="h-screen w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up">
+        <div className="min-h-screen min-h-dvh w-screen bg-gray-950 flex flex-col items-center justify-center animate-fade-in-up overflow-y-auto py-8 sm:py-0" style={{ minHeight: '100dvh' }}>
             {/* Settings Gear: top-left corner */}
             <div className="absolute top-4 left-4 z-50">
                 <GearMenu

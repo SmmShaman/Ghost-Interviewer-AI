@@ -514,7 +514,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   return (
     <div
       ref={dropdownRef}
-      className="fixed left-2 sm:left-16 top-12 sm:top-16 w-[calc(100vw-1rem)] sm:w-[380px] max-h-[calc(100vh-4rem)] sm:max-h-[80vh] bg-gray-950 border border-gray-700 rounded-xl shadow-2xl z-[60] overflow-hidden animate-fade-in-up"
+      className="fixed left-2 sm:left-16 top-14 sm:top-16 w-[calc(100vw-1rem)] sm:w-[380px] max-h-[calc(100vh-4.5rem)] sm:max-h-[80vh] bg-gray-950 border border-gray-700 rounded-xl shadow-2xl z-[60] overflow-hidden animate-fade-in-up"
     >
       {/* Header */}
       <div className="flex justify-between items-center px-4 py-3 bg-gray-900/80 border-b border-gray-800">

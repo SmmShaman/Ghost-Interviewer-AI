@@ -128,7 +128,7 @@ const StreamingFullModeLayout: React.FC<StreamingFullModeLayoutProps> = ({
     };
 
     return (
-        <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100vh - 8rem)' }}>
+        <div className="w-full h-full flex flex-col" style={{ maxHeight: 'calc(100dvh - 5rem)' }}>
             {/* Top row: Translation + Analysis + Strategy */}
             <div className="flex-1 flex flex-col sm:flex-row gap-2 min-h-0">
 
