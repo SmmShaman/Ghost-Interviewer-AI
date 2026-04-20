@@ -19,24 +19,58 @@ export interface PresetInfo {
     warning?: string;
 }
 
-const DEVICE_PATTERNS: { type: DeviceType; patterns: string[] }[] = [
-    { type: 'stereo-mix', patterns: ['stereo mix', 'stereo-mix', 'what u hear', 'wave out', 'loopback'] },
-    { type: 'vb-cable', patterns: ['cable output', 'vb-audio', 'vb-cable'] },
-    { type: 'voicemeeter', patterns: ['voicemeeter'] },
-    { type: 'headset-mic', patterns: ['headset', 'airpods', 'jabra', 'plantronics', 'logitech headset'] },
-    { type: 'usb-mic', patterns: ['usb', 'blue yeti', 'at2020', 'fifine', 'samson', 'rode'] },
-    { type: 'webcam-mic', patterns: ['webcam', 'camera', 'c920', 'c922', 'facecam'] },
-    { type: 'realtek-mic', patterns: ['realtek', 'high definition audio', 'internal mic', 'built-in'] },
+const DEVICE_PATTERNS: { type: DeviceType; patterns: string[]; friendlyName: string }[] = [
+    { type: 'stereo-mix', patterns: ['stereo mix', 'stereo-mix', 'what u hear', 'wave out', 'loopback'], friendlyName: '🔁 Stereo Mix (системний звук)' },
+    { type: 'vb-cable', patterns: ['cable output', 'vb-audio', 'vb-cable'], friendlyName: '🔌 VB-Cable (віртуальний кабель)' },
+    { type: 'voicemeeter', patterns: ['voicemeeter'], friendlyName: '🎛️ VoiceMeeter (мікшер)' },
+    { type: 'headset-mic', patterns: ['headset', 'airpods', 'jabra', 'plantronics', 'logitech headset', 'hands-free', 'handsfree'], friendlyName: '🎧 Гарнітура' },
+    { type: 'usb-mic', patterns: ['blue yeti', 'at2020', 'fifine', 'samson', 'rode', 'usb microphone', 'usb audio', 'usb pnp'], friendlyName: '🎙️ USB мікрофон' },
+    { type: 'webcam-mic', patterns: ['webcam', 'camera', 'c920', 'c922', 'c930', 'facecam', 'brio'], friendlyName: '📷 Мікрофон ��ебкамери' },
+    { type: 'realtek-mic', patterns: ['realtek', 'high definition audio', 'internal mic', 'built-in', 'integrated', 'microphone array'], friendlyName: '💻 Вбудований мікрофон' },
 ];
+
+// Friendly names for output devices
+function friendlyOutputName(label: string): string {
+    const l = label.toLowerCase();
+    if (l.includes('cable input') || l.includes('vb-audio')) return '🔌 VB-Cable (вхід)';
+    if (l.includes('headphone')) return '🎧 Навушники';
+    if (l.includes('speaker')) return '🔊 Колонки';
+    if (l.includes('hdmi') || l.includes('monitor') || l.includes('phl') || l.includes('displayport')) return '🖥️ Монітор';
+    if (l.includes('realtek') || l.includes('high definition')) return '🔊 Вбудовані динаміки';
+    if (l.includes('bluetooth') || l.includes('bt ')) return '📶 Bluetooth';
+    if (l.includes('airpods')) return '🎧 AirPods';
+    if (l.includes('voicemeeter')) return '🎛️ VoiceMeeter';
+    return label;
+}
 
 function classifyDevice(device: MediaDeviceInfo): ClassifiedDevice {
     const label = device.label.toLowerCase();
-    for (const { type, patterns } of DEVICE_PATTERNS) {
+    for (const { type, patterns, friendlyName } of DEVICE_PATTERNS) {
         if (patterns.some(p => label.includes(p))) {
-            return { device, type, friendlyName: device.label };
+            // Add specific brand/model if detectable
+            let name = friendlyName;
+            if (type === 'usb-mic') {
+                if (label.includes('blue yeti')) name = '🎙️ Blue Yeti';
+                else if (label.includes('at2020')) name = '🎙️ AT2020 USB';
+                else if (label.includes('fifine')) name = '🎙️ Fifine USB';
+                else if (label.includes('rode')) name = '🎙️ Rode USB';
+                else if (label.includes('samson')) name = '🎙️ Samson USB';
+            } else if (type === 'headset-mic') {
+                if (label.includes('airpods')) name = '🎧 AirPods';
+                else if (label.includes('jabra')) name = '🎧 Jabra';
+                else if (label.includes('plantronics') || label.includes('poly')) name = '🎧 Poly/Plantronics';
+                else if (label.includes('logitech')) name = '🎧 Logitech гарнітура';
+            } else if (type === 'webcam-mic') {
+                if (label.includes('c920')) name = '📷 Logitech C920';
+                else if (label.includes('c922')) name = '📷 Logitech C922';
+                else if (label.includes('brio')) name = '📷 Logitech Brio';
+            }
+            return { device, type, friendlyName: name };
         }
     }
-    return { device, type: 'unknown', friendlyName: device.label || `Microphone ${device.deviceId.slice(0, 8)}` };
+    // Fallback: try to make a readable name from the raw label
+    const rawLabel = device.label || `Мікрофон ${device.deviceId.slice(0, 6)}`;
+    return { device, type: 'unknown', friendlyName: `🎤 ${rawLabel}` };
 }
 
 function findDeviceByType(devices: ClassifiedDevice[], ...types: DeviceType[]): ClassifiedDevice | undefined {
@@ -87,11 +121,11 @@ export function useAudioDevices() {
     const hasVoiceMeeter = classifiedDevices.some(d => d.type === 'voicemeeter');
     const hasAnyMic = classifiedDevices.length > 0;
 
-    // Find output device by pattern
+    // Find output device by pattern, return with friendly label
     const findOutput = useCallback((...patterns: string[]): { id: string; label: string } | null => {
         for (const p of patterns) {
             const found = outputDevices.find(d => d.label.toLowerCase().includes(p));
-            if (found) return { id: found.deviceId, label: found.label };
+            if (found) return { id: found.deviceId, label: friendlyOutputName(found.label) };
         }
         return null;
     }, [outputDevices]);
