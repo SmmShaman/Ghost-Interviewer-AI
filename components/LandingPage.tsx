@@ -109,7 +109,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
     }, [googleUser, isAuthLoading, renderGoogleButton]);
 
     return (
-        <div className="h-dvh w-screen bg-gray-950 flex flex-col items-center animate-fade-in-up overflow-y-auto py-16 sm:py-8" style={{ height: '100dvh' }}>
+        <div className="h-dvh w-screen bg-gray-950 flex flex-col items-center justify-between overflow-hidden px-3 sm:px-6 pt-14 sm:pt-8 pb-4" style={{ height: '100dvh' }}>
             {/* Settings Gear: top-left corner */}
             <div className="absolute top-4 left-4 z-50">
                 <GearMenu
@@ -163,17 +163,12 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
             )}
 
-            {/* Title */}
-            <div className="text-center space-y-3 mb-6 sm:mb-12">
-                <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
+            {/* Title + Language in one row */}
+            <div className="text-center space-y-1 sm:space-y-2 shrink-0">
+                <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
                     Ghost Interviewer
                 </h1>
-                <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
-            </div>
-
-            {/* Language Selection — required before starting */}
-            <div className="w-full max-w-5xl px-6 mb-8">
-                <div className="flex flex-wrap items-center justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                     {/* Source Language */}
                     <div className="flex items-center gap-2">
                         <label className="text-[10px] text-gray-500 font-mono tracking-wider uppercase whitespace-nowrap">
@@ -218,37 +213,37 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
             </div>
 
-            {/* Warning: FOCUS/FULL with YouTube preset */}
+            {/* Warning: FOCUS/FULL with YouTube preset — compact */}
             {(context.speedPreset === 'youtube') && (
-                <div className="w-full max-w-5xl px-6 mb-4">
-                    <div className="px-4 py-2.5 rounded-lg bg-amber-900/20 border border-amber-500/30 text-center">
-                        <span className="text-amber-300 text-xs">
-                            ⚠️ Пресет «YouTube» — AI-відповіді вимкнені. Для FOCUS/FULL з відповідями оберіть «Live інтерв'ю» нижче.
+                <div className="w-full max-w-5xl shrink-0">
+                    <div className="px-3 py-1.5 rounded-lg bg-amber-900/20 border border-amber-500/30 text-center">
+                        <span className="text-amber-300 text-[10px]">
+                            ⚠️ YouTube — AI-відповіді вимкнені
                         </span>
                     </div>
                 </div>
             )}
 
-            {/* Mode Selection Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 w-full max-w-5xl px-3 sm:px-6 mb-6 sm:mb-12">
+            {/* Mode Selection Cards — compact */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 w-full max-w-5xl shrink-0">
                 {/* SIMPLE Mode */}
                 <button
                     onClick={() => { setContext({ ...context, speedPreset: 'youtube' }); startSessionWithMode('SIMPLE'); }}
                     disabled={!isModelReady}
-                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
+                    className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
                         hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all"></div>
                     <div className="relative">
-                        <div className="text-amber-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <div className="text-amber-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
                             {t.modes.simple}
                             <Tip color="amber" text="Тільки переклад, без AI-відповідей. Ліворуч — субтитри мовлення. Праворуч — короткий зміст по темах. Для перегляду відео, подкастів, лекцій." />
                         </div>
-                        <div className="text-gray-300 text-sm leading-relaxed">{t.modes.simpleDesc}</div>
-                        <div className="mt-6 flex items-center gap-2 text-amber-500/70 text-xs font-mono">
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.simpleDesc}</div>
+                        <div className="mt-2 sm:mt-4 flex items-center gap-2 text-amber-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
                         </div>
@@ -262,20 +257,20 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         startSessionWithMode('FOCUS');
                     }}
                     disabled={!isModelReady}
-                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
+                    className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
                         hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
                     <div className="relative">
-                        <div className="text-blue-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <div className="text-blue-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
                             {t.modes.focus}
                             <Tip color="blue" text="Переклад + підказка. Ліворуч — переклад що каже інтерв'юер. Праворуч — AI підказує що відповісти, коли задають питання. Для співбесід." />
                         </div>
-                        <div className="text-gray-300 text-sm leading-relaxed">{t.modes.focusDesc}</div>
-                        <div className="mt-6 flex items-center gap-2 text-blue-500/70 text-xs font-mono">
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.focusDesc}</div>
+                        <div className="mt-2 sm:mt-4 flex items-center gap-2 text-blue-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
                         </div>
@@ -289,20 +284,20 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         startSessionWithMode('FULL');
                     }}
                     disabled={!isModelReady}
-                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
+                    className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
                         hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all"></div>
                     <div className="relative">
-                        <div className="text-emerald-400 font-black mb-3 tracking-widest text-sm uppercase flex items-center gap-2">
+                        <div className="text-emerald-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
                             {t.modes.full}
                             <Tip color="emerald" text="Максимальна допомога. Переклад + AI аналізує питання + пропонує стратегію + готова відповідь. Для важливих співбесід де потрібна повна підтримка." />
                         </div>
-                        <div className="text-gray-300 text-sm leading-relaxed">{t.modes.fullDesc}</div>
-                        <div className="mt-6 flex items-center gap-2 text-emerald-500/70 text-xs font-mono">
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.fullDesc}</div>
+                        <div className="mt-2 sm:mt-4 flex items-center gap-2 text-emerald-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
                         </div>
@@ -354,7 +349,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                     selectPreset(preset.id as AudioPresetId, preset.matchedDeviceId, preset.listenThroughDeviceId);
                                 }
                             }}
-                            className={`group relative p-4 rounded-xl border-2 transition-all duration-300 text-center
+                            className={`group relative p-2 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all duration-300 text-center
                                 ${active
                                     ? 'border-cyan-400 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.15)]'
                                     : preset.available
@@ -364,7 +359,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             disabled={!preset.available}
                             title={preset.available ? preset.matchedDeviceLabel : (uiLang === 'uk' ? 'Потрібен VB-Cable' : 'Requires VB-Cable')}
                         >
-                            <div className="text-2xl mb-2">{m.icon}</div>
+                            <div className="text-lg sm:text-2xl mb-1">{m.icon}</div>
                             <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
                                 {uiLang === 'uk' ? m.labelUk : m.label}
                                 {m.tip && <Tip color="cyan" text={m.tip} />}
@@ -383,22 +378,22 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 };
 
                 return (
-                    <div className="w-full max-w-5xl px-3 sm:px-6 mb-8">
+                    <div className="w-full max-w-5xl shrink-0">
                         {/* Universal presets — always available */}
-                        <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+                        <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2">
                             {uiLang === 'uk' ? 'МІКРОФОН' : 'MICROPHONE'}
                         </p>
-                        <div className="grid grid-cols-2 gap-3 mb-6">
+                        <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-3 sm:mb-6">
                             {universalPresets.map(renderPresetButton)}
                         </div>
 
                         {/* VB-Cable presets — shown only if any VB-Cable device detected */}
                         {hasAnyVBCable && (
                             <>
-                                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
-                                    {uiLang === 'uk' ? 'VB-CABLE МАРШРУТИЗАЦІЯ' : 'VB-CABLE ROUTING'}
+                                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2">
+                                    {uiLang === 'uk' ? 'VB-CABLE' : 'VB-CABLE'}
                                 </p>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                                     {vbCablePresets.map(renderPresetButton)}
                                 </div>
                             </>
@@ -408,8 +403,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
             })()}
 
             {/* Speed Preset Buttons */}
-            <div className="w-full max-w-5xl px-3 sm:px-6 mb-8">
-                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-4">
+            <div className="w-full max-w-5xl shrink-0">
+                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2">
                     {uiLang === 'uk' ? 'ШВИДКІСТЬ' : 'SPEED'}
                 </p>
                 <div className="grid grid-cols-3 gap-2 sm:gap-3">
