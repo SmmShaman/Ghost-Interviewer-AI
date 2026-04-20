@@ -259,7 +259,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
               {/* Sub-Items Dropdown - Vertical Slide Down */}
               {item.subItems && (
                 <div className={`
-                  absolute top-full left-0 mt-2 min-w-[140px] z-50
+                  absolute top-full left-0 mt-2 min-w-[140px] max-w-[calc(100vw-1rem)] z-50
                   bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl
                   overflow-hidden transition-all duration-300 ease-out origin-top
                   ${isExpanded

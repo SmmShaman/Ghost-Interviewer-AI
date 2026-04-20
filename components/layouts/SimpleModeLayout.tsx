@@ -30,7 +30,7 @@ const SimpleModeLayout: React.FC<SimpleModeLayoutProps> = ({
     renderMessages
 }) => {
     return (
-        <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+        <div className="max-w-[1800px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
             {/* COLUMN 1: Scrollable Ghost blocks */}
             <div className="space-y-6">
                 {renderMessages()}
@@ -52,7 +52,7 @@ const SimpleModeLayout: React.FC<SimpleModeLayoutProps> = ({
             </div>
 
             {/* COLUMN 2: Visual Queue - Collecting + Processing Blocks */}
-            <div className="sticky top-8 h-fit space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
+            <div className="sticky top-4 lg:top-8 h-fit space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto">
                 {/* COLLECTING BLOCK - LIVE Chrome translation of accumulating text */}
                 {currentCollectingText && (
                     <div className="border-l-4 border-cyan-500 bg-cyan-900/10 rounded-lg shadow-xl animate-fade-in-up">

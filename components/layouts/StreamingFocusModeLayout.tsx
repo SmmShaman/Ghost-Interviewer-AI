@@ -181,8 +181,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                     )}
 
                     {/* Column headers */}
-                    <div className="px-4 py-2 border-b border-gray-800/30 flex gap-3 shrink-0">
-                        <div className="w-[70%] shrink-0">
+                    <div className="px-4 py-2 border-b border-gray-800/30 flex flex-col sm:flex-row gap-1 sm:gap-3 shrink-0">
+                        <div className="w-full sm:w-[70%] shrink-0">
                             <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
                         </div>
                         <div className="flex-1">
@@ -196,10 +196,10 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                                 {literaryChunks.map((chunk, chunkIdx) => (
                                     <div
                                         key={chunkIdx}
-                                        className="flex gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
+                                        className="flex flex-col sm:flex-row gap-1 sm:gap-3 border-b border-gray-800/20 last:border-b-0 py-2 animate-fade-in-up"
                                     >
                                         {/* Literary translation */}
-                                        <div className="w-[70%] shrink-0">
+                                        <div className="w-full sm:w-[70%] shrink-0">
                                             <p className="text-base text-amber-200/90 leading-relaxed">
                                                 {chunk.literary}
                                             </p>

@@ -25,7 +25,7 @@ const FullModeLayout: React.FC<FullModeLayoutProps> = ({
     messagesEndRef
 }) => {
     return (
-        <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+        <div className="max-w-[1800px] mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
             {/* COLUMN 1: Question + Translation (Scrollable) */}
             <div className="space-y-4">
                 {/* Interviewer blocks with translations */}

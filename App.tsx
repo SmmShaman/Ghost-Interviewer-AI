@@ -1742,8 +1742,8 @@ const App: React.FC = () => {
 
       <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} listenThroughActive={audioPassthrough.isActive} listenThroughError={audioPassthrough.error} />
 
-      <div className={`flex justify-between items-center p-4 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
-        <div className="flex items-center gap-4">
+      <div className={`flex flex-wrap justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
+        <div className="flex items-center gap-2 sm:gap-4">
             {/* Back to Home */}
             <button
               onClick={() => { stopListening(); setHasSessionStarted(false); setMessages([]); }}
@@ -1773,9 +1773,9 @@ const App: React.FC = () => {
             <button onClick={toggleLanguage} className="px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
-            {/* Audio preset indicator (compact) */}
+            {/* Audio preset indicator (compact) — hidden on mobile */}
             {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && (
-              <div className="px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
+              <div className="hidden sm:block px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
                 {context.activeAudioPreset === 'headphones-youtube' ? '🎧' :
                  context.activeAudioPreset === 'speakers' ? '🔊' :
                  context.activeAudioPreset === 'monitor-speakers' ? '🖥️' :
@@ -1784,17 +1784,17 @@ const App: React.FC = () => {
             )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
              {/* Google user avatar (if signed in) */}
              {googleAuth.isSignedIn && googleAuth.user && (
-               <div className="flex items-center gap-1.5 mr-2" title={googleAuth.user.email}>
+               <div className="hidden sm:flex items-center gap-1.5 mr-2" title={googleAuth.user.email}>
                  {googleAuth.user.picture && (
                    <img src={googleAuth.user.picture} alt="" className="w-6 h-6 rounded-full border border-gray-600" />
                  )}
                  <span className="text-[10px] text-gray-400 max-w-[80px] truncate hidden md:inline">{googleAuth.user.name}</span>
                </div>
              )}
-             <div className="flex items-center gap-1 mr-4 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
+             <div className="flex items-center gap-1 mr-1 sm:mr-4 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
                  <button onClick={handleSaveSession} className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-emerald-400 transition-colors" title={t.saveSession}>
                     <DownloadIcon className="w-5 h-5" />
                  </button>
@@ -1804,9 +1804,9 @@ const App: React.FC = () => {
                  </button>
              </div>
              {/* Listening/Pause Indicator */}
-             <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
-                <div className={`w-2.5 h-2.5 rounded-full shadow-lg ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
-                <span className="text-xs font-mono font-bold tracking-wider text-gray-200">
+             <div className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 rounded-lg border transition-all duration-300 ${isUserSpeaking ? 'border-blue-500/50 bg-blue-500/10' : appState !== AppState.IDLE ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800'}`}>
+                <div className={`w-2.5 h-2.5 rounded-full shadow-lg shrink-0 ${isUserSpeaking ? 'bg-blue-500 animate-pulse shadow-blue-500/50' : appState !== AppState.IDLE ? 'bg-red-500 animate-pulse shadow-red-500/50' : 'bg-gray-500'}`} />
+                <span className="text-xs font-mono font-bold tracking-wider text-gray-200 hidden sm:inline">
                     {isUserSpeaking ? "YOU ARE SPEAKING" : appState === AppState.LISTENING ? (context.stereoMode ? "LISTENING (STEREO)" : t.listening) : appState === AppState.PROCESSING ? t.generating : t.paused}
                 </span>
             </div>
@@ -1815,7 +1815,7 @@ const App: React.FC = () => {
                 onClick={toggleListening}
                 disabled={!isModelReady}
                 title={!isModelReady ? "Waiting for translation model to load..." : (shouldBeListening.current ? t.paused : t.listening)}
-                className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all transform ${
+                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-lg transition-all transform ${
                     !isModelReady
                         ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
                         : shouldBeListening.current
@@ -1838,7 +1838,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8">
+      <div className="flex-1 overflow-y-auto px-2 sm:px-4 md:px-8 py-4 sm:py-8">
          {/* SIMPLE MODE - NEW STREAMING UI */}
          {context.viewMode === 'SIMPLE' && useStreamingUI && (
              <StreamingSimpleModeLayout

@@ -164,8 +164,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
             )}
 
             {/* Title */}
-            <div className="text-center space-y-3 mb-12">
-                <h1 className="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
+            <div className="text-center space-y-3 mb-6 sm:mb-12">
+                <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
                     Ghost Interviewer
                 </h1>
                 <p className="text-gray-400 font-mono text-sm tracking-[0.3em] uppercase">{t.selectMode}</p>
@@ -173,7 +173,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
             {/* Language Selection — required before starting */}
             <div className="w-full max-w-5xl px-6 mb-8">
-                <div className="flex items-center justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-4">
                     {/* Source Language */}
                     <div className="flex items-center gap-2">
                         <label className="text-[10px] text-gray-500 font-mono tracking-wider uppercase whitespace-nowrap">
@@ -230,12 +230,12 @@ const LandingPage: React.FC<LandingPageProps> = ({
             )}
 
             {/* Mode Selection Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-6 mb-12">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 w-full max-w-5xl px-3 sm:px-6 mb-6 sm:mb-12">
                 {/* SIMPLE Mode */}
                 <button
                     onClick={() => { setContext({ ...context, speedPreset: 'youtube' }); startSessionWithMode('SIMPLE'); }}
                     disabled={!isModelReady}
-                    className={`group p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
+                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
                         hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -262,7 +262,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         startSessionWithMode('FOCUS');
                     }}
                     disabled={!isModelReady}
-                    className={`group p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
+                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
                         hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -289,7 +289,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         startSessionWithMode('FULL');
                     }}
                     disabled={!isModelReady}
-                    className={`group p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
+                    className={`group p-5 sm:p-8 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
                         hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
                         ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}

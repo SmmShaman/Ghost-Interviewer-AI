@@ -35,8 +35,8 @@ const BrickRow: React.FC<BrickRowProps> = ({
   const isFull = viewMode === 'FULL';
 
   // Grid CSS classes based on mode
-  let gridClass = 'grid-cols-1 md:grid-cols-3'; // Default FULL
-  if (isFocus) gridClass = 'grid-cols-1 md:grid-cols-2';
+  let gridClass = 'grid-cols-1 lg:grid-cols-3'; // Default FULL
+  if (isFocus) gridClass = 'grid-cols-1 lg:grid-cols-2';
   // SIMPLE mode: Always 1 column (LLM translation is now separate sticky column in App.tsx)
   if (isSimple) {
     gridClass = 'grid-cols-1';
