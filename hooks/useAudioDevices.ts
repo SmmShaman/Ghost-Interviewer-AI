@@ -25,21 +25,33 @@ const DEVICE_PATTERNS: { type: DeviceType; patterns: string[]; friendlyName: str
     { type: 'voicemeeter', patterns: ['voicemeeter'], friendlyName: '🎛️ VoiceMeeter (мікшер)' },
     { type: 'headset-mic', patterns: ['headset', 'airpods', 'jabra', 'plantronics', 'logitech headset', 'hands-free', 'handsfree'], friendlyName: '🎧 Гарнітура' },
     { type: 'usb-mic', patterns: ['blue yeti', 'at2020', 'fifine', 'samson', 'rode', 'usb microphone', 'usb audio', 'usb pnp'], friendlyName: '🎙️ USB мікрофон' },
-    { type: 'webcam-mic', patterns: ['webcam', 'camera', 'c920', 'c922', 'c930', 'facecam', 'brio'], friendlyName: '📷 Мікрофон ��ебкамери' },
-    { type: 'realtek-mic', patterns: ['realtek', 'high definition audio', 'internal mic', 'built-in', 'integrated', 'microphone array'], friendlyName: '💻 Вбудований мікрофон' },
+    { type: 'webcam-mic', patterns: ['webcam', 'camera', 'c920', 'c922', 'c930', 'c270', 'c525', 'facecam', 'brio', 'hd pro', 'streamcam', 'kiyo', 'facetime'], friendlyName: '📷 Webcam' },
+    { type: 'realtek-mic', patterns: ['realtek', 'high definition audio', 'internal mic', 'built-in', 'integrated', 'microphone array', 'conexant', 'synaptics'], friendlyName: '💻 Built-in mic' },
 ];
 
 // Friendly names for output devices
 function friendlyOutputName(label: string): string {
     const l = label.toLowerCase();
     if (l.includes('cable input') || l.includes('vb-audio')) return '🔌 VB-Cable (вхід)';
-    if (l.includes('headphone')) return '🎧 Навушники';
-    if (l.includes('speaker')) return '🔊 Колонки';
-    if (l.includes('hdmi') || l.includes('monitor') || l.includes('phl') || l.includes('displayport')) return '🖥️ Монітор';
-    if (l.includes('realtek') || l.includes('high definition')) return '🔊 Вбудовані динаміки';
-    if (l.includes('bluetooth') || l.includes('bt ')) return '📶 Bluetooth';
     if (l.includes('airpods')) return '🎧 AirPods';
+    if (l.includes('headphone') || l.includes('headset')) return '🎧 Навушники';
     if (l.includes('voicemeeter')) return '🎛️ VoiceMeeter';
+    if (l.includes('bluetooth') || l.includes('bt ')) return '📶 Bluetooth';
+    // Monitors — try to extract brand/model
+    if (l.includes('hdmi') || l.includes('displayport') || l.includes('phl') || l.includes('dell') || l.includes('samsung') || l.includes('lg ') || l.includes('asus') || l.includes('acer') || l.includes('benq') || l.includes('aoc') || l.includes('msi') || l.includes('lenovo')) {
+        // Extract brand for distinction between multiple monitors
+        const brands: [string, string][] = [
+            ['phl', 'Philips'], ['dell', 'Dell'], ['samsung', 'Samsung'], ['lg ', 'LG'],
+            ['asus', 'ASUS'], ['acer', 'Acer'], ['benq', 'BenQ'], ['aoc', 'AOC'],
+            ['msi', 'MSI'], ['lenovo', 'Lenovo'],
+        ];
+        for (const [pattern, brand] of brands) {
+            if (l.includes(pattern)) return `🖥️ ${brand} монітор`;
+        }
+        return '🖥️ Монітор (HDMI)';
+    }
+    if (l.includes('speaker')) return '🔊 Колонки';
+    if (l.includes('realtek') || l.includes('high definition')) return '🔊 Вбудовані динаміки';
     return label;
 }
 
@@ -63,6 +75,11 @@ function classifyDevice(device: MediaDeviceInfo): ClassifiedDevice {
             } else if (type === 'webcam-mic') {
                 if (label.includes('c920')) name = '📷 Logitech C920';
                 else if (label.includes('c922')) name = '📷 Logitech C922';
+                else if (label.includes('c270')) name = '📷 Logitech C270';
+                else if (label.includes('c525')) name = '📷 Logitech C525';
+                else if (label.includes('streamcam')) name = '📷 Logitech StreamCam';
+                else if (label.includes('kiyo')) name = '📷 Razer Kiyo';
+                else if (label.includes('hd pro')) name = '📷 HD Pro Webcam';
                 else if (label.includes('brio')) name = '📷 Logitech Brio';
             }
             return { device, type, friendlyName: name };
@@ -140,7 +157,7 @@ export function useAudioDevices() {
         const vbCable = findDeviceByType(classifiedDevices, 'vb-cable', 'stereo-mix', 'voicemeeter');
         const speakers = findOutput('speakers');
         const headphones = findOutput('headphones');
-        const monitor = findOutput('phl', 'hdmi', 'monitor');
+        const monitor = findOutput('phl', 'dell', 'samsung', 'lg ', 'asus', 'acer', 'benq', 'aoc', 'msi', 'hdmi', 'displayport', 'monitor');
         const noVBCable = { available: false, matchedDeviceId: '', matchedDeviceLabel: '', listenThroughDeviceId: '', listenThroughLabel: '', warning: 'vb-cable-needed' as const };
 
         // === UNIVERSAL PRESETS (always available) ===
