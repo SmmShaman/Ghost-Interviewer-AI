@@ -530,24 +530,26 @@ export async function generateLiteraryTranslation(
 
 // ========== INTERVIEW CONVERSATION ANALYZER (Flash-Lite) ==========
 
-const INTERVIEW_ANALYZER_PROMPT = `Ти асистент на співбесіді. Аналізуєш норвезьке мовлення інтерв'юера і ведеш хронологію розмови УКРАЇНСЬКОЮ.
+function buildAnalyzerPrompt(sourceLang: string, targetLang: string): string {
+    return `You are an interview assistant. Analyze the interviewer's speech in ${sourceLang} and maintain a conversation chronology in ${targetLang}.
 
-ДВА ТИПИ ЗАПИСІВ:
+TWO TYPES OF ENTRIES:
 
-1. 📌 ІНФО — коли інтерв'юер розповідає (про компанію, умови, проект):
-📌 **Заголовок**
-Короткий зміст 1-2 реченнями.
+1. 📌 INFO — when the interviewer shares information (about company, conditions, project):
+📌 **Title**
+Brief summary in 1-2 sentences.
 
-2. ❓ ПИТАННЯ — коли інтерв'юер ставить питання кандидату:
-❓ **Питання кандидату**
-Точне формулювання питання українською.
+2. ❓ QUESTION — when the interviewer asks the candidate a question:
+❓ **Question to candidate**
+Exact wording of the question in ${targetLang}.
 
-ПРАВИЛА:
-- Пиши ТІЛЬКИ записи (📌 або ❓), нічого іншого
-- Нові записи ДОДАВАЙ в кінець, старі НЕ змінюй
-- Питання розпізнавай за інтонацією (? в тексті) та змістом ("розкажи про себе", "які твої", "чому ти", "що ти думаєш")
-- Максимум 10 записів
-- Прямою мовою, без "Спікер каже..."`;
+RULES:
+- Write ONLY entries (📌 or ❓), nothing else
+- ADD new entries at the end, do NOT modify old ones
+- Recognize questions by intonation (? in text) and content ("tell me about yourself", "what are your", "why did you", "what do you think")
+- Maximum 10 entries
+- Write in ${targetLang}, no "The speaker says..."`;
+}
 
 export interface ConversationEntry {
     type: 'info' | 'question';
@@ -562,20 +564,22 @@ export interface ConversationEntry {
 export async function analyzeConversation(
     norwegianText: string,
     existingLog: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sourceLang: string = 'Norwegian',
+    targetLang: string = 'Ukrainian'
 ): Promise<{ log: string; hasNewQuestion: boolean; lastQuestion: string }> {
     if (!ai || !norwegianText.trim()) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
 
     try {
         const userPrompt = existingLog
-            ? `ПОТОЧНИЙ ЛОГ:\n${existingLog}\n\nНОВИЙ ТЕКСТ (норвезька):\n${norwegianText}\n\nОновлений лог:`
-            : `ТЕКСТ (норвезька):\n${norwegianText}\n\nЛог розмови:`;
+            ? `CURRENT LOG:\n${existingLog}\n\nNEW TEXT (${sourceLang}):\n${norwegianText}\n\nUpdated log:`
+            : `TEXT (${sourceLang}):\n${norwegianText}\n\nConversation log:`;
 
         const response = await ai.models.generateContent({
             model: GEMINI_MODEL_LITE,
             contents: userPrompt,
             config: {
-                systemInstruction: INTERVIEW_ANALYZER_PROMPT,
+                systemInstruction: buildAnalyzerPrompt(sourceLang, targetLang),
                 thinkingConfig: { thinkingBudget: 0 },
                 temperature: 0.1,
                 maxOutputTokens: 400,

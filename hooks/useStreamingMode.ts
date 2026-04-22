@@ -880,10 +880,13 @@ export function useStreamingMode(
         setState(prev => ({ ...prev, isProcessingConversation: true }));
 
         try {
+            const ctx = contextRef.current;
             const result = await analyzeConversation(
                 currentOriginal,
                 conversationLogRef.current,
-                conversationAbortRef.current.signal
+                conversationAbortRef.current.signal,
+                ctx.targetLanguage || 'Norwegian',
+                ctx.nativeLanguage || 'Ukrainian'
             );
 
             debugLogger.log('CONV', `q=${result.hasNewQuestion} | ${result.lastQuestion.substring(0, 40)}`, undefined, currentOriginal.split(/\s+/).length);
