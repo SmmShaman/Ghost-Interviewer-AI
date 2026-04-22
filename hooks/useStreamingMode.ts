@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, generateLiteraryTranslation, analyzeConversation, generateInterviewAnswer, refineTranslationPair } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, generateLiteraryTranslation, analyzeConversation, generateInterviewAnswerStreaming, refineTranslationPair } from '../services/geminiService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -48,6 +48,8 @@ export interface StreamingState {
     analysis: string;
     strategy: string;
     isGeneratingAnswer: boolean;
+    streamingAnswer: string;
+    streamingAnswerTranslation: string;
     isAnalyzing: boolean;
 
     // Topic structuring (Flash-Lite)
@@ -155,6 +157,8 @@ export function useStreamingMode(
         isProcessingConversation: false,
         answeredQuestions: [],
         isGeneratingAnswer: false,
+        streamingAnswer: '',
+        streamingAnswerTranslation: '',
         isAnalyzing: false,
         isListening: false,
         isProcessingGhost: false,
@@ -848,14 +852,29 @@ export function useStreamingMode(
 
     const conversationAbortRef = useRef<AbortController | null>(null);
     const answerAbortRef = useRef<AbortController | null>(null);
+    const isConversationRunningRef = useRef<boolean>(false);
+    const conversationQueuedRef = useRef<boolean>(false);
+    const conversationLogRef = useRef<string>('');
+
+    // Keep conversationLogRef in sync with state
+    useEffect(() => {
+        conversationLogRef.current = state.conversationLog;
+    }, [state.conversationLog]);
 
     const executeConversationAnalysis = useCallback(async () => {
         const currentOriginal = originalTextRef.current;
         const currentContext = contextRef.current;
-        if (!currentOriginal.trim() || currentOriginal.split(/\s+/).length < 10) return;
+        if (!currentOriginal.trim() || currentOriginal.trim().split(/\s+/).length < 10) return;
         if (currentContext.viewMode !== 'FOCUS') return; // Only in FOCUS mode
 
-        if (conversationAbortRef.current) conversationAbortRef.current.abort();
+        // Don't abort running analysis — queue re-run instead
+        if (isConversationRunningRef.current) {
+            conversationQueuedRef.current = true;
+            return;
+        }
+        isConversationRunningRef.current = true;
+        conversationQueuedRef.current = false;
+
         conversationAbortRef.current = new AbortController();
 
         setState(prev => ({ ...prev, isProcessingConversation: true }));
@@ -863,12 +882,13 @@ export function useStreamingMode(
         try {
             const result = await analyzeConversation(
                 currentOriginal,
-                state.conversationLog,
+                conversationLogRef.current,
                 conversationAbortRef.current.signal
             );
 
             debugLogger.log('CONV', `q=${result.hasNewQuestion} | ${result.lastQuestion.substring(0, 40)}`, undefined, currentOriginal.split(/\s+/).length);
 
+            conversationLogRef.current = result.log;
             setState(prev => ({
                 ...prev,
                 conversationLog: result.log,
@@ -883,8 +903,16 @@ export function useStreamingMode(
         } catch (e: any) {
             if (e.name !== 'AbortError') console.error('[Conversation] Error:', e);
             setState(prev => ({ ...prev, isProcessingConversation: false }));
+        } finally {
+            isConversationRunningRef.current = false;
+            conversationAbortRef.current = null;
+            // Re-run if new words arrived while we were processing
+            if (conversationQueuedRef.current) {
+                conversationQueuedRef.current = false;
+                executeConversationAnalysis();
+            }
         }
-    }, [state.conversationLog]);
+    }, []);
 
     const generateAnswerForQuestion = useCallback(async (question: string, conversationContext: string) => {
         const ctx = contextRef.current;
@@ -892,23 +920,35 @@ export function useStreamingMode(
         if (answerAbortRef.current) answerAbortRef.current.abort();
         answerAbortRef.current = new AbortController();
 
-        setState(prev => ({ ...prev, isGeneratingAnswer: true }));
+        setState(prev => ({ ...prev, isGeneratingAnswer: true, streamingAnswer: '', streamingAnswerTranslation: '' }));
         debugLogger.log('ANSWER_START', question.substring(0, 50));
 
         try {
-            const result = await generateInterviewAnswer(
+            const result = await generateInterviewAnswerStreaming(
                 question,
                 conversationContext,
                 ctx.resume || '',
                 ctx.knowledgeBase || '',
                 ctx.targetLanguage || 'Norwegian',
                 ctx.nativeLanguage || 'Ukrainian',
-                answerAbortRef.current.signal
+                // Progressive update callback — fires every ~100ms
+                (partial) => {
+                    if (answerAbortRef.current?.signal.aborted) return;
+                    setState(prev => ({
+                        ...prev,
+                        streamingAnswer: partial.answer,
+                        streamingAnswerTranslation: partial.answerTranslation,
+                    }));
+                },
+                answerAbortRef.current.signal,
+                ctx.companyDescription || '',
+                ctx.jobDescription || '',
+                ctx.applicationLetter || ''
             );
 
             debugLogger.log('ANSWER', result.answer.substring(0, 50));
 
-            // Store answer separately (won't be overwritten by Flash-Lite)
+            // Move completed answer to answeredQuestions, clear streaming state
             setState(prev => ({
                 ...prev,
                 generatedAnswer: result.answer,
@@ -918,11 +958,13 @@ export function useStreamingMode(
                     answer: result.answer,
                     translation: result.answerTranslation
                 }],
-                isGeneratingAnswer: false
+                isGeneratingAnswer: false,
+                streamingAnswer: '',
+                streamingAnswerTranslation: '',
             }));
         } catch (e: any) {
             if (e.name !== 'AbortError') console.error('[Answer] Error:', e);
-            setState(prev => ({ ...prev, isGeneratingAnswer: false }));
+            setState(prev => ({ ...prev, isGeneratingAnswer: false, streamingAnswer: '', streamingAnswerTranslation: '' }));
         }
     }, []);
 
@@ -967,7 +1009,9 @@ export function useStreamingMode(
         // Literary translation triggered directly on every final batch + on pause
         triggerLiteraryOnBlock(newWordCount);
         scheduleLiterary();
-    }, [triggerLiteraryOnBlock, scheduleLiterary]);
+        // Conversation analysis for FOCUS mode (question detection + answer generation)
+        triggerConversationOnBlock();
+    }, [triggerLiteraryOnBlock, scheduleLiterary, triggerConversationOnBlock]);
 
     /**
      * Set interim text (real-time, not yet finalized)
@@ -1080,6 +1124,8 @@ export function useStreamingMode(
             lastDetectedQuestion: '',
             isProcessingConversation: false,
             isGeneratingAnswer: false,
+            streamingAnswer: '',
+            streamingAnswerTranslation: '',
             isAnalyzing: false,
             isListening: true,
             isProcessingGhost: false,
@@ -1098,6 +1144,12 @@ export function useStreamingMode(
         isLiteraryRunningRef.current = false;
         literaryQueueRef.current = [];
         if (refineAbortRef.current) { refineAbortRef.current.abort(); refineAbortRef.current = null; }
+        // Reset conversation analyzer
+        conversationLogRef.current = '';
+        isConversationRunningRef.current = false;
+        conversationQueuedRef.current = false;
+        if (conversationAbortRef.current) { conversationAbortRef.current.abort(); conversationAbortRef.current = null; }
+        if (answerAbortRef.current) { answerAbortRef.current.abort(); answerAbortRef.current = null; }
         llmTranslationRef.current = '';
         wordCountRef.current = 0;
         lastAnswerTextRef.current = ''; // Reset answer text tracker
@@ -1313,6 +1365,8 @@ export function useStreamingMode(
             isProcessingConversation: false,
             answeredQuestions: [],
             isGeneratingAnswer: false,
+            streamingAnswer: '',
+            streamingAnswerTranslation: '',
             isAnalyzing: false,
             isListening: false,
             isProcessingGhost: false,

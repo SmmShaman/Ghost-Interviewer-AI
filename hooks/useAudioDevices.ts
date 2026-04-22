@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AudioPresetId } from '../types';
+import { AudioPresetId, InterviewContext } from '../types';
 
-export type DeviceType = 'stereo-mix' | 'vb-cable' | 'voicemeeter' | 'realtek-mic' | 'usb-mic' | 'headset-mic' | 'webcam-mic' | 'unknown';
+export type DeviceType = 'stereo-mix' | 'vb-cable' | 'voicemeeter' | 'line-in' | 'realtek-mic' | 'usb-mic' | 'headset-mic' | 'webcam-mic' | 'unknown';
 
 export interface ClassifiedDevice {
     device: MediaDeviceInfo;
@@ -23,6 +23,7 @@ const DEVICE_PATTERNS: { type: DeviceType; patterns: string[]; friendlyName: str
     { type: 'stereo-mix', patterns: ['stereo mix', 'stereo-mix', 'what u hear', 'wave out', 'loopback'], friendlyName: '🔁 Stereo Mix (системний звук)' },
     { type: 'vb-cable', patterns: ['cable output', 'vb-audio', 'vb-cable'], friendlyName: '🔌 VB-Cable (віртуальний кабель)' },
     { type: 'voicemeeter', patterns: ['voicemeeter'], friendlyName: '🎛️ VoiceMeeter (мікшер)' },
+    { type: 'line-in', patterns: ['line in', 'line-in', 'linein'], friendlyName: '📱 Line In (AUX вхід)' },
     { type: 'headset-mic', patterns: ['headset', 'airpods', 'jabra', 'plantronics', 'logitech headset', 'hands-free', 'handsfree'], friendlyName: '🎧 Гарнітура' },
     { type: 'usb-mic', patterns: ['blue yeti', 'at2020', 'fifine', 'samson', 'rode', 'usb microphone', 'usb audio', 'usb pnp'], friendlyName: '🎙️ USB мікрофон' },
     { type: 'webcam-mic', patterns: ['webcam', 'camera', 'c920', 'c922', 'c930', 'c270', 'c525', 'facecam', 'brio', 'hd pro', 'streamcam', 'kiyo', 'facetime'], friendlyName: '📷 Webcam' },
@@ -207,8 +208,22 @@ export function useAudioDevices() {
                 ? { id: 'headphones-interview', available: true, matchedDeviceId: vbCable.device.deviceId, matchedDeviceLabel: vbCable.friendlyName, listenThroughDeviceId: speakers.id, listenThroughLabel: speakers.label }
                 : { id: 'headphones-interview', ...noVBCable, warning: 'vb-cable-required' };
 
-        return [bestAvailablePreset, defaultMicPreset, speakersPreset, headphonesPreset, monitorPreset, interviewPreset];
+        // 📱 Phone via AUX: input=Line In, output=Headphones
+        const lineIn = findDeviceByType(classifiedDevices, 'line-in');
+        const phoneAuxPreset: PresetInfo = lineIn
+            ? { id: 'phone-aux', available: true, matchedDeviceId: lineIn.device.deviceId, matchedDeviceLabel: lineIn.friendlyName, listenThroughDeviceId: headphones?.id || speakers?.id || '', listenThroughLabel: headphones?.label || speakers?.label || '' }
+            : { id: 'phone-aux', available: false, matchedDeviceId: '', matchedDeviceLabel: '', listenThroughDeviceId: '', listenThroughLabel: '', warning: 'line-in-needed' };
+
+        return [bestAvailablePreset, defaultMicPreset, speakersPreset, headphonesPreset, monitorPreset, interviewPreset, phoneAuxPreset];
     }, [classifiedDevices, outputDevices, findOutput, getBestMic]);
+
+    const applyPreset = useCallback((context: InterviewContext, preset: PresetInfo): Partial<InterviewContext> => {
+        return {
+            audioDeviceId: preset.matchedDeviceId,
+            activeAudioPreset: preset.id as AudioPresetId,
+            listenThroughDeviceId: preset.listenThroughDeviceId,
+        };
+    }, []);
 
     return {
         rawDevices,
@@ -217,6 +232,7 @@ export function useAudioDevices() {
         isLoading,
         refreshDevices: enumerate,
         getPresets,
+        applyPreset,
         hasVBCable,
         hasStereoMix,
         hasVoiceMeeter,

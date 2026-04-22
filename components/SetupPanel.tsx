@@ -1,11 +1,11 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { InterviewContext, PromptPreset, InterviewProfile, ViewMode, CandidateProfile, JobProfile, ModeConfig } from '../types';
+import { InterviewContext, PromptPreset, InterviewProfile, CandidateProfile, JobProfile, ModeConfig } from '../types';
 import { translations } from '../translations';
 import { localTranslator } from '../services/localTranslator';
 import { knowledgeSearch } from '../services/knowledgeSearch';
-import AudioPresetSelector from './AudioPresetSelector';
+import { buildDynamicGuide } from './AudioPresetSelector';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 
 interface SetupPanelProps {
@@ -14,8 +14,6 @@ interface SetupPanelProps {
   isOpen: boolean;
   toggleOpen: () => void;
   uiLang: 'en' | 'uk';
-  listenThroughActive?: boolean;
-  listenThroughError?: string | null;
 }
 
 // Dropdown Section Component (expandable)
@@ -45,12 +43,9 @@ const DropdownSection: React.FC<{
   </div>
 );
 
-const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpen, toggleOpen, uiLang, listenThroughActive = false, listenThroughError = null }) => {
-  const [showAudioGuide, setShowAudioGuide] = useState(false);
-  const [showVMGuide, setShowVMGuide] = useState(false);
+const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpen, toggleOpen, uiLang }) => {
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>(context.audioDeviceId || '');
-  const [showManualDevice, setShowManualDevice] = useState(false);
   const audioDevices = useAudioDevices();
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -58,10 +53,8 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const [searchStats, setSearchStats] = useState({ chunks: 0, terms: 0, isReady: false });
 
   // Dropdown Section States
-  const [modeOpen, setModeOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
-  const [languageOpen, setLanguageOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -94,7 +87,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const streamRef = useRef<MediaStream | null>(null);
 
   const t = translations[uiLang].settings;
-  const tModes = translations[uiLang].modes;
 
   const handleChange = (field: keyof InterviewContext, value: any) => {
     onContextChange({ ...context, [field]: value });
@@ -529,81 +521,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       <div className="overflow-y-auto max-h-[calc(80vh-52px)]">
 
         {/* ============================================ */}
-        {/* SECTION 1: MODE SELECTION */}
-        {/* ============================================ */}
-        <DropdownSection
-          title={t.modeCards?.selectMode || "SELECT YOUR INTERVIEW MODE"}
-          icon="🎯"
-          isOpen={modeOpen}
-          onToggle={() => setModeOpen(!modeOpen)}
-        >
-          <div className="grid grid-cols-3 gap-2">
-            {/* FULL Mode */}
-            <button
-              onClick={() => handleChange('viewMode', 'FULL')}
-              className={`p-3 rounded-lg border-2 transition-all text-center ${
-                context.viewMode === 'FULL'
-                  ? 'border-emerald-500 bg-emerald-900/30 shadow-lg shadow-emerald-500/20'
-                  : 'border-gray-700 bg-gray-900/30 hover:border-gray-600'
-              }`}
-            >
-              <span className={`text-lg block ${context.viewMode === 'FULL' ? 'text-emerald-400' : 'text-gray-400'}`}>🎯</span>
-              <span className={`text-[10px] font-black uppercase ${context.viewMode === 'FULL' ? 'text-emerald-400' : 'text-gray-500'}`}>FULL</span>
-            </button>
-
-            {/* FOCUS Mode */}
-            <button
-              onClick={() => handleChange('viewMode', 'FOCUS')}
-              className={`p-3 rounded-lg border-2 transition-all text-center ${
-                context.viewMode === 'FOCUS'
-                  ? 'border-blue-500 bg-blue-900/30 shadow-lg shadow-blue-500/20'
-                  : 'border-gray-700 bg-gray-900/30 hover:border-gray-600'
-              }`}
-            >
-              <span className={`text-lg block ${context.viewMode === 'FOCUS' ? 'text-blue-400' : 'text-gray-400'}`}>👁️</span>
-              <span className={`text-[10px] font-black uppercase ${context.viewMode === 'FOCUS' ? 'text-blue-400' : 'text-gray-500'}`}>FOCUS</span>
-            </button>
-
-            {/* SIMPLE Mode */}
-            <button
-              onClick={() => handleChange('viewMode', 'SIMPLE')}
-              className={`p-3 rounded-lg border-2 transition-all text-center ${
-                context.viewMode === 'SIMPLE'
-                  ? 'border-amber-500 bg-amber-900/30 shadow-lg shadow-amber-500/20'
-                  : 'border-gray-700 bg-gray-900/30 hover:border-gray-600'
-              }`}
-            >
-              <span className={`text-lg block ${context.viewMode === 'SIMPLE' ? 'text-amber-400' : 'text-gray-400'}`}>⚡</span>
-              <span className={`text-[10px] font-black uppercase ${context.viewMode === 'SIMPLE' ? 'text-amber-400' : 'text-gray-500'}`}>SIMPLE</span>
-            </button>
-          </div>
-
-          {/* Mode Description */}
-          <div className={`mt-3 p-2 rounded-lg border text-[10px] ${
-            context.viewMode === 'FULL' ? 'border-emerald-800/50 bg-emerald-900/10 text-emerald-300/80' :
-            context.viewMode === 'FOCUS' ? 'border-blue-800/50 bg-blue-900/10 text-blue-300/80' :
-            'border-amber-800/50 bg-amber-900/10 text-amber-300/80'
-          }`}>
-            {context.viewMode === 'FULL' && tModes.fullDesc}
-            {context.viewMode === 'FOCUS' && tModes.focusDesc}
-            {context.viewMode === 'SIMPLE' && tModes.simpleDesc}
-          </div>
-
-          {/* AI Model Info (not for SIMPLE) */}
-          {context.viewMode !== 'SIMPLE' && (
-            <div className="mt-3">
-              <label className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-1 block">
-                🤖 AI Model
-              </label>
-              <div className="w-full bg-gray-900/80 border border-gray-700/50 rounded-lg px-3 py-2 text-xs text-gray-200">
-                Gemini 2.5 Flash
-              </div>
-            </div>
-          )}
-        </DropdownSection>
-
-        {/* ============================================ */}
-        {/* SECTION 2: YOUR PROFILE */}
+        {/* SECTION 1: YOUR PROFILE */}
         {/* ============================================ */}
         <DropdownSection
           title={t.accordion?.yourProfile || "YOUR PROFILE"}
@@ -707,7 +625,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
         </DropdownSection>
 
         {/* ============================================ */}
-        {/* SECTION 3: JOB APPLICATION */}
+        {/* SECTION 2: JOB APPLICATION */}
         {/* ============================================ */}
         <DropdownSection
           title={t.accordion?.jobApplication || "JOB APPLICATION"}
@@ -787,122 +705,47 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
         </DropdownSection>
 
         {/* ============================================ */}
-        {/* SECTION 4: LANGUAGE SETTINGS */}
+        {/* SECTION 3: ADVANCED AUDIO */}
         {/* ============================================ */}
         <DropdownSection
-          title={t.accordion?.languageSettings || "LANGUAGE SETTINGS"}
-          icon="🌐"
-          isOpen={languageOpen}
-          onToggle={() => setLanguageOpen(!languageOpen)}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-medium text-gray-400 uppercase">{t.targetLang}</label>
-              <select
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none"
-                value={context.targetLanguage}
-                onChange={(e) => handleChange('targetLanguage', e.target.value)}
-              >
-                <option className="bg-gray-900">Norwegian</option>
-                <option className="bg-gray-900">English</option>
-                <option className="bg-gray-900">Ukrainian</option>
-                <option className="bg-gray-900">Russian</option>
-                <option className="bg-gray-900">French</option>
-                <option className="bg-gray-900">German</option>
-                <option className="bg-gray-900">Spanish</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-medium text-gray-400 uppercase">{t.nativeLang}</label>
-              <select
-                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 outline-none"
-                value={context.nativeLanguage}
-                onChange={(e) => handleChange('nativeLanguage', e.target.value)}
-              >
-                <option className="bg-gray-900">Ukrainian</option>
-                <option className="bg-gray-900">Russian</option>
-                <option className="bg-gray-900">English</option>
-                <option className="bg-gray-900">Norwegian</option>
-                <option className="bg-gray-900">French</option>
-                <option className="bg-gray-900">German</option>
-                <option className="bg-gray-900">Spanish</option>
-              </select>
-            </div>
-          </div>
-        </DropdownSection>
-
-        {/* ============================================ */}
-        {/* SECTION 5: AUDIO SETUP */}
-        {/* ============================================ */}
-        <DropdownSection
-          title={t.accordion?.audioSetup || "AUDIO SETUP"}
-          icon="🎧"
+          title={t.accordion?.advancedAudio || "ADVANCED AUDIO"}
+          icon="🔧"
           isOpen={audioOpen}
           onToggle={() => setAudioOpen(!audioOpen)}
         >
-          {/* Audio Preset Buttons */}
-          <AudioPresetSelector
-            context={context}
-            onContextChange={(ctx) => {
-              onContextChange(ctx);
-              setSelectedDeviceId(ctx.audioDeviceId || '');
-            }}
-            presets={audioDevices.getPresets()}
-            outputDevices={audioDevices.outputDevices}
-            inputDevices={audioDevices.classifiedDevices}
-            uiLang={uiLang}
-            t={t}
-            listenThroughActive={listenThroughActive}
-            listenThroughError={listenThroughError}
-          />
-
-          {/* Manual Device Selection (collapsible) */}
-          <div className="mt-3">
-            <button
-              onClick={() => setShowManualDevice(!showManualDevice)}
-              className="w-full flex justify-between items-center text-[9px] font-bold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors"
+          {/* Manual Device Selection */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-medium text-gray-400 uppercase">{t.inputSource}</label>
+            <select
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:border-emerald-500 outline-none"
+              value={selectedDeviceId}
+              onChange={(e) => {
+                handleDeviceChange(e.target.value);
+                onContextChange({ ...context, audioDeviceId: e.target.value, activeAudioPreset: 'manual' });
+              }}
+              title={selectedDeviceId ? availableDevices.find(d => d.deviceId === selectedDeviceId)?.label || '' : ''}
             >
-              <span>{t.presetManualDevice}</span>
-              <span>{showManualDevice ? '−' : '+'}</span>
-            </button>
-
-            {showManualDevice && (
-              <div className="space-y-2 mt-2 pt-2 border-t border-gray-800">
-                <label className="text-[10px] font-medium text-gray-400 uppercase">{t.inputSource}</label>
-                <select
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 focus:border-emerald-500 outline-none"
-                  value={selectedDeviceId}
-                  onChange={(e) => {
-                    handleDeviceChange(e.target.value);
-                    onContextChange({ ...context, audioDeviceId: e.target.value, activeAudioPreset: 'manual' });
-                  }}
-                  title={selectedDeviceId ? availableDevices.find(d => d.deviceId === selectedDeviceId)?.label || '' : ''}
-                >
-                  <option value="" className="bg-gray-900">{t.defaultMic}</option>
-                  {availableDevices.map(device => {
-                    const label = device.label || `Microphone ${device.deviceId.slice(0, 5)}...`;
-                    const truncatedLabel = label.length > 35 ? label.slice(0, 35) + '...' : label;
-                    return (
-                      <option key={device.deviceId} value={device.deviceId} className="bg-gray-900" title={label}>
-                        {truncatedLabel}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            )}
+              <option value="" className="bg-gray-900">{t.defaultMic}</option>
+              {availableDevices.map(device => {
+                const label = device.label || `Microphone ${device.deviceId.slice(0, 5)}...`;
+                const truncatedLabel = label.length > 35 ? label.slice(0, 35) + '...' : label;
+                return (
+                  <option key={device.deviceId} value={device.deviceId} className="bg-gray-900" title={label}>
+                    {truncatedLabel}
+                  </option>
+                );
+              })}
+            </select>
           </div>
 
           {/* Audio Test */}
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => isTestingAudio ? stopAudioTest() : startAudioTest()}
               className={`text-[10px] px-2 py-1 rounded border transition-colors ${isTestingAudio ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}
             >
               {isTestingAudio ? t.stopTest : t.testMic}
             </button>
-
-            {/* Visualizer Bar */}
             <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-75 ease-out"
@@ -912,7 +755,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
           </div>
 
           {/* Stereo Mode Toggle */}
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between">
             <label className="text-[10px] font-medium text-orange-400 uppercase">{t.stereoMode}</label>
             <button
               onClick={() => handleChange('stereoMode', !context.stereoMode)}
@@ -922,33 +765,29 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             </button>
           </div>
 
-          {/* Audio Guide */}
-          <div className="bg-gray-900 border border-gray-800 rounded-lg p-2 mt-3">
-            <button
-              onClick={() => setShowAudioGuide(!showAudioGuide)}
-              className="w-full flex justify-between items-center text-[10px] font-bold text-blue-400 uppercase tracking-wider hover:text-blue-300 text-left"
-            >
-              <span>{t.audioGuideTitle}</span>
-              <span>{showAudioGuide ? '−' : '+'}</span>
-            </button>
-
-            {showAudioGuide && (
-              <div className="mt-2 text-[10px] text-gray-300 space-y-2 leading-relaxed border-t border-gray-800 pt-2">
-                <p className="font-semibold text-white">{t.audioGoal}</p>
-                <ol className="list-decimal pl-3 space-y-1">
-                  <li>{t.step1}</li>
-                  <li>{t.step2}</li>
-                  <li className="text-blue-200">{t.step3Title}</li>
-                  <li className="text-emerald-400">{t.step4}</li>
-                  <li className="text-emerald-400">{t.step5}</li>
-                </ol>
+          {/* Setup Guide (context-aware for active preset) */}
+          {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && context.activeAudioPreset !== 'best-available' && context.activeAudioPreset !== 'default-mic' && (() => {
+            const steps = audioDevices.outputDevices.length > 0
+              ? buildDynamicGuide(context.activeAudioPreset, audioDevices.outputDevices, audioDevices.classifiedDevices, uiLang === 'uk')
+              : (t[`presetSetup${context.activeAudioPreset.charAt(0).toUpperCase() + context.activeAudioPreset.slice(1).replace(/-./g, c => c[1].toUpperCase())}` as keyof typeof t] as string[] || []);
+            if (steps.length === 0) return null;
+            return (
+              <div className="bg-cyan-950/30 border border-cyan-800/30 rounded-lg p-2.5 space-y-1.5">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-cyan-400/70 mb-1">
+                  {t.accordion?.audioSetupGuide || "SETUP GUIDE"}
+                </div>
+                {steps.map((step: string, i: number) => (
+                  <div key={i} className={`text-[10px] leading-relaxed ${step.startsWith('✦') ? 'text-emerald-400 font-medium mt-1' : step.startsWith('⚠') ? 'text-amber-400/90' : 'text-gray-300/90'}`}>
+                    {step}
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </DropdownSection>
 
         {/* ============================================ */}
-        {/* SECTION 6: ADVANCED PROMPTS */}
+        {/* SECTION 4: ADVANCED PROMPTS */}
         {/* ============================================ */}
         <DropdownSection
           title={t.accordion?.advancedPrompts || "ADVANCED PROMPTS"}

@@ -621,7 +621,10 @@ export async function generateInterviewAnswer(
     knowledgeBase: string,
     targetLanguage: string,
     nativeLanguage: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    companyDescription?: string,
+    jobDescription?: string,
+    applicationLetter?: string
 ): Promise<{ answer: string; answerTranslation: string }> {
     if (!ai || !question.trim()) return { answer: '', answerTranslation: '' };
 
@@ -633,12 +636,24 @@ export async function generateInterviewAnswer(
 КОНТЕКСТ РОЗМОВИ:
 ${conversationContext.slice(-500)}
 
+═══════════════════════════════════════
 ПРОФІЛЬ КАНДИДАТА:
+═══════════════════════════════════════
 Резюме: ${resume?.slice(0, 1500) || '[не вказано]'}
 База знань: ${knowledgeBase?.slice(0, 1000) || '[не вказано]'}
+Супровідний лист: ${applicationLetter?.slice(0, 800) || '[не вказано]'}
+
+═══════════════════════════════════════
+ПРО РОБОТОДАВЦЯ:
+═══════════════════════════════════════
+Компанія: ${companyDescription?.slice(0, 800) || '[не вказано]'}
+Вакансія: ${jobDescription?.slice(0, 1000) || '[не вказано]'}
 
 ЗАВДАННЯ:
-1. [ANSWER] — Відповідь мовою інтерв'ю (${targetLanguage}), 2-4 речення, професійно, на основі профілю кандидата
+1. [ANSWER] — Відповідь мовою інтерв'ю (${targetLanguage}), 2-4 речення, професійно
+   - Базуйся на профілі кандидата
+   - Враховуй вимоги вакансії — підкреслюй релевантний досвід
+   - Якщо відома інформація про компанію — покажи що кандидат розуміє їхню специфіку
 2. [TRANSLATION] — Переклад відповіді на ${nativeLanguage}
 
 Формат:
@@ -671,6 +686,112 @@ ${conversationContext.slice(-500)}
         if (e.name !== 'AbortError') {
             console.error('[InterviewAnswer] Error:', e?.message || e);
         }
+        return { answer: '', answerTranslation: '' };
+    }
+}
+
+/**
+ * Streaming variant of generateInterviewAnswer.
+ * Shows answer word-by-word via onUpdate callback instead of waiting for full response.
+ */
+export async function generateInterviewAnswerStreaming(
+    question: string,
+    conversationContext: string,
+    resume: string,
+    knowledgeBase: string,
+    targetLanguage: string,
+    nativeLanguage: string,
+    onUpdate: (partial: { answer: string; answerTranslation: string }) => void,
+    signal?: AbortSignal,
+    companyDescription?: string,
+    jobDescription?: string,
+    applicationLetter?: string
+): Promise<{ answer: string; answerTranslation: string }> {
+    if (!ai || !question.trim()) return { answer: '', answerTranslation: '' };
+
+    const prompt = `Ти готуєш відповідь кандидата на співбесіді.
+
+ПИТАННЯ ІНТЕРВ'ЮЕРА: "${question}"
+
+КОНТЕКСТ РОЗМОВИ:
+${conversationContext.slice(-500)}
+
+═══════════════════════════════════════
+ПРОФІЛЬ КАНДИДАТА:
+═══════════════════════════════════════
+Резюме: ${resume?.slice(0, 1500) || '[не вказано]'}
+База знань: ${knowledgeBase?.slice(0, 1000) || '[не вказано]'}
+Супровідний лист: ${applicationLetter?.slice(0, 800) || '[не вказано]'}
+
+═══════════════════════════════════════
+ПРО РОБОТОДАВЦЯ:
+═══════════════════════════════════════
+Компанія: ${companyDescription?.slice(0, 800) || '[не вказано]'}
+Вакансія: ${jobDescription?.slice(0, 1000) || '[не вказано]'}
+
+ЗАВДАННЯ:
+1. [ANSWER] — Відповідь мовою інтерв'ю (${targetLanguage}), 2-4 речення, професійно
+   - Базуйся на профілі кандидата
+   - Враховуй вимоги вакансії — підкреслюй релевантний досвід
+   - Якщо відома інформація про компанію — покажи що кандидат розуміє їхню специфіку
+2. [TRANSLATION] — Переклад відповіді на ${nativeLanguage}
+
+Формат:
+[ANSWER]
+відповідь мовою інтерв'ю
+[TRANSLATION]
+переклад`;
+
+    let fullText = '';
+    let lastUpdate = 0;
+    const UPDATE_INTERVAL = 100;
+
+    const parseAnswerTags = (text: string): { answer: string; answerTranslation: string } => {
+        const answerMatch = text.match(/\[ANSWER\]\s*([\s\S]*?)(?:\[TRANSLATION\]|$)/i);
+        const translationMatch = text.match(/\[TRANSLATION\]\s*([\s\S]*?)$/i);
+        return {
+            answer: answerMatch?.[1]?.trim() || '',
+            answerTranslation: translationMatch?.[1]?.trim() || ''
+        };
+    };
+
+    try {
+        const response = await ai.models.generateContentStream({
+            model: GEMINI_MODEL,
+            contents: prompt,
+            config: {
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.4,
+                maxOutputTokens: 500,
+            }
+        });
+
+        for await (const chunk of response) {
+            if (signal?.aborted) {
+                throw new DOMException('Aborted', 'AbortError');
+            }
+
+            const content = chunk.text || '';
+            if (content) {
+                fullText += content;
+
+                const now = Date.now();
+                if (now - lastUpdate >= UPDATE_INTERVAL) {
+                    onUpdate(parseAnswerTags(fullText));
+                    lastUpdate = now;
+                }
+            }
+        }
+
+        // Final parse with complete text
+        const final = parseAnswerTags(fullText);
+        onUpdate(final);
+        return final;
+    } catch (e: any) {
+        if (e.name === 'AbortError' || signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        console.error('[InterviewAnswerStreaming] Error:', e?.message || e);
         return { answer: '', answerTranslation: '' };
     }
 }

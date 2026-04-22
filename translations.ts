@@ -50,6 +50,9 @@ export const translations = {
       presetMonitorDesc: "Sound through monitor speakers",
       presetInterview: "Headphones + Teams/Zoom",
       presetInterviewDesc: "Call audio routed to app via VB-Cable",
+      presetPhoneAux: "Phone (AUX Cable)",
+      presetPhoneAuxDesc: "Phone call audio via AUX cable to Line In",
+      presetLineInNeeded: "Connect your phone to the blue Line In jack via AUX cable",
       presetReady: "Ready",
       presetActive: "Active",
       presetDetected: "Detected",
@@ -193,8 +196,12 @@ export const translations = {
           yourProfile: "YOUR PROFILE",
           jobApplication: "JOB APPLICATION",
           audioSetup: "AUDIO SETUP",
+          audioAndLanguage: "AUDIO & LANGUAGE",
+          advancedAudio: "ADVANCED AUDIO",
+          audioSetupGuide: "SETUP GUIDE",
           languageSettings: "LANGUAGE SETTINGS",
-          advancedPrompts: "ADVANCED PROMPTS"
+          advancedPrompts: "ADVANCED PROMPTS",
+          allSettings: "ALL SETTINGS"
       }
     },
     modes: {
@@ -314,6 +321,9 @@ Example:
       presetMonitorDesc: "Звук через вбудовані динаміки монітора",
       presetInterview: "Навушники + Teams/Zoom",
       presetInterviewDesc: "Аудіо дзвінка через VB-Cable в додаток",
+      presetPhoneAux: "Телефон (AUX кабель)",
+      presetPhoneAuxDesc: "Аудіо дзвінка з телефону через AUX в Line In",
+      presetLineInNeeded: "Підключіть телефон до синього роз'єму Line In через AUX кабель",
       presetReady: "Готово",
       presetActive: "Активно",
       presetDetected: "Знайдено",
@@ -457,8 +467,12 @@ Example:
           yourProfile: "ВАШ ПРОФІЛЬ",
           jobApplication: "ЗАЯВКА НА ВАКАНСІЮ",
           audioSetup: "НАЛАШТУВАННЯ АУДІО",
+          audioAndLanguage: "АУДІО ТА МОВА",
+          advancedAudio: "РОЗШИРЕНЕ АУДІО",
+          audioSetupGuide: "ІНСТРУКЦІЯ",
           languageSettings: "НАЛАШТУВАННЯ МОВИ",
-          advancedPrompts: "РОЗШИРЕНІ ПРОМПТИ"
+          advancedPrompts: "РОЗШИРЕНІ ПРОМПТИ",
+          allSettings: "УСІ НАЛАШТУВАННЯ"
       }
     },
     modes: {

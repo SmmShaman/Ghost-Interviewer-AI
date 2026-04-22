@@ -48,6 +48,9 @@ interface StreamingFocusModeLayoutProps {
     isProcessingConversation?: boolean;
     answeredQuestions?: Array<{ question: string; answer: string; translation: string }>;
 
+    streamingAnswer?: string;
+    streamingAnswerTranslation?: string;
+
     literaryChunks?: LiteraryChunk[];
     isProcessingLiterary?: boolean;
 }
@@ -62,6 +65,8 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
     conversationLog = '',
     isProcessingConversation = false,
     answeredQuestions = [],
+    streamingAnswer = '',
+    streamingAnswerTranslation = '',
     literaryChunks = [],
     isProcessingLiterary = false
 }) => {
@@ -93,7 +98,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
         if (conversationScrollRef.current) {
             conversationScrollRef.current.scrollTop = conversationScrollRef.current.scrollHeight;
         }
-    }, [conversationLog, answeredQuestions]);
+    }, [conversationLog, answeredQuestions, streamingAnswer]);
 
     const formatDuration = (ms: number): string => {
         const s = Math.floor(ms / 1000);
@@ -153,11 +158,29 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                     );
                 } else if (isGeneratingAnswer && questionIndex === answeredQuestions.length) {
                     result.push(
-                        <div key={`generating-${questionIndex}`} className="mb-3 rounded-lg bg-emerald-900/10 border border-emerald-500/20 px-4 py-3">
-                            <div className="flex items-center gap-2">
+                        <div key={`generating-${questionIndex}`} className="mb-3 rounded-lg bg-emerald-900/20 border border-emerald-500/30 px-4 py-3">
+                            <div className="text-sm font-semibold text-emerald-300 leading-snug flex items-center gap-2">
                                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                                <span className="text-sm text-emerald-400">Генерую відповідь...</span>
+                                💡 Рекомендована відповідь
                             </div>
+                            {streamingAnswer ? (
+                                <>
+                                    <div className="text-sm text-emerald-200 leading-relaxed mt-1">
+                                        {streamingAnswer}
+                                        <span className="inline-block w-1 h-4 bg-emerald-400 animate-pulse ml-0.5 align-text-bottom" />
+                                    </div>
+                                    {streamingAnswerTranslation && (
+                                        <div className="text-sm text-gray-400 italic leading-relaxed mt-2 pt-2 border-t border-emerald-800/30">
+                                            {streamingAnswerTranslation}
+                                            <span className="inline-block w-1 h-3 bg-gray-500 animate-pulse ml-0.5 align-text-bottom" />
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-sm text-emerald-400">Генерую відповідь...</span>
+                                </div>
+                            )}
                         </div>
                     );
                 }
@@ -186,7 +209,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
                             <span className="text-[9px] text-amber-400/60 uppercase tracking-wider font-bold">Літературний переклад</span>
                         </div>
                         <div className="flex-1">
-                            <span className="text-[9px] text-gray-600 uppercase tracking-wider font-bold">Оригінал</span>
+                            <span className="text-[9px] text-blue-400/60 uppercase tracking-wider font-bold">Оригінал</span>
                         </div>
                     </div>
 
@@ -207,7 +230,7 @@ const StreamingFocusModeLayout: React.FC<StreamingFocusModeLayoutProps> = ({
 
                                         {/* Raw words */}
                                         <div className="flex-1 flex items-start">
-                                            <p className="text-xs text-gray-600 leading-relaxed font-mono">
+                                            <p className="text-xs text-blue-400/70 leading-relaxed font-mono">
                                                 {chunk.rawText}
                                             </p>
                                         </div>

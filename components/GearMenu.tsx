@@ -1,7 +1,7 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
-import { InterviewContext, ViewMode, SpeedPresetId, SPEED_PRESETS, AudioPresetId } from '../types';
+import { InterviewContext, SpeedPresetId, SPEED_PRESETS, AudioPresetId } from '../types';
 import { translations } from '../translations';
 import { SettingsIcon } from './Icons';
 import { useAudioDevices } from '../hooks/useAudioDevices';
@@ -69,17 +69,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
   // Menu items configuration
   const menuItems: MenuItem[] = [
     {
-      id: 'mode',
-      icon: '🎯',
-      label: t.settings.modeCards?.selectMode || 'Mode',
-      color: 'emerald',
-      subItems: [
-        { id: 'FULL', label: 'FULL', value: 'FULL', isActive: context.viewMode === 'FULL' },
-        { id: 'FOCUS', label: 'FOCUS', value: 'FOCUS', isActive: context.viewMode === 'FOCUS' },
-        { id: 'SIMPLE', label: 'SIMPLE', value: 'SIMPLE', isActive: context.viewMode === 'SIMPLE' },
-      ]
-    },
-    {
       id: 'language',
       icon: '🌐',
       label: t.settings.accordion?.languageSettings || 'Language',
@@ -95,15 +84,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       ]
     },
     {
-      id: 'ai',
-      icon: '🤖',
-      label: 'AI Model',
-      color: 'purple',
-      subItems: [
-        { id: 'gemini', label: 'Gemini 2.5 Flash', value: 'gemini', isActive: context.llmProvider === 'gemini' },
-      ]
-    },
-    {
       id: 'audio',
       icon: '🎧',
       label: t.settings.accordion?.audioSetup || 'Audio',
@@ -115,6 +95,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         { id: 'preset-headphones', label: '🎧 Навушники', value: 'headphones-youtube', isActive: context.activeAudioPreset === 'headphones-youtube' },
         { id: 'preset-monitor', label: '🖥️ Монітор', value: 'monitor-speakers', isActive: context.activeAudioPreset === 'monitor-speakers' },
         { id: 'preset-interview', label: '🎙️ Інтерв\'ю', value: 'headphones-interview', isActive: context.activeAudioPreset === 'headphones-interview' },
+        { id: 'preset-phone', label: '📱 Телефон (AUX)', value: 'phone-aux', isActive: context.activeAudioPreset === 'phone-aux' },
       ]
     },
     {
@@ -132,21 +113,15 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
     {
       id: 'settings',
       icon: '⚙️',
-      label: t.settings.accordion?.advancedPrompts || 'Full Settings',
+      label: t.settings.accordion?.allSettings || 'All Settings',
       color: 'gray',
     },
   ];
 
   const handleSubItemClick = (menuId: string, subItem: SubMenuItem) => {
     switch (menuId) {
-      case 'mode':
-        handleChange('viewMode', subItem.value as ViewMode);
-        break;
       case 'language':
         handleChange('targetLanguage', subItem.value);
-        break;
-      case 'ai':
-        handleChange('llmProvider', subItem.value as 'gemini');
         break;
       case 'audio': {
         const presetId = subItem.value as AudioPresetId;
@@ -154,12 +129,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         const matched = presets.find(p => p.id === presetId);
         console.log(`🎧 [GearMenu] Preset ${presetId}: available=${matched?.available}, deviceId=${matched?.matchedDeviceId?.slice(0,12) || 'EMPTY'}, label=${matched?.matchedDeviceLabel}, listenThrough=${matched?.listenThroughLabel || 'NONE'}, totalDevices=${audioDevices.rawDevices.length}`);
         if (matched?.available) {
-          onContextChange({
-            ...context,
-            audioDeviceId: matched.matchedDeviceId,
-            activeAudioPreset: presetId,
-            listenThroughDeviceId: matched.listenThroughDeviceId,
-          });
+          onContextChange({ ...context, ...audioDevices.applyPreset(context, matched) });
         }
         break;
       }
@@ -183,9 +153,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
 
   const getColorClasses = (color: string, isActive: boolean = false) => {
     const colors: Record<string, { bg: string; border: string; text: string; hover: string; activeBg: string }> = {
-      emerald: { bg: 'bg-emerald-900/30', border: 'border-emerald-500', text: 'text-emerald-400', hover: 'hover:bg-emerald-800/50', activeBg: 'bg-emerald-500' },
       blue: { bg: 'bg-blue-900/30', border: 'border-blue-500', text: 'text-blue-400', hover: 'hover:bg-blue-800/50', activeBg: 'bg-blue-500' },
-      purple: { bg: 'bg-purple-900/30', border: 'border-purple-500', text: 'text-purple-400', hover: 'hover:bg-purple-800/50', activeBg: 'bg-purple-500' },
       orange: { bg: 'bg-orange-900/30', border: 'border-orange-500', text: 'text-orange-400', hover: 'hover:bg-orange-800/50', activeBg: 'bg-orange-500' },
       amber: { bg: 'bg-amber-900/30', border: 'border-amber-500', text: 'text-amber-400', hover: 'hover:bg-amber-800/50', activeBg: 'bg-amber-500' },
       gray: { bg: 'bg-gray-800/50', border: 'border-gray-600', text: 'text-gray-400', hover: 'hover:bg-gray-700/50', activeBg: 'bg-gray-500' },
@@ -272,11 +240,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
                   }
                 `}>
                   {item.subItems.map((subItem, subIndex) => {
-                    const subColors = getColorClasses(
-                      item.id === 'mode'
-                        ? (subItem.value === 'FULL' ? 'emerald' : subItem.value === 'FOCUS' ? 'blue' : 'amber')
-                        : item.color
-                    );
+                    const subColors = getColorClasses(item.color);
 
                     return (
                       <button

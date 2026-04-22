@@ -1762,7 +1762,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} listenThroughActive={audioPassthrough.isActive} listenThroughError={audioPassthrough.error} />
+      <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} />
 
       <div className={`shrink-0 flex justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 overflow-x-auto ${!isModelReady ? 'mt-10' : ''}`}>
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
@@ -1925,6 +1925,8 @@ const App: React.FC = () => {
                  lastDetectedQuestion={streamingMode.state.lastDetectedQuestion}
                  isProcessingConversation={streamingMode.state.isProcessingConversation}
                  answeredQuestions={streamingMode.state.answeredQuestions || []}
+                 streamingAnswer={streamingMode.state.streamingAnswer}
+                 streamingAnswerTranslation={streamingMode.state.streamingAnswerTranslation}
                  literaryChunks={streamingMode.state.literaryChunks}
                  isProcessingLiterary={streamingMode.state.isProcessingLiterary}
              />

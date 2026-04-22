@@ -62,6 +62,7 @@ export type AudioPresetId =
   | 'speakers'                // VB-Cable: system audio to speakers
   | 'monitor-speakers'        // VB-Cable: system audio to monitor speakers
   | 'headphones-interview'    // VB-Cable: interview call routing
+  | 'phone-aux'               // Phone via AUX cable: Line In input
   | 'manual'                  // User manually selected from dropdown
   | '';                       // No preset selected
 

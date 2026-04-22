@@ -332,11 +332,17 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда',
                         tip: 'Для Zoom/Teams/Meet. Звук співрозмовника через VB-Cable.'
                     },
+                    'phone-aux': {
+                        icon: '📱', label: 'Phone (AUX)', labelUk: 'Телефон (AUX)',
+                        tip: 'Телефонний дзвінок через AUX кабель в синій роз\'єм Line In. Говориш в телефон, додаток чує співрозмовника.'
+                    },
                 };
 
                 const universalPresets = presets.filter(p => p.id === 'best-available' || p.id === 'default-mic');
-                const vbCablePresets = presets.filter(p => p.id !== 'best-available' && p.id !== 'default-mic');
+                const devicePresets = presets.filter(p => p.id === 'phone-aux');
+                const vbCablePresets = presets.filter(p => p.id !== 'best-available' && p.id !== 'default-mic' && p.id !== 'phone-aux');
                 const hasAnyVBCable = vbCablePresets.some(p => p.available);
+                const hasAnyDevice = devicePresets.length > 0;
 
                 const renderPresetButton = (preset: typeof presets[0]) => {
                     const active = context.activeAudioPreset === preset.id;
@@ -357,7 +363,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                         : 'border-gray-800/50 bg-gray-900/20 opacity-40 cursor-not-allowed'
                                 }`}
                             disabled={!preset.available}
-                            title={preset.available ? preset.matchedDeviceLabel : (uiLang === 'uk' ? 'Потрібен VB-Cable' : 'Requires VB-Cable')}
+                            title={preset.available ? preset.matchedDeviceLabel : (preset.id === 'phone-aux' ? (uiLang === 'uk' ? 'Підключіть AUX кабель в Line In' : 'Connect AUX cable to Line In') : (uiLang === 'uk' ? 'Потрібен VB-Cable' : 'Requires VB-Cable'))}
                         >
                             <div className="text-lg sm:text-2xl mb-1">{m.icon}</div>
                             <div className={`text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-cyan-300' : 'text-gray-400'}`}>
@@ -371,7 +377,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-gray-950" />
                             )}
                             {!preset.available && (
-                                <div className="text-[8px] text-amber-500/70 mt-1">VB-Cable</div>
+                                <div className="text-[8px] text-amber-500/70 mt-1">{preset.id === 'phone-aux' ? 'Line In' : 'VB-Cable'}</div>
                             )}
                         </button>
                     );
@@ -395,6 +401,18 @@ const LandingPage: React.FC<LandingPageProps> = ({
                                 </p>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                                     {vbCablePresets.map(renderPresetButton)}
+                                </div>
+                            </>
+                        )}
+
+                        {/* Device presets — phone, etc. */}
+                        {hasAnyDevice && (
+                            <>
+                                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2 mt-3 sm:mt-6">
+                                    {uiLang === 'uk' ? 'ПРИСТРОЇ' : 'DEVICES'}
+                                </p>
+                                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                                    {devicePresets.map(renderPresetButton)}
                                 </div>
                             </>
                         )}
@@ -453,7 +471,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Settings Panel (available from landing) */}
-            <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} listenThroughActive={listenThroughActive} listenThroughError={listenThroughError} />
+            <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={setContext} uiLang={uiLang} />
         </div>
     );
 };

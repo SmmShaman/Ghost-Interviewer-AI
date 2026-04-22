@@ -19,6 +19,7 @@ const PRESET_META: Record<string, { icon: string; group: 'listen' | 'interview';
     'speakers':           { icon: '🔊', group: 'listen', nameKey: 'presetSpeakers', descKey: 'presetSpeakersDesc' },
     'monitor-speakers':   { icon: '🖥️', group: 'listen', nameKey: 'presetMonitor', descKey: 'presetMonitorDesc' },
     'headphones-interview': { icon: '🎙️', group: 'interview', nameKey: 'presetInterview', descKey: 'presetInterviewDesc' },
+    'phone-aux':            { icon: '📱', group: 'interview', nameKey: 'presetPhoneAux', descKey: 'presetPhoneAuxDesc' },
 };
 
 const SETUP_KEYS: Record<string, string> = {
@@ -36,7 +37,7 @@ function findOutputDevice(outputs: MediaDeviceInfo[], ...patterns: string[]): st
     return null;
 }
 
-function buildDynamicGuide(
+export function buildDynamicGuide(
     presetId: string,
     outputs: MediaDeviceInfo[],
     inputs: { device: MediaDeviceInfo; type: string; friendlyName: string }[],
@@ -115,7 +116,6 @@ const VBCABLE_PRESETS = ['headphones-youtube', 'headphones-interview'];
 
 const AudioPresetSelector: React.FC<Props> = ({ context, onContextChange, presets, outputDevices = [], inputDevices = [], uiLang, t, listenThroughActive = false, listenThroughError = null }) => {
     const [expandedWarning, setExpandedWarning] = useState<string | null>(null);
-    const [expandedSetup, setExpandedSetup] = useState<string | null>(null);
 
     const listenPresets = presets.filter(p => PRESET_META[p.id]?.group === 'listen');
     const interviewPresets = presets.filter(p => PRESET_META[p.id]?.group === 'interview');
@@ -139,6 +139,7 @@ const AudioPresetSelector: React.FC<Props> = ({ context, onContextChange, preset
     const getWarningText = (preset: PresetInfo): string => {
         if (preset.warning === 'vb-cable-required') return t.presetVBCableRequired;
         if (preset.warning === 'vb-cable-needed') return t.presetVBCableNeeded;
+        if (preset.warning === 'line-in-needed') return t.presetLineInNeeded;
         return '';
     };
 
@@ -227,30 +228,6 @@ const AudioPresetSelector: React.FC<Props> = ({ context, onContextChange, preset
                         )}
                     </div>
                 )}
-                {/* Setup guide toggle */}
-                {available && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedSetup(expandedSetup === preset.id ? null : preset.id); }}
-                        className="mt-1 text-[9px] text-gray-500 hover:text-cyan-400 transition-colors text-left px-3"
-                    >
-                        {expandedSetup === preset.id ? `▾ ${t.presetHideSetup}` : `▸ ${t.presetShowSetup}`}
-                    </button>
-                )}
-                {/* Expanded setup guide */}
-                {expandedSetup === preset.id && available && (() => {
-                    const steps = outputDevices.length > 0
-                        ? buildDynamicGuide(preset.id, outputDevices, inputDevices, uiLang === 'uk')
-                        : (t[SETUP_KEYS[preset.id]] as string[] || []);
-                    return (
-                        <div className="mt-1 px-3 py-2.5 bg-cyan-950/30 border border-cyan-800/30 rounded-lg space-y-1.5">
-                            {steps.map((step: string, i: number) => (
-                                <div key={i} className={`text-[10px] leading-relaxed ${step.startsWith('✦') ? 'text-emerald-400 font-medium mt-1' : step.startsWith('⚠') ? 'text-amber-400/90' : 'text-gray-300/90'}`}>
-                                    {step}
-                                </div>
-                            ))}
-                        </div>
-                    );
-                })()}
             </div>
         );
     };
