@@ -1764,7 +1764,7 @@ const App: React.FC = () => {
 
       <SetupPanel isOpen={isSetupOpen} toggleOpen={() => setIsSetupOpen(!isSetupOpen)} context={context} onContextChange={handleContextChange} uiLang={uiLang} />
 
-      <div className={`shrink-0 flex justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 overflow-x-auto ${!isModelReady ? 'mt-10' : ''}`}>
+      <div className={`shrink-0 flex justify-between items-center p-2 sm:p-4 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800 ${!isModelReady ? 'mt-10' : ''}`}>
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {/* Back to Home */}
             <button
@@ -1795,15 +1795,6 @@ const App: React.FC = () => {
             <button onClick={toggleLanguage} className="hidden sm:block px-3 py-1.5 bg-gray-800 text-xs font-black text-emerald-400 rounded-lg border border-gray-700 hover:bg-gray-700 hover:border-emerald-500/50 transition-all shadow-lg shadow-black/20">
                 {uiLang === 'en' ? 'UA 🇺🇦' : 'EN 🇺🇸'}
             </button>
-            {/* Audio preset indicator (compact) — hidden on mobile */}
-            {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && (
-              <div className="hidden md:block px-2 py-1 text-[9px] font-bold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 tracking-wider" title="Audio preset active">
-                {context.activeAudioPreset === 'headphones-youtube' ? '🎧' :
-                 context.activeAudioPreset === 'speakers' ? '🔊' :
-                 context.activeAudioPreset === 'monitor-speakers' ? '🖥️' :
-                 context.activeAudioPreset === 'headphones-interview' ? '🎙️' : ''}
-              </div>
-            )}
         </div>
 
         <div className="flex items-center gap-1 sm:gap-3 shrink-0">
@@ -1859,6 +1850,31 @@ const App: React.FC = () => {
               </div>
           </div>
       )}
+
+      {/* Audio status bar — preset, source, language */}
+      {(() => {
+        const presetLabels: Record<string, { icon: string; label: string; source: string }> = {
+          'best-available': { icon: '🎤', label: 'Best Mic', source: 'Мікрофон' },
+          'default-mic': { icon: '🔇', label: 'System', source: 'Мікрофон' },
+          'speakers': { icon: '🔊', label: 'Колонки', source: 'VB-Cable' },
+          'headphones-youtube': { icon: '🎧', label: 'Навушники+Відео', source: 'VB-Cable' },
+          'monitor-speakers': { icon: '🖥️', label: 'Монітор', source: 'VB-Cable' },
+          'headphones-interview': { icon: '🎙️', label: 'Інтерв\'ю', source: 'VB-Cable' },
+          'phone-aux': { icon: '📱', label: 'Телефон', source: 'Line In' },
+          'manual': { icon: '⚙️', label: 'Ручний', source: 'Ручний' },
+        };
+        const preset = presetLabels[context.activeAudioPreset] || { icon: '?', label: context.activeAudioPreset, source: '?' };
+        return (
+          <div className="shrink-0 flex items-center justify-center gap-3 px-4 py-1 bg-gray-950/80 border-b border-gray-800/50 text-xs">
+            <span>{preset.icon}</span>
+            <span className="text-cyan-400 font-bold">{preset.label}</span>
+            <span className="text-gray-600">·</span>
+            <span className="text-gray-400">{preset.source}</span>
+            <span className="text-gray-600">·</span>
+            <span className="text-amber-400 font-bold">{context.targetLanguage} → {context.nativeLanguage}</span>
+          </div>
+        );
+      })()}
 
       <div className="flex-1 overflow-y-auto px-2 sm:px-4 md:px-8 py-4 sm:py-8">
          {/* SIMPLE MODE - NEW STREAMING UI */}

@@ -1,7 +1,7 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
-import { InterviewContext, SpeedPresetId, SPEED_PRESETS, AudioPresetId } from '../types';
+import { InterviewContext, AudioPresetId } from '../types';
 import { translations } from '../translations';
 import { SettingsIcon } from './Icons';
 import { useAudioDevices } from '../hooks/useAudioDevices';
@@ -69,21 +69,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
   // Menu items configuration
   const menuItems: MenuItem[] = [
     {
-      id: 'language',
-      icon: '🌐',
-      label: t.settings.accordion?.languageSettings || 'Language',
-      color: 'blue',
-      subItems: [
-        { id: 'no', label: '🇳🇴 Norwegian', value: 'Norwegian', isActive: context.targetLanguage === 'Norwegian' },
-        { id: 'en', label: '🇬🇧 English', value: 'English', isActive: context.targetLanguage === 'English' },
-        { id: 'ua', label: '🇺🇦 Ukrainian', value: 'Ukrainian', isActive: context.targetLanguage === 'Ukrainian' },
-        { id: 'ru', label: '🇷🇺 Russian', value: 'Russian', isActive: context.targetLanguage === 'Russian' },
-        { id: 'fr', label: '🇫🇷 French', value: 'French', isActive: context.targetLanguage === 'French' },
-        { id: 'de', label: '🇩🇪 German', value: 'German', isActive: context.targetLanguage === 'German' },
-        { id: 'es', label: '🇪🇸 Spanish', value: 'Spanish', isActive: context.targetLanguage === 'Spanish' },
-      ]
-    },
-    {
       id: 'audio',
       icon: '🎧',
       label: t.settings.accordion?.audioSetup || 'Audio',
@@ -99,18 +84,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
       ]
     },
     {
-      id: 'speed',
-      icon: '⚡',
-      label: uiLang === 'uk' ? 'Швидкість' : 'Speed',
-      color: 'amber',
-      subItems: (Object.entries(SPEED_PRESETS) as [SpeedPresetId, typeof SPEED_PRESETS[SpeedPresetId]][]).map(([id, preset]) => ({
-        id,
-        label: preset.label,
-        value: id,
-        isActive: (context.speedPreset || 'interview') === id,
-      }))
-    },
-    {
       id: 'settings',
       icon: '⚙️',
       label: t.settings.accordion?.allSettings || 'All Settings',
@@ -120,9 +93,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
 
   const handleSubItemClick = (menuId: string, subItem: SubMenuItem) => {
     switch (menuId) {
-      case 'language':
-        handleChange('targetLanguage', subItem.value);
-        break;
       case 'audio': {
         const presetId = subItem.value as AudioPresetId;
         const presets = audioDevices.getPresets();
@@ -133,9 +103,6 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
         }
         break;
       }
-      case 'speed':
-        handleChange('speedPreset', subItem.value as SpeedPresetId);
-        break;
     }
     // Close submenu after selection
     setExpandedItem(null);
@@ -231,7 +198,7 @@ const GearMenu: React.FC<GearMenuProps> = ({ context, onContextChange, uiLang, o
               {/* Sub-Items Dropdown - Vertical Slide Down */}
               {item.subItems && (
                 <div className={`
-                  absolute top-full left-0 mt-2 min-w-[140px] max-w-[calc(100vw-1rem)] z-50
+                  absolute top-full left-0 mt-2 min-w-[140px] max-w-[calc(100vw-1rem)] z-[100]
                   bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl
                   overflow-hidden transition-all duration-300 ease-out origin-top
                   ${isExpanded
