@@ -1,16 +1,82 @@
 
-
-import { GoogleGenAI } from "@google/genai";
 import { InterviewContext } from "../types";
 import { knowledgeSearch } from "./knowledgeSearch";
+import { apiClient } from "./apiClient";
 
-// Gemini Configuration (from .env via Vite)
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const API_BASE = import.meta.env.VITE_API_URL || 'https://ghost.vitalii.no';
 const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
 const GEMINI_MODEL_LITE = "gemini-2.5-flash-lite";
 
-// Initialize Google GenAI SDK
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+async function generateContent(
+    model: string,
+    prompt: string,
+    options: { systemInstruction?: string; temperature?: number; maxOutputTokens?: number; thinkingBudget?: number } = {}
+): Promise<string> {
+    const idToken = apiClient.getIdToken();
+    if (!idToken) return '';
+    try {
+        const response = await fetch(`${API_BASE}/api/ai/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: JSON.stringify({
+                model,
+                prompt,
+                systemInstruction: options.systemInstruction,
+                config: {
+                    temperature: options.temperature,
+                    maxOutputTokens: options.maxOutputTokens,
+                    thinkingBudget: options.thinkingBudget,
+                },
+            }),
+        });
+        if (!response.ok) return '';
+        const data = await response.json() as { text: string };
+        return data.text?.trim() || '';
+    } catch {
+        return '';
+    }
+}
+
+async function* streamContent(
+    model: string,
+    prompt: string,
+    config: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number },
+    signal?: AbortSignal
+): AsyncGenerator<string> {
+    const idToken = apiClient.getIdToken();
+    if (!idToken) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/ai/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: JSON.stringify({ model, prompt, config }),
+            signal,
+        });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (signal?.aborted) return;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const jsonStr = line.slice(6).trim();
+                if (!jsonStr || jsonStr === '[DONE]') continue;
+                try {
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed.text) yield parsed.text;
+                } catch {}
+            }
+        }
+    } catch (e: any) {
+        if (e.name === 'AbortError') throw e;
+    }
+}
 
 function constructPrompt(currentInput: string, historyText: string, context: InterviewContext, safeInstruction: string): string {
     const isSimpleMode = context.viewMode === 'SIMPLE';
@@ -227,49 +293,27 @@ ${modeSpecificGuidelines}
 ВАЖЛИВО: Кожен тег на окремому рядку. Відповідай ТІЛЬКИ в цьому форматі.`;
 }
 
-// GEMINI IMPLEMENTATION using @google/genai SDK
+// GEMINI IMPLEMENTATION via backend proxy (key never leaves server)
 async function generateViaGemini(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
-    if (!GEMINI_API_KEY || !ai) {
-        throw new Error("Gemini API Key is missing. Set VITE_GEMINI_API_KEY in .env");
-    }
-
-    if (signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-    }
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let fullText = "";
     let lastUpdate = 0;
-    const UPDATE_INTERVAL = 100; // ms - batch UI updates
+    const UPDATE_INTERVAL = 100;
 
     try {
-        const response = await ai.models.generateContentStream({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: {
-                temperature: 0.6,
-                maxOutputTokens: 4096,
-            }
-        });
+        for await (const text of streamContent(GEMINI_MODEL, prompt, { temperature: 0.6, maxOutputTokens: 4096 }, signal)) {
+            if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        for await (const chunk of response) {
-            if (signal?.aborted) {
-                throw new DOMException('Aborted', 'AbortError');
-            }
-
-            const content = chunk.text || "";
-            if (content) {
-                fullText += content;
-
-                const now = Date.now();
-                if (now - lastUpdate >= UPDATE_INTERVAL) {
-                    parseAndEmit(fullText, onUpdate);
-                    onUpdate({ _rawChunk: content, _fullRawText: fullText });
-                    lastUpdate = now;
-                }
+            fullText += text;
+            const now = Date.now();
+            if (now - lastUpdate >= UPDATE_INTERVAL) {
+                parseAndEmit(fullText, onUpdate);
+                onUpdate({ _rawChunk: text, _fullRawText: fullText });
+                lastUpdate = now;
             }
         }
 
-        // Final update: ensure all content is emitted
         parseAndEmit(fullText, onUpdate);
         onUpdate({ _rawChunk: '', _fullRawText: fullText });
     } catch (error: any) {
@@ -285,7 +329,7 @@ export const generateInterviewAssist = async (
   historyBuffer: string[],
   context: InterviewContext,
   onUpdate: (data: { answer: string; analysis: string; strategy: string; answerTranslation: string; inputTranslation: string; rationale: string }) => void,
-  signal?: AbortSignal // Optional abort signal for cancellation
+  signal?: AbortSignal
 ): Promise<void> => {
   try {
     const historyText = historyBuffer.join(" ");
@@ -294,9 +338,8 @@ export const generateInterviewAssist = async (
     await generateViaGemini(combinedPrompt, onUpdate, signal);
 
   } catch (error: any) {
-    // Don't log abort errors as they are expected
     if (error.name === 'AbortError') {
-        throw error; // Re-throw to be handled by caller
+        throw error;
     }
     console.error("LLM Service Error:", error);
     onUpdate({
@@ -369,7 +412,7 @@ export async function refineTranslationPair(
     nativeLanguage: string,
     signal?: AbortSignal
 ): Promise<string | null> {
-    if (!ai || !originalText.trim()) return null;
+    if (!originalText.trim()) return null;
 
     try {
         const prompt = `ОРИГІНАЛ (${targetLanguage}):
@@ -380,18 +423,10 @@ ${draftTranslation}
 
 Виправ переклад. Зроби його природним і граматично правильним ${nativeLanguage} мовою. Поверни ТІЛЬКИ виправлений переклад, без пояснень.`;
 
-        const response = await ai.models.generateContent({
-            model: GEMINI_MODEL_LITE,
-            contents: prompt,
-            config: {
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.1,
-                maxOutputTokens: 200,
-            }
-        });
-
         if (signal?.aborted) return null;
-        return response?.text?.trim() || null;
+        const text = await generateContent(GEMINI_MODEL_LITE, prompt, { thinkingBudget: 0, temperature: 0.1, maxOutputTokens: 200 });
+        if (signal?.aborted) return null;
+        return text || null;
     } catch (e: any) {
         if (e.name !== 'AbortError') {
             console.error('[RefineTranslation] Error:', e?.message || e);
@@ -411,27 +446,21 @@ export async function generateTopicSummary(
     sourceLanguage: string = 'Norwegian',
     targetLanguage: string = 'Ukrainian'
 ): Promise<string> {
-    if (!ai || !sourceText.trim()) return existingTopics || '';
+    if (!sourceText.trim()) return existingTopics || '';
 
     try {
         const userPrompt = existingTopics
             ? `CURRENT TOPICS:\n${existingTopics}\n\nNEW TEXT (${sourceLanguage}):\n${sourceText}`
             : `TEXT (${sourceLanguage}):\n${sourceText}`;
 
-        const response = await ai.models.generateContent({
-            model: GEMINI_MODEL_LITE,
-            contents: userPrompt,
-            config: {
-                systemInstruction: buildTopicSystemPrompt(sourceLanguage, targetLanguage),
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.1,
-                maxOutputTokens: 600,
-            }
-        });
-
         if (signal?.aborted) return existingTopics || '';
-
-        const text = response?.text?.trim();
+        const text = await generateContent(GEMINI_MODEL_LITE, userPrompt, {
+            systemInstruction: buildTopicSystemPrompt(sourceLanguage, targetLanguage),
+            thinkingBudget: 0,
+            temperature: 0.1,
+            maxOutputTokens: 600,
+        });
+        if (signal?.aborted) return existingTopics || '';
         return text || existingTopics || '';
     } catch (e: any) {
         if (e.name !== 'AbortError') {
@@ -440,8 +469,6 @@ export async function generateTopicSummary(
         return existingTopics || '';
     }
 }
-
-// ========== LITERARY TRANSLATION (Flash — quality rewrite) ==========
 
 function buildLiterarySystemPrompt(sourceLanguage: string, targetLanguage: string, hasTopics: boolean): string {
     const inputSection = hasTopics
@@ -497,7 +524,7 @@ export async function generateLiteraryTranslation(
     sourceLanguage: string = 'Norwegian',
     targetLanguage: string = 'Ukrainian'
 ): Promise<string> {
-    if (!ai || !rawText.trim()) return '';
+    if (!rawText.trim()) return '';
 
     const hasTopics = !!structuredTopics.trim();
     try {
@@ -505,20 +532,14 @@ export async function generateLiteraryTranslation(
             ? `STRUCTURED TOPICS:\n${structuredTopics}\n\nRAW TEXT (${sourceLanguage}):\n${rawText}`
             : `RAW TEXT (${sourceLanguage}):\n${rawText}`;
 
-        const response = await ai.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: userPrompt,
-            config: {
-                systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage, hasTopics),
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.3,
-                maxOutputTokens: 1000,
-            }
-        });
-
         if (signal?.aborted) return '';
-
-        const text = response?.text?.trim();
+        const text = await generateContent(GEMINI_MODEL, userPrompt, {
+            systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage, hasTopics),
+            thinkingBudget: 0,
+            temperature: 0.3,
+            maxOutputTokens: 1000,
+        });
+        if (signal?.aborted) return '';
         return text || '';
     } catch (e: any) {
         if (e.name !== 'AbortError') {
@@ -568,34 +589,26 @@ export async function analyzeConversation(
     sourceLang: string = 'Norwegian',
     targetLang: string = 'Ukrainian'
 ): Promise<{ log: string; hasNewQuestion: boolean; lastQuestion: string }> {
-    if (!ai || !norwegianText.trim()) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
+    if (!norwegianText.trim()) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
 
     try {
         const userPrompt = existingLog
             ? `CURRENT LOG:\n${existingLog}\n\nNEW TEXT (${sourceLang}):\n${norwegianText}\n\nUpdated log:`
             : `TEXT (${sourceLang}):\n${norwegianText}\n\nConversation log:`;
 
-        const response = await ai.models.generateContent({
-            model: GEMINI_MODEL_LITE,
-            contents: userPrompt,
-            config: {
-                systemInstruction: buildAnalyzerPrompt(sourceLang, targetLang),
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.1,
-                maxOutputTokens: 400,
-            }
-        });
-
+        if (signal?.aborted) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
+        const text = await generateContent(GEMINI_MODEL_LITE, userPrompt, {
+            systemInstruction: buildAnalyzerPrompt(sourceLang, targetLang),
+            thinkingBudget: 0,
+            temperature: 0.1,
+            maxOutputTokens: 400,
+        }) || existingLog || '';
         if (signal?.aborted) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
 
-        const text = response?.text?.trim() || existingLog || '';
-
-        // Detect if new question appeared
         const existingQuestions = (existingLog || '').match(/❓/g)?.length || 0;
         const newQuestions = text.match(/❓/g)?.length || 0;
         const hasNewQuestion = newQuestions > existingQuestions;
 
-        // Extract last question text
         let lastQuestion = '';
         if (hasNewQuestion) {
             const questionBlocks = text.split('❓').filter(b => b.trim());
@@ -630,7 +643,7 @@ export async function generateInterviewAnswer(
     jobDescription?: string,
     applicationLetter?: string
 ): Promise<{ answer: string; answerTranslation: string }> {
-    if (!ai || !question.trim()) return { answer: '', answerTranslation: '' };
+    if (!question.trim()) return { answer: '', answerTranslation: '' };
 
     try {
         const prompt = `Ти готуєш відповідь кандидата на співбесіді.
@@ -666,19 +679,10 @@ ${conversationContext.slice(-500)}
 [TRANSLATION]
 переклад`;
 
-        const response = await ai.models.generateContent({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: {
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.4,
-                maxOutputTokens: 500,
-            }
-        });
-
+        if (signal?.aborted) return { answer: '', answerTranslation: '' };
+        const text = await generateContent(GEMINI_MODEL, prompt, { thinkingBudget: 0, temperature: 0.4, maxOutputTokens: 500 });
         if (signal?.aborted) return { answer: '', answerTranslation: '' };
 
-        const text = response?.text || '';
         const answerMatch = text.match(/\[ANSWER\]\s*([\s\S]*?)(?:\[TRANSLATION\]|$)/i);
         const translationMatch = text.match(/\[TRANSLATION\]\s*([\s\S]*?)$/i);
 
@@ -711,7 +715,7 @@ export async function generateInterviewAnswerStreaming(
     jobDescription?: string,
     applicationLetter?: string
 ): Promise<{ answer: string; answerTranslation: string }> {
-    if (!ai || !question.trim()) return { answer: '', answerTranslation: '' };
+    if (!question.trim()) return { answer: '', answerTranslation: '' };
 
     const prompt = `Ти готуєш відповідь кандидата на співбесіді.
 
@@ -760,34 +764,17 @@ ${conversationContext.slice(-500)}
     };
 
     try {
-        const response = await ai.models.generateContentStream({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: {
-                thinkingConfig: { thinkingBudget: 0 },
-                temperature: 0.4,
-                maxOutputTokens: 500,
-            }
-        });
+        for await (const text of streamContent(GEMINI_MODEL, prompt, { thinkingBudget: 0, temperature: 0.4, maxOutputTokens: 500 } as any, signal)) {
+            if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        for await (const chunk of response) {
-            if (signal?.aborted) {
-                throw new DOMException('Aborted', 'AbortError');
-            }
-
-            const content = chunk.text || '';
-            if (content) {
-                fullText += content;
-
-                const now = Date.now();
-                if (now - lastUpdate >= UPDATE_INTERVAL) {
-                    onUpdate(parseAnswerTags(fullText));
-                    lastUpdate = now;
-                }
+            fullText += text;
+            const now = Date.now();
+            if (now - lastUpdate >= UPDATE_INTERVAL) {
+                onUpdate(parseAnswerTags(fullText));
+                lastUpdate = now;
             }
         }
 
-        // Final parse with complete text
         const final = parseAnswerTags(fullText);
         onUpdate(final);
         return final;
@@ -831,14 +818,13 @@ export const generateStreamingTranslation = async (
     const prompt = constructStreamingPrompt(fullText, alreadyTranslated, context);
 
     let resultText = '';
-    let fullResponseText = ''; // Capture full response for intent parsing
+    let fullResponseText = '';
 
     try {
         const onUpdate = (data: any) => {
             if (data.inputTranslation) {
                 resultText = data.inputTranslation;
             }
-            // Capture full raw text for intent parsing
             if (data._fullRawText) {
                 fullResponseText = data._fullRawText;
             }
@@ -852,11 +838,9 @@ export const generateStreamingTranslation = async (
         // Fall back to heuristic classification if LLM didn't provide intent
         if (!intent || intent.speechType === 'UNKNOWN') {
             const heuristicIntent = classifyIntent(fullText, resultText);
-            // Merge: use LLM intent if available, otherwise heuristic
             intent = {
                 containsQuestion: intent?.containsQuestion ?? heuristicIntent.containsQuestion,
                 questionConfidence: intent?.questionConfidence ?? heuristicIntent.questionConfidence,
-                // Fix: check if intent exists AND has a valid speechType before using it
                 speechType: (intent && intent.speechType && intent.speechType !== 'UNKNOWN')
                     ? intent.speechType
                     : heuristicIntent.speechType
@@ -865,34 +849,22 @@ export const generateStreamingTranslation = async (
 
         console.log(`🎯 [Intent] type=${intent.speechType}, question=${intent.containsQuestion}, confidence=${intent.questionConfidence}%`);
 
-        // Sanitize: strip any leaked LLM tags from translation text
         resultText = sanitizeTranslationText(resultText);
-
-        // Strip original text echo: LLMs sometimes repeat the original before translating
         resultText = stripOriginalTextEcho(resultText, fullText);
 
-        return {
-            translation: resultText,
-            intent
-        };
+        return { translation: resultText, intent };
     } catch (e: any) {
         if (e.name === 'AbortError') throw e;
         console.error('Streaming translation error:', e);
         return {
             translation: alreadyTranslated || '',
-            intent: {
-                containsQuestion: false,
-                questionConfidence: 0,
-                speechType: 'UNKNOWN'
-            }
+            intent: { containsQuestion: false, questionConfidence: 0, speechType: 'UNKNOWN' }
         };
     }
 };
 
 /**
  * Strip any leaked LLM structural tags from translation text.
- * Handles cases where the model outputs malformed closing tags or
- * streaming captures partial tags in the translation.
  */
 function sanitizeTranslationText(text: string): string {
     return text
@@ -909,9 +881,6 @@ function sanitizeTranslationText(text: string): string {
 
 /**
  * Strip original text echo from translation.
- * Some LLMs repeat the original text before/after the translation.
- * Detects this by checking if the translation contains the original text
- * and removes it, keeping only the actual translated content.
  */
 function stripOriginalTextEcho(translation: string, originalText: string): string {
     if (!translation || !originalText) return translation;
@@ -919,7 +888,6 @@ function stripOriginalTextEcho(translation: string, originalText: string): strin
     const trimmedOriginal = originalText.trim();
     const trimmedTranslation = translation.trim();
 
-    // Case 1: Translation starts with the original text (most common)
     if (trimmedTranslation.startsWith(trimmedOriginal)) {
         const stripped = trimmedTranslation.slice(trimmedOriginal.length).trim();
         if (stripped.length > 0) {
@@ -928,7 +896,6 @@ function stripOriginalTextEcho(translation: string, originalText: string): strin
         }
     }
 
-    // Case 2: Translation ends with the original text
     if (trimmedTranslation.endsWith(trimmedOriginal)) {
         const stripped = trimmedTranslation.slice(0, -trimmedOriginal.length).trim();
         if (stripped.length > 0) {
@@ -937,23 +904,19 @@ function stripOriginalTextEcho(translation: string, originalText: string): strin
         }
     }
 
-    // Case 3: Check if significant portion of original words appear at start
-    // (handles partial echo where LLM echoes most but not all original words)
     const originalWords = trimmedOriginal.split(/\s+/);
     const translationWords = trimmedTranslation.split(/\s+/);
 
     if (originalWords.length >= 3 && translationWords.length > originalWords.length) {
-        // Check if first N words of translation match original
         let matchCount = 0;
         for (let i = 0; i < Math.min(originalWords.length, translationWords.length); i++) {
             if (translationWords[i].toLowerCase() === originalWords[i].toLowerCase()) {
                 matchCount++;
             } else {
-                break; // Stop at first non-match
+                break;
             }
         }
 
-        // If 60%+ of original words match at start, strip them
         if (matchCount >= originalWords.length * 0.6 && matchCount >= 3) {
             const stripped = translationWords.slice(matchCount).join(' ').trim();
             if (stripped.length > 0) {
@@ -971,33 +934,25 @@ function stripOriginalTextEcho(translation: string, originalText: string): strin
  */
 function parseLLMIntent(responseText: string): StreamingTranslationResult['intent'] | null {
     try {
-        // Look for [INTENT] section
         const intentMatch = responseText.match(/\[INTENT\]([\s\S]*?)(\[\/INTENT\]|$)/i);
         if (!intentMatch) return null;
 
         const intentBlock = intentMatch[1];
 
-        // Parse type
         const typeMatch = intentBlock.match(/type:\s*(QUESTION|INFO|SMALL_TALK|STORY|UNKNOWN)/i);
         const speechType = typeMatch
             ? typeMatch[1].toUpperCase() as 'QUESTION' | 'INFO' | 'STORY' | 'SMALL_TALK' | 'UNKNOWN'
             : 'UNKNOWN';
 
-        // Parse confidence
         const confidenceMatch = intentBlock.match(/confidence:\s*(\d+)/i);
         const questionConfidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : 50;
 
-        // Parse has_question
         const hasQuestionMatch = intentBlock.match(/has_question:\s*(true|false)/i);
         const containsQuestion = hasQuestionMatch
             ? hasQuestionMatch[1].toLowerCase() === 'true'
             : speechType === 'QUESTION';
 
-        return {
-            containsQuestion,
-            questionConfidence,
-            speechType
-        };
+        return { containsQuestion, questionConfidence, speechType };
     } catch (e) {
         console.warn('Failed to parse LLM intent:', e);
         return null;
@@ -1007,7 +962,6 @@ function parseLLMIntent(responseText: string): StreamingTranslationResult['inten
 function constructStreamingPrompt(fullText: string, alreadyTranslated: string, context: InterviewContext): string {
     const hasExistingTranslation = alreadyTranslated && alreadyTranslated.trim().length > 0;
 
-    // Common intent classification instructions
     const intentInstructions = `
 КЛАСИФІКАЦІЯ МОВЛЕННЯ:
 Визнач тип мовлення та чи є питання до кандидата:
@@ -1029,7 +983,6 @@ has_question: true/false
 
 КРИТИЧНО: В тегах [INPUT_TRANSLATION] пиши ТІЛЬКИ переклад на ${context.nativeLanguage}. НЕ повторюй оригінальний ${context.targetLanguage} текст. НЕ додавай оригінал перед перекладом.`;
 
-    // Speech recognition error correction instructions (common for Norwegian)
     const speechCorrectionRules = `
 ВИПРАВЛЕННЯ ПОМИЛОК РОЗПІЗНАВАННЯ МОВЛЕННЯ:
 Текст надходить від Web Speech API і ЧАСТО містить помилки. Ти МУСИШ розпізнати правильне слово з контексту:
@@ -1040,7 +993,6 @@ has_question: true/false
 - Технічні терміни (API, deploy, framework) залишай як є`;
 
     if (hasExistingTranslation) {
-        // Incremental mode - tell LLM what's already translated
         return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
 
 КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст надходить поступово від розпізнавання мовлення і містить помилки.
@@ -1066,7 +1018,6 @@ ${speechCorrectionRules}
 ${intentInstructions}`;
     }
 
-    // First translation - no previous context
     return `Ти професійний перекладач-синхроніст з ${context.targetLanguage} на ${context.nativeLanguage}.
 
 КОНТЕКСТ: Ти перекладаєш ЖИВУ МОВУ інтерв'юера в реальному часі. Текст від розпізнавання мовлення і містить помилки.
@@ -1085,17 +1036,10 @@ ${intentInstructions}`;
 }
 
 function classifyIntent(originalText: string, translation: string): StreamingTranslationResult['intent'] {
-    // Heuristic intent classification
-    // TODO: Can be improved with LLM classification in the future
-
     const questionIndicators = [
-        // Norwegian question words
         'hva', 'hvordan', 'hvorfor', 'når', 'hvor', 'hvem', 'hvilken', 'hvilke',
-        // English question words
         'what', 'how', 'why', 'when', 'where', 'who', 'which',
-        // German question words
         'was', 'wie', 'warum', 'wann', 'wo', 'wer', 'welche',
-        // Question marks
         '?'
     ];
 
@@ -1114,53 +1058,36 @@ function classifyIntent(originalText: string, translation: string): StreamingTra
     const lowerOriginal = originalText.toLowerCase();
     const lowerTranslation = translation.toLowerCase();
 
-    // Check for question
     let questionScore = 0;
     for (const indicator of questionIndicators) {
         if (lowerOriginal.includes(indicator)) questionScore += 2;
         if (lowerTranslation.includes(indicator)) questionScore += 1;
     }
 
-    // Check for company info
     let infoScore = 0;
     for (const indicator of infoIndicators) {
         if (lowerOriginal.includes(indicator)) infoScore += 2;
     }
 
-    // Check for small talk
     let smallTalkScore = 0;
     for (const indicator of smallTalkIndicators) {
         if (lowerOriginal.includes(indicator)) smallTalkScore += 2;
     }
 
-    // Determine type
     const maxScore = Math.max(questionScore, infoScore, smallTalkScore);
 
     if (questionScore > 3 && questionScore === maxScore) {
-        return {
-            containsQuestion: true,
-            questionConfidence: Math.min(100, questionScore * 15),
-            speechType: 'QUESTION'
-        };
+        return { containsQuestion: true, questionConfidence: Math.min(100, questionScore * 15), speechType: 'QUESTION' };
     }
 
     if (infoScore > 3 && infoScore === maxScore) {
-        return {
-            containsQuestion: false,
-            questionConfidence: 0,
-            speechType: 'INFO'
-        };
+        return { containsQuestion: false, questionConfidence: 0, speechType: 'INFO' };
     }
 
     if (smallTalkScore > 3 && smallTalkScore === maxScore) {
-        return {
-            containsQuestion: false,
-            questionConfidence: 0,
-            speechType: 'SMALL_TALK'
-        };
+        return { containsQuestion: false, questionConfidence: 0, speechType: 'SMALL_TALK' };
     }
 
-    // Default - unknown but might be question if has question mark
     const hasQuestionMark = originalText.includes('?');
     return {
         containsQuestion: hasQuestionMark,
@@ -1179,38 +1106,28 @@ function parseAndEmit(fullText: string, onUpdate: any) {
     let answer = "";
     let rationale = "";
 
-    // 0. Input Translation - supports both [/INPUT_TRANSLATION] and </INPUT_TRANSLATION>
-    // Note: \]? makes closing bracket optional (LLMs sometimes omit it)
-    // [INTENT] added as delimiter to prevent intent block leaking into translation
     const inputMatch = fullText.match(/\[INPUT_TRANSLATION\]([\s\S]*?)(\[\/INPUT_TRANSLATION\]?|<\/INPUT_TRANSLATION>|\[ANALYSIS\]|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|\[INTENT\]|$)/i);
     if (inputMatch) inputTranslation = inputMatch[1].trim();
 
-    // 1. Analysis - supports both [/ANALYSIS] and </ANALYSIS>
     const analysisMatch = fullText.match(/\[ANALYSIS\]([\s\S]*?)(\[\/ANALYSIS\]|<\/ANALYSIS>|\[STRATEGY\]|\[TRANSLATION\]|\[ANSWER\]|$)/i);
     if (analysisMatch) analysis = analysisMatch[1].trim();
 
-    // 2. Strategy - supports both [/STRATEGY] and </STRATEGY>
     const strategyMatch = fullText.match(/\[STRATEGY\]([\s\S]*?)(\[\/STRATEGY\]|<\/STRATEGY>|\[TRANSLATION\]|\[ANSWER\]|$)/i);
     if (strategyMatch) strategy = strategyMatch[1].trim();
 
-    // 3. Translation (answer translation) - supports both [/TRANSLATION] and </TRANSLATION>
     const translationMatch = fullText.match(/\[TRANSLATION\]([\s\S]*?)(\[\/TRANSLATION\]|<\/TRANSLATION>|\[ANSWER\]|$)/i);
     if (translationMatch) answerTranslation = translationMatch[1].trim();
 
-    // 4. Answer - supports both [/ANSWER] and </ANSWER>
     const answerMatch = fullText.match(/\[ANSWER\]([\s\S]*?)(\[\/ANSWER\]|<\/ANSWER>|$)/i);
     if (answerMatch) answer = answerMatch[1].trim();
 
-    // Handle streaming case where [ANSWER] exists but tag isn't closed yet
     if (!answer && fullText.includes('[ANSWER]')) {
          const parts = fullText.split('[ANSWER]');
          if (parts.length > 1) {
-             // Remove closing tag if partially present (both styles)
              answer = parts[1].replace(/(\[\/ANSWER\]|<\/ANSWER>).*$/i, '').trim();
          }
     }
 
-    // Fallback: If no tags found but text exists, use as inputTranslation (for SIMPLE mode raw output)
     if (!inputTranslation && !answer && !analysis && fullText.length > 0 && !fullText.includes('[')) {
         inputTranslation = fullText.trim();
     }

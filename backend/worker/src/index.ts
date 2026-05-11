@@ -4,6 +4,7 @@ interface Env {
   DATABASE_URL: string;
   ENVIRONMENT: string;
   GOOGLE_TRANSLATE_KEY: string;
+  GEMINI_API_KEY: string;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -782,6 +783,148 @@ async function syncUp(sql: SqlFunction, userId: string, request: Request): Promi
   return jsonResponse({ synced: results });
 }
 
+// ─── Gemini AI Proxy ─────────────────────────────────────────────────────────
+
+// POST /api/ai/generate — non-streaming Gemini proxy (key stays server-side)
+async function geminiGenerate(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'Authorization required' }, 401);
+  }
+  const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
+  if (!tokenInfo) {
+    return jsonResponse({ error: 'Invalid token' }, 401);
+  }
+
+  if (!env.GEMINI_API_KEY) {
+    return jsonResponse({ error: 'AI service not configured' }, 503);
+  }
+
+  const body = await request.json() as {
+    model: string;
+    prompt: string;
+    systemInstruction?: string;
+    config?: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number };
+  };
+
+  if (!body.model || !body.prompt) {
+    return jsonResponse({ error: 'model and prompt are required' }, 400);
+  }
+
+  const geminiBody: any = {
+    contents: [{ role: 'user', parts: [{ text: body.prompt }] }],
+  };
+
+  if (body.config) {
+    const genConfig: any = {};
+    if (body.config.temperature !== undefined) genConfig.temperature = body.config.temperature;
+    if (body.config.maxOutputTokens !== undefined) genConfig.maxOutputTokens = body.config.maxOutputTokens;
+    if (body.config.thinkingBudget !== undefined) genConfig.thinkingConfig = { thinkingBudget: body.config.thinkingBudget };
+    geminiBody.generationConfig = genConfig;
+  }
+
+  if (body.systemInstruction) {
+    geminiBody.systemInstruction = { role: 'user', parts: [{ text: body.systemInstruction }] };
+  }
+
+  const geminiResp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${body.model}:generateContent?key=${env.GEMINI_API_KEY}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody) }
+  );
+
+  const data = await geminiResp.json() as any;
+  if (!geminiResp.ok) {
+    return jsonResponse({ error: 'Gemini API error', details: data?.error?.message }, geminiResp.status);
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return jsonResponse({ text });
+}
+
+// POST /api/ai/stream — streaming Gemini proxy via SSE
+async function geminiStream(request: Request, env: Env): Promise<Response> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'Authorization required' }, 401);
+  }
+  const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
+  if (!tokenInfo) {
+    return jsonResponse({ error: 'Invalid token' }, 401);
+  }
+
+  if (!env.GEMINI_API_KEY) {
+    return jsonResponse({ error: 'AI service not configured' }, 503);
+  }
+
+  const body = await request.json() as {
+    model: string;
+    prompt: string;
+    config?: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number };
+  };
+
+  if (!body.model || !body.prompt) {
+    return jsonResponse({ error: 'model and prompt are required' }, 400);
+  }
+
+  const geminiBody: any = {
+    contents: [{ role: 'user', parts: [{ text: body.prompt }] }],
+  };
+
+  if (body.config) {
+    const genConfig: any = {};
+    if (body.config.temperature !== undefined) genConfig.temperature = body.config.temperature;
+    if (body.config.maxOutputTokens !== undefined) genConfig.maxOutputTokens = body.config.maxOutputTokens;
+    if (body.config.thinkingBudget !== undefined) genConfig.thinkingConfig = { thinkingBudget: body.config.thinkingBudget };
+    geminiBody.generationConfig = genConfig;
+  }
+
+  const geminiResp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${body.model}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody) }
+  );
+
+  if (!geminiResp.ok || !geminiResp.body) {
+    const errData = await geminiResp.json().catch(() => ({})) as any;
+    return jsonResponse({ error: 'Gemini stream failed', details: errData?.error?.message }, geminiResp.status);
+  }
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  (async () => {
+    const reader = geminiResp.body!.getReader();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (text) await writer.write(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+          } catch {}
+        }
+      }
+    } finally {
+      await writer.write(encoder.encode('data: [DONE]\n\n'));
+      await writer.close();
+    }
+  })();
+
+  return new Response(readable, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', ...corsHeaders() },
+  });
+}
+
 // ─── Health check ────────────────────────────────────────────────────────────
 
 async function healthCheck(sql: SqlFunction): Promise<Response> {
@@ -830,6 +973,14 @@ export default {
           redirect: 'follow',
         });
         return fetch(proxyReq);
+      }
+
+      // Gemini AI proxy (requires auth, key stays server-side)
+      if (method === 'POST' && path === '/api/ai/generate') {
+        return geminiGenerate(request, env);
+      }
+      if (method === 'POST' && path === '/api/ai/stream') {
+        return geminiStream(request, env);
       }
 
       // Translation proxy (requires auth, uses server-side API key)
