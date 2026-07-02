@@ -1,0 +1,839 @@
+
+
+import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
+import { glossaryProcessor } from './glossaryProcessor';
+import { pivotTranslator } from './pivotTranslator';
+import { confidenceFilter } from './confidenceFilter';
+import { debugLogger } from './debugLogger';
+import { googleTranslateNMT } from './googleTranslateNMT';
+
+// CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
+env.useBrowserCache = true;  // Cache models in browser (IndexedDB/Cache API)
+env.useCustomCache = false;  // Use default browser caching mechanism
+
+export interface TranslatedWord {
+    original: string;
+    ghostTranslation: string;
+    finalTranslation?: string;
+    status: 'ghost' | 'final';
+}
+
+// Chrome Translator API types (Chrome 138+)
+interface ChromeTranslator {
+    translate(text: string): Promise<string>;
+    translateStreaming?(text: string): ReadableStream<string>;
+}
+
+interface ChromeTranslatorOptions {
+    sourceLanguage: string;
+    targetLanguage: string;
+    monitor?: (m: any) => void;
+}
+
+declare global {
+    interface Window {
+        Translator?: {
+            create(options: ChromeTranslatorOptions): Promise<ChromeTranslator>;
+            canTranslate?(options: { sourceLanguage: string; targetLanguage: string }): Promise<string>;
+        };
+    }
+}
+
+class LocalTranslator {
+    private translator: any = null;
+
+    // Chrome Native Translator (Chrome 138+)
+    private chromeTranslator: ChromeTranslator | null = null;
+    private chromeTranslatorAvailable: boolean | null = null; // null = not checked yet
+    private chromeInitPromise: Promise<boolean> | null = null; // Lock for init
+
+    // PRIMARY: Use the custom OPUS model (56MB)
+    private opusModelId = 'goldcc/opus-mt-no-uk-int8';
+
+    // SECONDARY: Fallback to NLLB if Opus fails (600MB+)
+    private nllbModelId = 'Xenova/nllb-200-distilled-600M';
+
+    private activeModelId = '';
+    private currentModelType: 'opus' | 'nllb' = 'opus';
+
+    private sourceLang: string = "nob_Latn";
+    private targetLang: string = "ukr_Cyrl";
+
+    // UI language names for Chrome API
+    private sourceLanguageName: string = "no"; // BCP-47 codes for Chrome
+    private targetLanguageName: string = "uk";
+
+    private isLoading = false;
+    private progressCallback: ((progress: number) => void) | null = null;
+    private activeDevice: 'webgpu' | 'wasm' | null = null;
+
+    // PERFORMANCE OPTIMIZATION: Chunk translation cache
+    private chunkCache: Map<string, string> = new Map();
+    private static readonly CHUNK_SIZE = 5; // Larger chunks give OPUS model more context for coherent translations
+    private static readonly MAX_CACHE_SIZE = 100;
+
+    // PIVOT TRANSLATION: NO → EN → UK (better quality)
+    private usePivot: boolean = true;  // Enable pivot by default
+    private pivotInitialized: boolean = false;
+
+    // CONFIDENCE FILTERING: Reject low-quality translations
+    private useConfidenceFilter: boolean = true;
+    private lastConfidenceScore: number = 100;
+
+    // INCREMENTAL CACHE: Reuse prefix translation for growing text
+    private incrementalCache: { originalText: string; translatedText: string } = { originalText: '', translatedText: '' };
+
+    // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
+
+    async checkChromeTranslator(): Promise<boolean> {
+        if (this.chromeTranslatorAvailable !== null) {
+            return this.chromeTranslatorAvailable;
+        }
+
+        try {
+            if (!('Translator' in window) || !window.Translator) {
+                console.log('🌐 Chrome Translator API: Not available (no Translator object)');
+                this.chromeTranslatorAvailable = false;
+                return false;
+            }
+
+            const pair = { sourceLanguage: this.sourceLanguageName, targetLanguage: this.targetLanguageName };
+
+            // Chrome 141+: use availability() instead of deprecated canTranslate()
+            const tr = window.Translator as any;
+            if (typeof tr.availability === 'function') {
+                const status = await tr.availability(pair);
+                console.log(`🌐 Chrome Translator: availability(${this.sourceLanguageName}→${this.targetLanguageName}) = "${status}"`);
+                debugLogger.log('CHROME_CHECK', `availability(${this.sourceLanguageName}→${this.targetLanguageName}) = "${status}"`);
+
+                if (status === 'unavailable') {
+                    // Try 'nb' (Bokmål) if 'no' is unavailable
+                    if (this.sourceLanguageName === 'no') {
+                        const nbStatus = await tr.availability({ sourceLanguage: 'nb', targetLanguage: this.targetLanguageName });
+                        console.log(`🌐 Chrome Translator: availability(nb→${this.targetLanguageName}) = "${nbStatus}"`);
+                        if (nbStatus !== 'unavailable') {
+                            this.sourceLanguageName = 'nb';
+                            this.chromeTranslatorAvailable = true;
+                            return true;
+                        }
+                    }
+                    this.chromeTranslatorAvailable = false;
+                    return false;
+                }
+                // "available", "downloadable", "downloading" — all mean it can work
+                this.chromeTranslatorAvailable = true;
+                return true;
+            }
+
+            // Fallback: legacy canTranslate() for Chrome 138-140
+            if (typeof tr.canTranslate === 'function') {
+                const support = await tr.canTranslate(pair);
+                console.log(`🌐 Chrome Translator: canTranslate(${this.sourceLanguageName}→${this.targetLanguageName}) = "${support}"`);
+                if (support === 'no') {
+                    this.chromeTranslatorAvailable = false;
+                    return false;
+                }
+                this.chromeTranslatorAvailable = true;
+                return true;
+            }
+
+            // Neither availability() nor canTranslate() — try create() directly
+            console.log('🌐 Chrome Translator: No check method, will try create() directly');
+            this.chromeTranslatorAvailable = true;
+            return true;
+        } catch (e) {
+            console.error('🌐 Chrome Translator: Check failed', e);
+            this.chromeTranslatorAvailable = false;
+            return false;
+        }
+    }
+
+    async initChromeTranslator(): Promise<boolean> {
+        if (this.chromeTranslator) return true;
+
+        // Lock to prevent race condition
+        if (this.chromeInitPromise) {
+            return this.chromeInitPromise;
+        }
+
+        this.chromeInitPromise = this.doInitChromeTranslator();
+        const result = await this.chromeInitPromise;
+        this.chromeInitPromise = null;
+        return result;
+    }
+
+    private async doInitChromeTranslator(): Promise<boolean> {
+        if (!await this.checkChromeTranslator()) return false;
+
+        const tryCreate = async (src: string, tgt: string): Promise<boolean> => {
+            try {
+                console.log(`🌐 Chrome Translator: Creating ${src}→${tgt}...`);
+                this.chromeTranslator = await (window.Translator as any).create({
+                    sourceLanguage: src,
+                    targetLanguage: tgt,
+                    monitor: (m: any) => {
+                        m.addEventListener?.('downloadprogress', (e: any) => {
+                            const progress = e.loaded ? Math.round(e.loaded * 100) : 0;
+                            console.log(`🌐 Chrome Translator downloading: ${progress}%`);
+                            if (this.progressCallback) this.progressCallback(progress);
+                        });
+                    }
+                });
+                this.sourceLanguageName = src;
+                console.log(`🌐 Chrome Translator: Ready! (${src}→${tgt})`);
+                debugLogger.log('CHROME_OK', `${src}→${tgt} ready`);
+                return true;
+            } catch (e: any) {
+                console.error(`🌐 Chrome Translator: create(${src}→${tgt}) failed:`, e?.message || e);
+                debugLogger.log('CHROME_FAIL', `create(${src}→${tgt}): ${e?.message || e}`);
+                return false;
+            }
+        };
+
+        // Try primary language code, then fallback to 'nb' for Norwegian
+        if (await tryCreate(this.sourceLanguageName, this.targetLanguageName)) return true;
+        if (this.sourceLanguageName === 'no' && await tryCreate('nb', this.targetLanguageName)) return true;
+
+        this.chromeTranslatorAvailable = false;
+        return false;
+    }
+
+    /** Destroy current translator instance (call on language change or session stop) */
+    destroyChromeTranslator(): void {
+        if (this.chromeTranslator) {
+            try {
+                (this.chromeTranslator as any).destroy?.();
+            } catch { /* ignore */ }
+            this.chromeTranslator = null;
+        }
+        this.chromeTranslatorAvailable = null;
+        this.chromeInitPromise = null;
+    }
+
+    // Pre-initialize Chrome Translator at app startup (call this early!)
+    async preInitChrome(): Promise<void> {
+        console.log('🌐 Chrome Translator: Pre-initializing...');
+        await this.initChromeTranslator();
+    }
+
+    async translateWithChrome(text: string): Promise<string | null> {
+        if (!this.chromeTranslator) {
+            const ok = await this.initChromeTranslator();
+            if (!ok) return null;
+        }
+
+        try {
+            const result = await this.chromeTranslator!.translate(text);
+            return result;
+        } catch (e) {
+            console.error('🌐 Chrome Translator: Translation failed', e);
+            return null;
+        }
+    }
+
+    async switchModel(modelType: 'opus' | 'nllb', onProgress?: (progress: number) => void) {
+        if (this.currentModelType === modelType && this.translator) {
+            if (onProgress) onProgress(100);
+            return; 
+        }
+
+        console.log(`Swapping model to ${modelType}...`);
+        this.translator = null;
+        this.currentModelType = modelType;
+        
+        await this.initialize(onProgress);
+    }
+
+    getCurrentModelType() {
+        return this.currentModelType;
+    }
+
+    /** Configure Google Cloud NMT — direct key or proxy */
+    setGoogleNMTKey(key: string): void {
+        if (key) {
+            googleTranslateNMT.setApiKey(key);
+        }
+    }
+
+    /** Configure Google NMT proxy mode (production) */
+    setGoogleNMTProxy(proxyUrl: string, authToken: string): void {
+        googleTranslateNMT.setProxy(proxyUrl, authToken);
+    }
+
+    /** Update auth token for NMT proxy */
+    setGoogleNMTAuthToken(token: string): void {
+        googleTranslateNMT.setAuthToken(token);
+    }
+
+    async initialize(onProgress?: (progress: number) => void) {
+        // Initialize Google Cloud NMT if API key available (from env var)
+        const nmtKey = (import.meta as any).env?.VITE_GOOGLE_TRANSLATE_KEY || '';
+        if (nmtKey) {
+            googleTranslateNMT.setApiKey(nmtKey);
+        }
+
+        // OPTIMIZATION: Skip model loading if Chrome Translator API is available
+        const chromeAvailable = await this.checkChromeTranslator();
+        if (chromeAvailable) {
+            console.log('✅ Chrome Translator API available - skipping model download');
+            if (onProgress) onProgress(100);
+            this.finishInit();
+            return;
+        }
+
+        // Also skip model loading if Google NMT is available
+        if (googleTranslateNMT.isAvailable()) {
+            console.log('✅ Google Cloud NMT available - skipping model download');
+            if (onProgress) onProgress(100);
+            this.finishInit();
+            return;
+        }
+
+        console.log('⚠️ Chrome Translator API not available - loading fallback model');
+
+        if (this.translator) {
+             if (onProgress) onProgress(100);
+             return;
+        }
+
+        if (this.isLoading) {
+             this.progressCallback = onProgress || null;
+             return;
+        }
+
+        this.isLoading = true;
+        this.progressCallback = onProgress || null;
+
+        const targetModelId = this.currentModelType === 'opus' ? this.opusModelId : this.nllbModelId;
+        const isQuantized = this.currentModelType === 'opus';
+
+        // Proper WebGPU detection: Actually check if adapter is available
+        let webgpuAvailable = false;
+        if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+            try {
+                const adapter = await (navigator as any).gpu.requestAdapter();
+                webgpuAvailable = adapter !== null;
+                if (!webgpuAvailable) {
+                    console.log('🔍 WebGPU API present but no adapter available, using WASM');
+                }
+            } catch {
+                console.log('🔍 WebGPU check failed, using WASM');
+            }
+        }
+
+        // Only try WebGPU if adapter is actually available
+        const devicesToTry: ('webgpu' | 'wasm')[] = webgpuAvailable ? ['webgpu', 'wasm'] : ['wasm'];
+
+        for (const device of devicesToTry) {
+            try {
+                if (this.progressCallback) this.progressCallback(0);
+                console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
+
+                this.activeModelId = targetModelId;
+
+                // Configure ONNX session options based on device
+                // This ensures onnxruntime-web doesn't try WebGPU when we want WASM
+                const sessionOptions = device === 'wasm' ? {
+                    executionProviders: ['wasm'],
+                } : undefined;
+
+                let model, tokenizer;
+
+                if (isQuantized) {
+                    model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
+                        quantized: true,
+                        device: device,
+                        session_options: sessionOptions,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    } as any);
+
+                    tokenizer = await AutoTokenizer.from_pretrained(targetModelId, {
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    });
+                }
+
+                if (isQuantized && model && tokenizer) {
+                     this.translator = await pipeline('translation', targetModelId, {
+                        model: model,
+                        tokenizer: tokenizer,
+                        device: device,
+                        session_options: sessionOptions,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    } as any);
+                } else {
+                    // Standard loading (NLLB)
+                    this.translator = await pipeline('translation', targetModelId, {
+                        device: device,
+                        session_options: sessionOptions,
+                        progress_callback: (data: any) => this.handleProgress(data),
+                    });
+                }
+
+                this.activeDevice = device;
+                this.finishInit();
+                return;
+
+            } catch (e: any) {
+                const errorMsg = e?.message || String(e);
+                const errorCode = String(e?.code || e);
+
+                const isWebGPUError = errorMsg.includes('webgpu') ||
+                                      errorMsg.includes('GPU') ||
+                                      errorMsg.includes('adapter') ||
+                                      errorMsg.includes('backend') ||
+                                      errorCode.includes('3762476112'); // Known ONNX WebGPU error
+
+                const isCacheCorruption = errorMsg.includes('Corruption') ||
+                                          errorMsg.includes('checksum') ||
+                                          errorMsg.includes('corrupted');
+
+                // If cache corruption detected, try clearing cache and retry once
+                if (isCacheCorruption) {
+                    console.warn(`⚠️ Cache corruption detected, clearing cache...`);
+                    await this.clearModelCache();
+                    // Don't retry automatically - let user trigger reload
+                    this.isLoading = false;
+                    throw new Error(`Cache corruption detected. Please refresh the page to re-download the model.`);
+                }
+
+                // If WebGPU failed and we have WASM fallback, try it
+                if (device === 'webgpu' && devicesToTry.includes('wasm') && isWebGPUError) {
+                    console.warn(`⚠️ WebGPU failed, falling back to WASM...`, errorMsg);
+                    continue; // Try WASM
+                }
+
+                // If WASM also failed or it's a different error, throw
+                console.error(`❌ FAILED to load ${this.currentModelType} Model with ${device}.`, e);
+                this.isLoading = false;
+                throw new Error(`Failed to load ${this.currentModelType} model.`);
+            }
+        }
+
+        // Should not reach here, but just in case
+        this.isLoading = false;
+        throw new Error(`Failed to load ${this.currentModelType} model - no backends available.`);
+    }
+
+    // Clear model cache (IndexedDB for transformers.js)
+    private async clearModelCache(): Promise<void> {
+        try {
+            // Clear Cache API
+            if ('caches' in window) {
+                const keys = await caches.keys();
+                for (const key of keys) {
+                    if (key.includes('transformers') || key.includes('onnx')) {
+                        await caches.delete(key);
+                        console.log(`🗑️ Cleared cache: ${key}`);
+                    }
+                }
+            }
+
+            // Clear IndexedDB for transformers
+            const databases = await indexedDB.databases?.() || [];
+            for (const db of databases) {
+                if (db.name && (db.name.includes('transformers') || db.name.includes('onnx'))) {
+                    indexedDB.deleteDatabase(db.name);
+                    console.log(`🗑️ Cleared IndexedDB: ${db.name}`);
+                }
+            }
+
+            console.log('✅ Model cache cleared');
+        } catch (e) {
+            console.error('Failed to clear cache:', e);
+        }
+    }
+
+    private handleProgress(data: any) {
+        // Log cache status
+        if (data.status === 'download') {
+            console.log(`📥 Downloading: ${data.file} (not cached)`);
+        } else if (data.status === 'cached') {
+            console.log(`✅ Loaded from cache: ${data.file}`);
+        }
+
+        if (data.status === 'progress' && this.progressCallback) {
+            const prog = data.progress || 0;
+            this.progressCallback(Math.round(prog));
+        }
+    }
+
+    private finishInit() {
+        this.isLoading = false;
+        if (this.progressCallback) this.progressCallback(100);
+        console.log(`👻 Ghost Translator: Ready using ${this.activeModelId} (${this.activeDevice?.toUpperCase() || 'unknown'})`);
+    }
+
+    // Convert UI language names to Model Codes
+    setLanguages(source: string, target: string) {
+        // Map common names to NLLB codes (Flores-200 format)
+        const codeMap: Record<string, string> = {
+            'Norwegian': 'nob_Latn',
+            'Ukrainian': 'ukr_Cyrl',
+            'English': 'eng_Latn',
+            'German': 'deu_Latn',
+            'Spanish': 'spa_Latn',
+            'French': 'fra_Latn',
+            'Russian': 'rus_Cyrl',
+            'Polish': 'pol_Latn'
+        };
+
+        // BCP-47 codes for Chrome Translator API
+        const bcp47Map: Record<string, string> = {
+            'Norwegian': 'no',
+            'Ukrainian': 'uk',
+            'English': 'en',
+            'German': 'de',
+            'Spanish': 'es',
+            'French': 'fr',
+            'Russian': 'ru',
+            'Polish': 'pl'
+        };
+
+        this.sourceLang = codeMap[source] || 'eng_Latn';
+        this.targetLang = codeMap[target] || 'eng_Latn';
+
+        // Set BCP-47 codes for Chrome API
+        const newSourceLang = bcp47Map[source] || 'en';
+        const newTargetLang = bcp47Map[target] || 'en';
+
+        // Reset Chrome translator if languages changed
+        if (this.sourceLanguageName !== newSourceLang || this.targetLanguageName !== newTargetLang) {
+            this.destroyChromeTranslator();
+        }
+
+        this.sourceLanguageName = newSourceLang;
+        this.targetLanguageName = newTargetLang;
+
+        // Sync Google NMT languages
+        googleTranslateNMT.setLanguages(source, target);
+    }
+
+    // Split text into chunks of CHUNK_SIZE words
+    private splitIntoChunks(text: string): string[] {
+        const words = text.trim().split(/\s+/);
+        const chunks: string[] = [];
+        for (let i = 0; i < words.length; i += LocalTranslator.CHUNK_SIZE) {
+            chunks.push(words.slice(i, i + LocalTranslator.CHUNK_SIZE).join(' '));
+        }
+        return chunks;
+    }
+
+    // Translate a single chunk (internal, no caching logic)
+    private async translateSingleChunk(chunk: string): Promise<string> {
+        if (!chunk.trim()) return '';
+
+        const chunkStart = performance.now();
+        try {
+            let output;
+            if (this.activeModelId.includes('nllb')) {
+                output = await this.translator(chunk, {
+                    src_lang: this.sourceLang,
+                    tgt_lang: this.targetLang
+                });
+            } else {
+                output = await this.translator(chunk);
+            }
+
+            const result = Array.isArray(output) ? output[0] : output;
+            const chunkMs = performance.now() - chunkStart;
+            const modelName = this.activeModelId.includes('nllb') ? 'NLLB' : 'OPUS';
+            debugLogger.log(`${modelName}_CHUNK`, chunk.substring(0, 30), chunkMs, chunk.split(/\s+/).length);
+            return result?.translation_text || result?.generated_text || "⚠️";
+        } catch (e) {
+            console.error("❌ [GHOST] Chunk translation error", e);
+            return "❌";
+        }
+    }
+
+    // Clear cache (call when switching languages or models)
+    clearCache() {
+        this.chunkCache.clear();
+        this.incrementalCache = { originalText: '', translatedText: '' };
+    }
+
+    // OPTIMIZED: Translate phrase using chunked approach with caching
+    // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
+    // onProgress callback: Called after each chunk with partial translation
+    async translatePhraseChunked(
+        text: string,
+        forceFullTranslate = false,
+        onProgress?: (partialTranslation: string) => void
+    ): Promise<TranslatedWord[]> {
+        if (!text || !text.trim()) {
+            return [];
+        }
+
+        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
+        // INCREMENTAL CACHE: If text starts with previously translated prefix,
+        // only translate the new suffix and concatenate (keeps latency ~1-50ms)
+        const cache = this.incrementalCache;
+        if (cache.originalText && text.startsWith(cache.originalText) && text !== cache.originalText) {
+            const suffix = text.slice(cache.originalText.length).trim();
+            if (suffix) {
+                const suffixStart = performance.now();
+                const suffixResult = await this.translateWithChrome(suffix);
+                if (suffixResult !== null) {
+                    const fullTranslation = cache.translatedText + ' ' + suffixResult;
+                    const processedResult = glossaryProcessor.processTranslation(fullTranslation);
+                    // Update cache with full text
+                    this.incrementalCache = { originalText: text, translatedText: fullTranslation };
+                    debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - suffixStart, text.split(/\s+/).length);
+                    if (onProgress) onProgress(processedResult);
+                    return [{ original: text, ghostTranslation: processedResult, status: 'ghost' }];
+                }
+            }
+        }
+
+        const chromeStart = performance.now();
+        const chromeResult = await this.translateWithChrome(text);
+        if (chromeResult !== null) {
+            // POST-PROCESSING: Apply IT glossary
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            // Update incremental cache
+            this.incrementalCache = { originalText: text, translatedText: chromeResult };
+            debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - chromeStart, text.split(/\s+/).length);
+            if (onProgress) onProgress(processedResult);
+            return [{
+                original: text,
+                ghostTranslation: processedResult,
+                status: 'ghost'
+            }];
+        }
+
+        // === PRIORITY 2: Google Cloud NMT API (50-200ms, high quality) ===
+        if (googleTranslateNMT.isAvailable()) {
+            const nmtStart = performance.now();
+            const nmtResult = await googleTranslateNMT.translate(text);
+            if (nmtResult !== null) {
+                const processedResult = glossaryProcessor.processTranslation(nmtResult);
+                debugLogger.log('GNMT_OK', text.substring(0, 40), performance.now() - nmtStart, text.split(/\s+/).length);
+                if (onProgress) onProgress(processedResult);
+                return [{
+                    original: text,
+                    ghostTranslation: processedResult,
+                    status: 'ghost'
+                }];
+            }
+        }
+
+        // === PRIORITY 3: Direct OPUS model (56MB, 300-2000ms, offline fallback) ===
+        if (!this.translator) {
+            if (!this.isLoading) this.initialize();
+            return [{
+                original: text,
+                ghostTranslation: "⏳...",
+                status: 'ghost'
+            }];
+        }
+
+        const chunks = this.splitIntoChunks(text);
+        const translations: string[] = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+
+            // Check cache first
+            if (!forceFullTranslate && this.chunkCache.has(chunk)) {
+                translations.push(this.chunkCache.get(chunk)!);
+
+                // PROGRESSIVE UPDATE: Show cached chunks immediately
+                if (onProgress) {
+                    const partialTranslation = translations.join(' ');
+                    onProgress(partialTranslation);
+                }
+            } else {
+                // Translate and cache
+                const translated = await this.translateSingleChunk(chunk);
+                this.chunkCache.set(chunk, translated);
+
+                // Limit cache size
+                if (this.chunkCache.size > LocalTranslator.MAX_CACHE_SIZE) {
+                    const firstKey = this.chunkCache.keys().next().value;
+                    if (firstKey) this.chunkCache.delete(firstKey);
+                }
+
+                translations.push(translated);
+
+                // PROGRESSIVE UPDATE: Call onProgress after EACH translated chunk
+                if (onProgress) {
+                    const partialTranslation = translations.join(' ');
+                    onProgress(partialTranslation);
+                }
+            }
+        }
+
+        const fullTranslation = translations.join(' ');
+
+        // POST-PROCESSING: Apply IT glossary for correct terminology
+        const processedTranslation = glossaryProcessor.processTranslation(fullTranslation);
+
+        return [{
+            original: text,
+            ghostTranslation: processedTranslation,
+            status: 'ghost'
+        }];
+    }
+
+    // Full phrase translation (used for finalized blocks)
+    // Priority: 1. Chrome API (instant) → 2. Pivot (NO→EN→UK) → 3. Direct Transformers.js
+    async translatePhrase(text: string): Promise<TranslatedWord[]> {
+        if (!text || !text.trim()) {
+            return [];
+        }
+
+        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
+        const chromeResult = await this.translateWithChrome(text);
+        if (chromeResult !== null) {
+            // POST-PROCESSING: Apply IT glossary + confidence filter
+            const processedResult = glossaryProcessor.processTranslation(chromeResult);
+            const filteredResult = this.applyConfidenceFilter(text, processedResult);
+            return [{
+                original: text,
+                ghostTranslation: filteredResult,
+                status: 'ghost'
+            }];
+        }
+
+        // === PRIORITY 2: Direct OPUS (fast) — Pivot skipped, too slow on WASM ===
+        if (!this.translator) {
+             if (!this.isLoading) this.initialize();
+             return [{
+                 original: text,
+                 ghostTranslation: "⏳...",
+                 status: 'ghost'
+             }];
+        }
+
+        try {
+            let output;
+
+            if (this.activeModelId.includes('nllb')) {
+                 output = await this.translator(text, {
+                    src_lang: this.sourceLang,
+                    tgt_lang: this.targetLang
+                });
+            } else {
+                output = await this.translator(text);
+            }
+
+            const result = Array.isArray(output) ? output[0] : output;
+            let translatedText = result?.translation_text || result?.generated_text || "";
+
+            if (!translatedText) translatedText = "⚠️";
+
+            // POST-PROCESSING: Apply IT glossary + confidence filter
+            const processedText = glossaryProcessor.processTranslation(translatedText);
+            const filteredText = this.applyConfidenceFilter(text, processedText);
+
+            return [{
+                original: text,
+                ghostTranslation: filteredText,
+                status: 'ghost'
+            }];
+
+        } catch (e) {
+            console.error("❌ [GHOST] Translation error", e);
+            return [{ original: text, ghostTranslation: "❌", status: 'ghost' }];
+        }
+    }
+
+    public getStatus() {
+        const pivotStatus = pivotTranslator.getStatus();
+        return {
+            isLoading: this.isLoading,
+            isReady: !!this.translator || !!this.chromeTranslator || googleTranslateNMT.isAvailable() || pivotTranslator.isReady(),
+            useChromeAPI: this.chromeTranslatorAvailable === true,
+            useGoogleNMT: googleTranslateNMT.isAvailable(),
+            chromeChecked: this.chromeTranslatorAvailable !== null,
+            device: this.activeDevice, // 'webgpu' | 'wasm' | null
+            modelType: this.currentModelType,
+            // Pivot status
+            usePivot: this.usePivot,
+            pivotReady: pivotTranslator.isReady(),
+            pivotNoToEnReady: pivotStatus.noToEnReady,
+            pivotEnToUkReady: pivotStatus.enToUkReady,
+            // Confidence status
+            useConfidenceFilter: this.useConfidenceFilter,
+            lastConfidenceScore: this.lastConfidenceScore
+        };
+    }
+
+    /**
+     * Apply confidence filter to translation result
+     * Returns filtered text and updates lastConfidenceScore
+     */
+    private applyConfidenceFilter(original: string, translation: string): string {
+        if (!this.useConfidenceFilter) {
+            return translation;
+        }
+
+        const result = confidenceFilter.calculate(original, translation);
+        this.lastConfidenceScore = result.confidence;
+
+        if (!result.isAcceptable) {
+            console.log(`⚠️ [Confidence] Low quality (${result.confidence}%): ${result.reasons.join(', ')}`);
+            // Return translation anyway but log warning
+            // In future, could show visual indicator or retry
+        }
+
+        return translation;
+    }
+
+    /**
+     * Get last confidence score
+     */
+    public getLastConfidenceScore(): number {
+        return this.lastConfidenceScore;
+    }
+
+    /**
+     * Enable or disable confidence filtering
+     */
+    public setConfidenceFilterEnabled(enabled: boolean): void {
+        this.useConfidenceFilter = enabled;
+        console.log(`📊 [Confidence] Filter ${enabled ? 'Enabled' : 'Disabled'}`);
+    }
+
+    // Check if using native Chrome API (for UI display)
+    public isUsingChromeAPI(): boolean {
+        return this.chromeTranslatorAvailable === true;
+    }
+
+    // ========== PIVOT CONTROL ==========
+
+    /**
+     * Enable or disable pivot translation
+     */
+    public setPivotEnabled(enabled: boolean): void {
+        this.usePivot = enabled;
+        console.log(`🔄 [Pivot] ${enabled ? 'Enabled' : 'Disabled'}`);
+    }
+
+    /**
+     * Check if pivot is enabled
+     */
+    public isPivotEnabled(): boolean {
+        return this.usePivot;
+    }
+
+    /**
+     * Check if pivot is ready to use
+     */
+    public isPivotReady(): boolean {
+        return pivotTranslator.isReady();
+    }
+
+    /**
+     * Initialize pivot translator
+     */
+    public async initPivot(onProgress?: (stage: string, progress: number) => void): Promise<boolean> {
+        const result = await pivotTranslator.initialize(onProgress);
+        this.pivotInitialized = result;
+        return result;
+    }
+
+}
+
+export const localTranslator = new LocalTranslator();

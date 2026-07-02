@@ -94,12 +94,12 @@ const App: React.FC = () => {
   // GOOGLE AUTH HOOK: Optional sign-in for cloud sync
   const googleAuth = useGoogleAuth();
 
-  // AUDIO PASSTHROUGH HOOK: Routes VB-Cable audio to selected output device
-  const isVBCablePreset = ['headphones-youtube', 'headphones-interview'].includes(context.activeAudioPreset);
+  // AUDIO PASSTHROUGH HOOK: Routes audio from input device to selected output device
+  // Enabled for any preset that has a listenThroughDeviceId (VB-Cable, phone-aux, etc.)
   const audioPassthrough = useAudioPassthrough({
     inputDeviceId: context.audioDeviceId,
     outputDeviceId: context.listenThroughDeviceId || '',
-    enabled: isVBCablePreset && !!context.listenThroughDeviceId,
+    enabled: !!context.audioDeviceId && !!context.listenThroughDeviceId,
   });
 
   // STREAMING MODE HOOK: Manages accumulated text and translations
@@ -1052,25 +1052,27 @@ const App: React.FC = () => {
         if (isRestartingRef.current) return;
         isRestartingRef.current = true;
         try {
-          let track = speechStreamRef.current?.getAudioTracks()[0];
+          const deviceId = contextRef.current.audioDeviceId;
+          let track: MediaStreamTrack | undefined;
 
-          // If track is dead, recreate from selected device
-          if (!track || track.readyState !== 'live') {
-            const deviceId = contextRef.current.audioDeviceId;
-            if (deviceId) {
-              try {
-                if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
-                const stream = await navigator.mediaDevices.getUserMedia({
-                  audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
-                });
-                speechStreamRef.current = stream;
-                track = stream.getAudioTracks()[0];
-                addDebug(`▶️ recreated track: ${track.label.slice(0, 30)}`);
-              } catch (e) {
-                addDebug(`▶️ track recreate failed, using default`);
-                track = undefined;
-              }
+          // ALWAYS recreate track from device — Chrome invalidates tracks after recognition.stop()
+          if (deviceId) {
+            try {
+              if (speechStreamRef.current) speechStreamRef.current.getTracks().forEach(t => t.stop());
+              const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { deviceId: { exact: deviceId }, echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+              });
+              speechStreamRef.current = stream;
+              track = stream.getAudioTracks()[0];
+              addDebug(`▶️ recreated track: ${track.label.slice(0, 30)}`);
+            } catch (e) {
+              addDebug(`▶️ track recreate failed (device=${deviceId.slice(0,8)}): ${(e as Error).message}`);
+              // Try existing track as fallback
+              track = speechStreamRef.current?.getAudioTracks()[0];
+              if (track?.readyState !== 'live') track = undefined;
             }
+          } else {
+            addDebug(`▶️ no deviceId in context — will use default mic`);
           }
 
           // Reset delta tracking — new recognition instance starts with fresh event.results

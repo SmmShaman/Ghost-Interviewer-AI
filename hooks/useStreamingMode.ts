@@ -978,6 +978,51 @@ export function useStreamingMode(
         }
     }, [executeConversationAnalysis]);
 
+    // === OVERLAP DEDUP ===
+
+    /**
+     * Detect and strip text that overlaps with the end of existing text.
+     * After recognition restart, default mic may re-recognize audio from speakers,
+     * producing chunks where a contiguous sequence matches the existing text tail.
+     */
+    const stripOverlapWithExisting = (existingText: string, newText: string): string => {
+        if (!existingText) return newText;
+
+        const existingWords = existingText.split(/\s+/).filter(w => w);
+        const newWords = newText.split(/\s+/).filter(w => w);
+
+        if (existingWords.length < 4 || newWords.length < 4) return newText;
+
+        // Find the longest contiguous sequence in newWords that matches
+        // a suffix of existingWords (the tail of already-committed text)
+        const maxOverlap = Math.min(existingWords.length, newWords.length, 20);
+
+        for (let len = maxOverlap; len >= 4; len--) {
+            const existTail = existingWords.slice(-len);
+
+            // Search for existTail anywhere within newWords
+            for (let start = 0; start <= newWords.length - len; start++) {
+                let match = true;
+                for (let j = 0; j < len; j++) {
+                    if (newWords[start + j].toLowerCase() !== existTail[j].toLowerCase()) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    // Strip the overlapping portion, keep words before and after
+                    const before = newWords.slice(0, start);
+                    const after = newWords.slice(start + len);
+                    const result = [...before, ...after].join(' ');
+                    debugLogger.log('DEDUP', `stripped ${len}w overlap at pos ${start}`);
+                    return result;
+                }
+            }
+        }
+
+        return newText;
+    };
+
     // === PUBLIC API ===
 
     /**
@@ -991,16 +1036,24 @@ export function useStreamingMode(
         const trimmedNew = cleanSpeechText(newWords);
         if (!trimmedNew) return;
 
+        // OVERLAP DEDUP: After recognition restart, default mic may re-recognize
+        // audio from speakers, producing overlapping text. Strip duplicate sequences.
+        const deduped = stripOverlapWithExisting(originalTextRef.current, trimmedNew);
+        if (!deduped.trim()) {
+            debugLogger.log('DEDUP', `stripped entire chunk as duplicate: "${trimmedNew.slice(0, 40)}..."`);
+            return;
+        }
+
         // METRICS
-        const newWordCount = trimmedNew.split(/\s+/).length;
+        const newWordCount = deduped.split(/\s+/).length;
         metricsCollector.recordWordsReceived(newWordCount);
-        debugLogger.log('WORDS_IN', trimmedNew, undefined, newWordCount);
+        debugLogger.log('WORDS_IN', deduped, undefined, newWordCount);
 
         // Update original text — just append, no paragraph logic
         setState(prev => {
             const newOriginal = prev.originalText
-                ? `${prev.originalText} ${trimmedNew}`
-                : trimmedNew;
+                ? `${prev.originalText} ${deduped}`
+                : deduped;
             const totalWords = newOriginal.split(/\s+/).length;
 
             originalTextRef.current = newOriginal;
