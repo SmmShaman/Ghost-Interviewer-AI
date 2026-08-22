@@ -836,14 +836,22 @@ function anthropicHeaders(env: Env): Record<string, string> | null {
   return null;
 }
 
+// Subscription OAuth tokens only unlock Opus/Sonnet when the FIRST system block is
+// exactly the Claude Code identity line (verified 2026-08-22: without it every
+// non-Haiku model answers an instant `rate_limit_error`). The app prompt follows
+// as a second block. Harmless with an API key, so it is always sent.
+const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 function buildAnthropicBody(body: AiRequestBody, stream: boolean): Record<string, unknown> {
+  const system: { type: 'text'; text: string }[] = [{ type: 'text', text: CLAUDE_CODE_IDENTITY }];
+  if (body.systemInstruction) system.push({ type: 'text', text: body.systemInstruction });
   const out: Record<string, unknown> = {
     model: body.model,
     max_tokens: body.config?.maxOutputTokens ?? 4096,
+    system,
     messages: [{ role: 'user', content: body.prompt }],
     stream,
   };
-  if (body.systemInstruction) out.system = body.systemInstruction;
   // Haiku 4.5 predates adaptive thinking; every newer model runs adaptive thinking
   // with a low default effort — this is a real-time interview aid, latency matters.
   if (!body.model.includes('haiku-4-5')) {
