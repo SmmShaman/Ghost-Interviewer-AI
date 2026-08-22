@@ -30,3 +30,6 @@ debug-logs.txt
 *.njsproj
 *.sln
 *.sw?
+
+# wrangler dry-run output
+backend/worker/wbuild/
