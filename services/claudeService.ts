@@ -297,7 +297,8 @@ ${modeSpecificGuidelines}
 }
 
 // CLAUDE IMPLEMENTATION via backend proxy (credentials never leave the server)
-async function generateViaClaude(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
+// Live translation runs on the fast model (latency first); answers/analysis on the main model.
+async function generateViaClaude(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal, model: string = CLAUDE_MODEL) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let fullText = "";
@@ -305,7 +306,7 @@ async function generateViaClaude(prompt: string, onUpdate: (data: any) => void, 
     const UPDATE_INTERVAL = 100;
 
     try {
-        for await (const text of streamContent(CLAUDE_MODEL, prompt, { effort: 'low', maxOutputTokens: 4096 }, signal)) {
+        for await (const text of streamContent(model, prompt, { effort: 'low', maxOutputTokens: 4096 }, signal)) {
             if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
             fullText += text;
@@ -830,7 +831,7 @@ export const generateStreamingTranslation = async (
             }
         };
 
-        await generateViaClaude(prompt, onUpdate, signal);
+        await generateViaClaude(prompt, onUpdate, signal, CLAUDE_MODEL_FAST);
 
         // Try to parse LLM-based intent first
         let intent = parseLLMIntent(fullResponseText);

@@ -956,7 +956,7 @@ export function useStreamingMode(
                 ...prev,
                 generatedAnswer: result.answer,
                 answerTranslation: result.answerTranslation,
-                answeredQuestions: [...prev.answeredQuestions, {
+                answeredQuestions: [...(prev.answeredQuestions ?? []), {
                     question,
                     answer: result.answer,
                     translation: result.answerTranslation
@@ -1179,6 +1179,7 @@ export function useStreamingMode(
             conversationLog: '',
             lastDetectedQuestion: '',
             isProcessingConversation: false,
+            answeredQuestions: [],
             isGeneratingAnswer: false,
             streamingAnswer: '',
             streamingAnswerTranslation: '',
