@@ -432,7 +432,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
       if (!files || files.length === 0) return;
 
       // Filter valid files first
-      const validFiles = Array.from(files).filter((file) => {
+      const validFiles = Array.from(files as ArrayLike<File>).filter((file: File) => {
           if (file.size > MAX_FILE_SIZE) {
               alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 8MB per file.`);
               return false;

@@ -87,11 +87,28 @@ class LocalTranslator {
 
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
 
+    // Chrome's Translator.availability()/canTranslate() can hang forever when the
+    // on-device translation component is missing (headless Chromium, some VMs).
+    // Without a timeout the app would stay on "Downloading model 0%" with all
+    // mode buttons disabled. Fall back to the local model instead.
+    private static readonly CHROME_CHECK_TIMEOUT_MS = 5000;
+
+    private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+            promise.then(
+                (v) => { clearTimeout(timer); resolve(v); },
+                (e) => { clearTimeout(timer); reject(e); }
+            );
+        });
+    }
+
     async checkChromeTranslator(): Promise<boolean> {
         if (this.chromeTranslatorAvailable !== null) {
             return this.chromeTranslatorAvailable;
         }
 
+        const T = LocalTranslator.CHROME_CHECK_TIMEOUT_MS;
         try {
             if (!('Translator' in window) || !window.Translator) {
                 console.log('🌐 Chrome Translator API: Not available (no Translator object)');
@@ -104,14 +121,14 @@ class LocalTranslator {
             // Chrome 141+: use availability() instead of deprecated canTranslate()
             const tr = window.Translator as any;
             if (typeof tr.availability === 'function') {
-                const status = await tr.availability(pair);
+                const status = await this.withTimeout(tr.availability(pair), T, 'Translator.availability');
                 console.log(`🌐 Chrome Translator: availability(${this.sourceLanguageName}→${this.targetLanguageName}) = "${status}"`);
                 debugLogger.log('CHROME_CHECK', `availability(${this.sourceLanguageName}→${this.targetLanguageName}) = "${status}"`);
 
                 if (status === 'unavailable') {
                     // Try 'nb' (Bokmål) if 'no' is unavailable
                     if (this.sourceLanguageName === 'no') {
-                        const nbStatus = await tr.availability({ sourceLanguage: 'nb', targetLanguage: this.targetLanguageName });
+                        const nbStatus = await this.withTimeout(tr.availability({ sourceLanguage: 'nb', targetLanguage: this.targetLanguageName }), T, 'Translator.availability(nb)');
                         console.log(`🌐 Chrome Translator: availability(nb→${this.targetLanguageName}) = "${nbStatus}"`);
                         if (nbStatus !== 'unavailable') {
                             this.sourceLanguageName = 'nb';
@@ -129,7 +146,7 @@ class LocalTranslator {
 
             // Fallback: legacy canTranslate() for Chrome 138-140
             if (typeof tr.canTranslate === 'function') {
-                const support = await tr.canTranslate(pair);
+                const support = await this.withTimeout(tr.canTranslate(pair), T, 'Translator.canTranslate');
                 console.log(`🌐 Chrome Translator: canTranslate(${this.sourceLanguageName}→${this.targetLanguageName}) = "${support}"`);
                 if (support === 'no') {
                     this.chromeTranslatorAvailable = false;
@@ -836,4 +853,4 @@ class LocalTranslator {
 
 }
 
-export const localTranslator = new LocalTranslator();
+export const localTranslator = new LocalTranslator();

@@ -32,7 +32,9 @@ class DebugLogger {
     private flushTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly FLUSH_INTERVAL_MS = 2000;
     private readonly API_URL = '/api/debug-logs';
-    private fileAvailable: boolean = true; // assume dev server is running
+    // File sync only exists on the Vite dev server (see debugLogPlugin in vite.config.ts).
+    // In production the SPA redirect answers 200 for any path, so we must not rely on errors.
+    private fileAvailable: boolean = import.meta.env.DEV;
 
     constructor() {
         this.expose();
@@ -217,6 +219,8 @@ class DebugLogger {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, data })
+        }).then((res) => {
+            if (!res.ok) this.fileAvailable = false;
         }).catch(() => {
             // Dev server not running (production) — disable file sync silently
             this.fileAvailable = false;
