@@ -98,6 +98,7 @@ Toggle via `useStreamingUI` state (default: true for SIMPLE mode).
 ### Anthropic Claude (via Cloudflare Worker)
 - Frontend never holds LLM credentials. `claudeService.ts` calls `POST {VITE_API_URL}/api/ai/generate` and `/api/ai/stream` on `ghost.vitalii.no` with the user's Google id token.
 - Worker (`backend/worker/src/index.ts`) calls `https://api.anthropic.com/v1/messages`. Auth: `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription OAuth token → `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20`) or `ANTHROPIC_API_KEY` (`x-api-key`). Set with `npx wrangler secret put <NAME>` in `backend/worker`.
+- Subscription OAuth tokens serve Opus/Sonnet ONLY when the first `system` block is exactly `You are Claude Code, Anthropic's official CLI for Claude.` — `buildAnthropicBody()` always prepends it (app prompt = 2nd block). Without it every non-Haiku model returns an instant `rate_limit_error`.
 - Models: `claude-opus-5` (main: translation, analysis, answers; adaptive thinking, `effort: low` for latency) and `claude-haiku-4-5` (fast helpers: intent, refinement, topic log). Override with `VITE_CLAUDE_MODEL` / `VITE_CLAUDE_MODEL_FAST`. Worker only accepts `claude-*` model ids.
 - Stream protocol between Worker and frontend is unchanged: SSE lines `data: {"text": "..."}` then `data: [DONE]`; `data: {"error": "..."}` aborts.
 
