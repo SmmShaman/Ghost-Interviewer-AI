@@ -4,7 +4,10 @@ interface Env {
   DATABASE_URL: string;
   ENVIRONMENT: string;
   GOOGLE_TRANSLATE_KEY: string;
-  GEMINI_API_KEY: string;
+  // Anthropic auth: either a Claude subscription OAuth token (from `claude setup-token`)
+  // or a console API key. The OAuth token takes precedence when both are set.
+  CLAUDE_CODE_OAUTH_TOKEN?: string;
+  ANTHROPIC_API_KEY?: string;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -783,66 +786,74 @@ async function syncUp(sql: SqlFunction, userId: string, request: Request): Promi
   return jsonResponse({ synced: results });
 }
 
-// ─── Gemini AI Proxy ─────────────────────────────────────────────────────────
+// ─── Anthropic (Claude) AI Proxy ─────────────────────────────────────────────
+// Credentials never leave the Worker. Auth is either a Claude subscription OAuth
+// token (Authorization: Bearer + oauth beta header) or a console API key.
 
-// POST /api/ai/generate — non-streaming Gemini proxy (key stays server-side)
-async function geminiGenerate(request: Request, env: Env): Promise<Response> {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return jsonResponse({ error: 'Authorization required' }, 401);
+const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_VERSION = '2023-06-01';
+const ALLOWED_MODEL = /^claude-[a-z0-9-]+$/;
+// Subscription OAuth tokens are rate-limited per model tier; when the main model
+// answers 429 we retry once on the fast model so the interview aid keeps working.
+const FALLBACK_MODEL = 'claude-haiku-4-5';
+
+async function callAnthropic(headers: Record<string, string>, body: AiRequestBody, stream: boolean): Promise<Response> {
+  const attempt = (model: string) => fetch(ANTHROPIC_API, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(buildAnthropicBody({ ...body, model }, stream)),
+  });
+  let resp = await attempt(body.model);
+  if (resp.status === 429 && body.model !== FALLBACK_MODEL) {
+    console.warn(`Anthropic 429 on ${body.model}, retrying with ${FALLBACK_MODEL}`);
+    resp = await attempt(FALLBACK_MODEL);
   }
-  const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
-  if (!tokenInfo) {
-    return jsonResponse({ error: 'Invalid token' }, 401);
-  }
-
-  if (!env.GEMINI_API_KEY) {
-    return jsonResponse({ error: 'AI service not configured' }, 503);
-  }
-
-  const body = await request.json() as {
-    model: string;
-    prompt: string;
-    systemInstruction?: string;
-    config?: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number };
-  };
-
-  if (!body.model || !body.prompt) {
-    return jsonResponse({ error: 'model and prompt are required' }, 400);
-  }
-
-  const geminiBody: any = {
-    contents: [{ role: 'user', parts: [{ text: body.prompt }] }],
-  };
-
-  if (body.config) {
-    const genConfig: any = {};
-    if (body.config.temperature !== undefined) genConfig.temperature = body.config.temperature;
-    if (body.config.maxOutputTokens !== undefined) genConfig.maxOutputTokens = body.config.maxOutputTokens;
-    if (body.config.thinkingBudget !== undefined) genConfig.thinkingConfig = { thinkingBudget: body.config.thinkingBudget };
-    geminiBody.generationConfig = genConfig;
-  }
-
-  if (body.systemInstruction) {
-    geminiBody.systemInstruction = { role: 'user', parts: [{ text: body.systemInstruction }] };
-  }
-
-  const geminiResp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${body.model}:generateContent?key=${env.GEMINI_API_KEY}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody) }
-  );
-
-  const data = await geminiResp.json() as any;
-  if (!geminiResp.ok) {
-    return jsonResponse({ error: 'Gemini API error', details: data?.error?.message }, geminiResp.status);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return jsonResponse({ text });
+  return resp;
 }
 
-// POST /api/ai/stream — streaming Gemini proxy via SSE
-async function geminiStream(request: Request, env: Env): Promise<Response> {
+interface AiRequestBody {
+  model: string;
+  prompt: string;
+  systemInstruction?: string;
+  config?: { maxOutputTokens?: number; effort?: 'low' | 'medium' | 'high' };
+}
+
+function anthropicHeaders(env: Env): Record<string, string> | null {
+  const base: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': ANTHROPIC_VERSION,
+  };
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return {
+      ...base,
+      'Authorization': `Bearer ${env.CLAUDE_CODE_OAUTH_TOKEN}`,
+      'anthropic-beta': 'oauth-2025-04-20',
+    };
+  }
+  if (env.ANTHROPIC_API_KEY) {
+    return { ...base, 'x-api-key': env.ANTHROPIC_API_KEY };
+  }
+  return null;
+}
+
+function buildAnthropicBody(body: AiRequestBody, stream: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    model: body.model,
+    max_tokens: body.config?.maxOutputTokens ?? 4096,
+    messages: [{ role: 'user', content: body.prompt }],
+    stream,
+  };
+  if (body.systemInstruction) out.system = body.systemInstruction;
+  // Haiku 4.5 predates adaptive thinking; every newer model runs adaptive thinking
+  // with a low default effort — this is a real-time interview aid, latency matters.
+  if (!body.model.includes('haiku-4-5')) {
+    out.thinking = { type: 'adaptive' };
+    out.output_config = { effort: body.config?.effort ?? 'low' };
+  }
+  return out;
+}
+
+async function authorizeAiRequest(request: Request, env: Env): Promise<{ headers: Record<string, string>; body: AiRequestBody } | Response> {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Authorization required' }, 401);
@@ -851,41 +862,49 @@ async function geminiStream(request: Request, env: Env): Promise<Response> {
   if (!tokenInfo) {
     return jsonResponse({ error: 'Invalid token' }, 401);
   }
-
-  if (!env.GEMINI_API_KEY) {
+  const headers = anthropicHeaders(env);
+  if (!headers) {
     return jsonResponse({ error: 'AI service not configured' }, 503);
   }
-
-  const body = await request.json() as {
-    model: string;
-    prompt: string;
-    config?: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number };
-  };
-
+  const body = await request.json() as AiRequestBody;
   if (!body.model || !body.prompt) {
     return jsonResponse({ error: 'model and prompt are required' }, 400);
   }
+  if (!ALLOWED_MODEL.test(body.model)) {
+    return jsonResponse({ error: 'Unsupported model' }, 400);
+  }
+  return { headers, body };
+}
 
-  const geminiBody: any = {
-    contents: [{ role: 'user', parts: [{ text: body.prompt }] }],
-  };
+// POST /api/ai/generate — non-streaming Claude proxy
+async function claudeGenerate(request: Request, env: Env): Promise<Response> {
+  const auth = await authorizeAiRequest(request, env);
+  if (auth instanceof Response) return auth;
 
-  if (body.config) {
-    const genConfig: any = {};
-    if (body.config.temperature !== undefined) genConfig.temperature = body.config.temperature;
-    if (body.config.maxOutputTokens !== undefined) genConfig.maxOutputTokens = body.config.maxOutputTokens;
-    if (body.config.thinkingBudget !== undefined) genConfig.thinkingConfig = { thinkingBudget: body.config.thinkingBudget };
-    geminiBody.generationConfig = genConfig;
+  const resp = await callAnthropic(auth.headers, auth.body, false);
+
+  const data = await resp.json() as any;
+  if (!resp.ok) {
+    return jsonResponse({ error: 'Anthropic API error', details: data?.error?.message }, resp.status);
   }
 
-  const geminiResp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${body.model}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiBody) }
-  );
+  const text = (data.content || [])
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => b.text)
+    .join('');
+  return jsonResponse({ text, stop_reason: data.stop_reason });
+}
 
-  if (!geminiResp.ok || !geminiResp.body) {
-    const errData = await geminiResp.json().catch(() => ({})) as any;
-    return jsonResponse({ error: 'Gemini stream failed', details: errData?.error?.message }, geminiResp.status);
+// POST /api/ai/stream — streaming Claude proxy, re-emitted as `data: {"text"}` SSE
+async function claudeStream(request: Request, env: Env): Promise<Response> {
+  const auth = await authorizeAiRequest(request, env);
+  if (auth instanceof Response) return auth;
+
+  const resp = await callAnthropic(auth.headers, auth.body, true);
+
+  if (!resp.ok || !resp.body) {
+    const errData = await resp.json().catch(() => ({})) as any;
+    return jsonResponse({ error: 'Anthropic stream failed', details: errData?.error?.message }, resp.status);
   }
 
   const { readable, writable } = new TransformStream();
@@ -894,7 +913,7 @@ async function geminiStream(request: Request, env: Env): Promise<Response> {
   const decoder = new TextDecoder();
 
   (async () => {
-    const reader = geminiResp.body!.getReader();
+    const reader = resp.body!.getReader();
     let buffer = '';
     try {
       while (true) {
@@ -906,11 +925,14 @@ async function geminiStream(request: Request, env: Env): Promise<Response> {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const jsonStr = line.slice(6).trim();
-          if (!jsonStr || jsonStr === '[DONE]') continue;
+          if (!jsonStr) continue;
           try {
-            const chunk = JSON.parse(jsonStr);
-            const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            if (text) await writer.write(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+            const evt = JSON.parse(jsonStr);
+            if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ text: evt.delta.text })}\n\n`));
+            } else if (evt.type === 'error') {
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ error: evt.error?.message || 'stream error' })}\n\n`));
+            }
           } catch {}
         }
       }
@@ -975,12 +997,12 @@ export default {
         return fetch(proxyReq);
       }
 
-      // Gemini AI proxy (requires auth, key stays server-side)
+      // Claude AI proxy (requires auth, credentials stay server-side)
       if (method === 'POST' && path === '/api/ai/generate') {
-        return geminiGenerate(request, env);
+        return claudeGenerate(request, env);
       }
       if (method === 'POST' && path === '/api/ai/stream') {
-        return geminiStream(request, env);
+        return claudeStream(request, env);
       }
 
       // Translation proxy (requires auth, uses server-side API key)

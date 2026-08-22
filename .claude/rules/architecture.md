@@ -9,7 +9,7 @@ Landing Page (mode selection)
     -> Block Splitting (silence/word count/punctuation)
     -> Dual Translation:
         Stream 1: Ghost (Chrome API > Opus > NLLB) -> instant display
-        Stream 2: LLM Accumulator -> AI Queue -> Azure/Groq -> structured tags -> parsed display
+        Stream 2: LLM Accumulator -> AI Queue -> Worker proxy -> Claude -> structured tags -> parsed display
     -> Stop Session (AbortController cancels in-flight LLM)
 ```
 
@@ -39,7 +39,7 @@ Post-processing pipeline: `translation -> glossaryProcessor -> confidenceFilter`
 
 Pivot translation (NO>EN>UK) exists in `pivotTranslator.ts` but is disabled for Ghost due to WASM latency (2-12s). Used only for higher-quality translation when needed.
 
-### LLM Translation (geminiService.ts)
+### LLM Translation (claudeService.ts)
 
 LLM accumulator collects words until threshold (6-10 words or 2s pause), then queues for processing:
 - `aiQueueRef` stores queue items with question ID, response ID, target message ID
@@ -95,16 +95,11 @@ Toggle via `useStreamingUI` state (default: true for SIMPLE mode).
 
 ## API Integration
 
-### Azure OpenAI
-- Endpoint: `VITE_AZURE_ENDPOINT` (default: `https://jobbot.openai.azure.com`)
-- Deployment: `VITE_DEPLOYMENT` (default: `gpt-5.1-codex-mini`)
-- Uses `max_completion_tokens` (not `max_tokens`)
-- `sanitizeForAzure()` masks imperative phrases that trigger content filtering
-
-### Groq
-- Model: `llama-3.3-70b-versatile`
-- Standard OpenAI-compatible API
-- API key entered in UI, stored in context (localStorage)
+### Anthropic Claude (via Cloudflare Worker)
+- Frontend never holds LLM credentials. `claudeService.ts` calls `POST {VITE_API_URL}/api/ai/generate` and `/api/ai/stream` on `ghost.vitalii.no` with the user's Google id token.
+- Worker (`backend/worker/src/index.ts`) calls `https://api.anthropic.com/v1/messages`. Auth: `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription OAuth token → `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20`) or `ANTHROPIC_API_KEY` (`x-api-key`). Set with `npx wrangler secret put <NAME>` in `backend/worker`.
+- Models: `claude-opus-5` (main: translation, analysis, answers; adaptive thinking, `effort: low` for latency) and `claude-haiku-4-5` (fast helpers: intent, refinement, topic log). Override with `VITE_CLAUDE_MODEL` / `VITE_CLAUDE_MODEL_FAST`. Worker only accepts `claude-*` model ids.
+- Stream protocol between Worker and frontend is unchanged: SSE lines `data: {"text": "..."}` then `data: [DONE]`; `data: {"error": "..."}` aborts.
 
 ## Important Patterns
 
@@ -122,4 +117,3 @@ STOP button triggers:
 Dependencies loaded via CDN import maps in `index.html`, not bundled:
 - React/ReactDOM from aistudiocdn.com
 - HuggingFace Transformers from jsdelivr
-- Google GenAI from aistudiocdn.com

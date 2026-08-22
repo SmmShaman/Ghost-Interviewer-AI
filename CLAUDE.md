@@ -14,7 +14,7 @@ Real-time interview assistance app. Transcribes interviewer speech via Web Speec
 | Styling | Tailwind CSS (CDN with inline config in index.html) |
 | Local AI | Hugging Face Transformers.js (WebGPU/WASM) |
 | Native Translation | Chrome Translator API (Chrome 138+) |
-| Cloud LLM | Azure OpenAI (gpt-5.1-codex-mini) or Groq (Llama 3.3 70B) |
+| Cloud LLM | Anthropic Claude (Opus 5 main, Haiku 4.5 fast) via Cloudflare Worker proxy `ghost.vitalii.no` |
 | Speech | Web Speech API (Chrome/Edge) |
 | Knowledge Search | TF-IDF (pure TypeScript, no deps) |
 | Hosting | Netlify (auto-deploy from main) |
@@ -28,7 +28,7 @@ npm run build     # Production build
 npm run preview   # Preview production build
 ```
 
-**Environment:** Set `GEMINI_API_KEY` in `.env.local`. Azure/Groq keys configured via Vite env vars (`VITE_AZURE_API_KEY`, `VITE_GROQ_API_KEY`, etc.) or entered in the UI.
+**Environment:** LLM credentials live ONLY on the Cloudflare Worker (`backend/worker`): `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription, from `claude setup-token`) or `ANTHROPIC_API_KEY`. Frontend optional: `VITE_API_URL`, `VITE_CLAUDE_MODEL`, `VITE_CLAUDE_MODEL_FAST`.
 
 ## Directory Structure
 
@@ -56,7 +56,7 @@ components/
     Streaming*ModeLayout.tsx   # Streaming variants of each layout
 
 services/
-  geminiService.ts             # Cloud LLM (Azure/Groq): prompt construction, streaming, tag parsing
+  claudeService.ts             # Cloud LLM (Claude via Worker proxy): prompt construction, streaming, tag parsing
   localTranslator.ts           # Local translation: Chrome API > Opus > NLLB fallback chain
   pivotTranslator.ts           # Two-step NO>EN>UK via separate models
   glossaryProcessor.ts         # IT term correction with Ukrainian morphology (160+ terms)
@@ -78,7 +78,7 @@ data/it-glossary.json          # 160+ IT terms with Ukrainian inflections
 
 1. **Ghost (Local/Instant)**: Chrome Translator API > Opus model (56MB) > NLLB (600MB)
    - ~0-200ms latency, runs in-browser
-2. **LLM (Cloud/Quality)**: Azure OpenAI or Groq with structured output tags
+2. **LLM (Cloud/Quality)**: Claude (Anthropic) through the Worker proxy with structured output tags
    - `[INPUT_TRANSLATION]`, `[ANALYSIS]`, `[STRATEGY]`, `[TRANSLATION]`, `[ANSWER]`
 
 ### Three View Modes
@@ -126,7 +126,7 @@ CHUNK_SIZE = 500, CHUNK_OVERLAP = 100, TOP_K = 5, MIN_SCORE = 0.1
 
 ## LLM Prompt Tags
 
-Parsing in `geminiService.ts parseAndEmit()`. Supports both `[/TAG]` and `</TAG>` closing styles:
+Parsing in `claudeService.ts parseAndEmit()`. Supports both `[/TAG]` and `</TAG>` closing styles:
 - `[INPUT_TRANSLATION]` - Translation of interviewer speech
 - `[ANALYSIS]` - Question analysis (FULL mode)
 - `[STRATEGY]` - Response strategy (FULL mode)
@@ -163,7 +163,7 @@ This enables users with VB-Audio Cable to select "CABLE Output" directly in the 
 3. Update dropdowns in `SetupPanel.tsx`
 
 ### Modifying LLM Prompts
-Edit `constructPrompt()` or `constructStreamingPrompt()` in `services/geminiService.ts`. Tag parsing is in `parseAndEmit()`.
+Edit `constructPrompt()` or `constructStreamingPrompt()` in `services/claudeService.ts`. Tag parsing is in `parseAndEmit()`.
 
 ### Adding IT Terms
 Add entries to `data/it-glossary.json` with term, uk translation, category, and optional inflections.

@@ -3,14 +3,18 @@ import { InterviewContext } from "../types";
 import { knowledgeSearch } from "./knowledgeSearch";
 import { apiClient } from "./apiClient";
 
+type Effort = 'low' | 'medium' | 'high';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'https://ghost.vitalii.no';
-const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
-const GEMINI_MODEL_LITE = "gemini-2.5-flash-lite";
+// Main model: translation + analysis + answers (streamed). Fast model: short helper
+// tasks (intent, refinement, topic log). Both configurable via Vite env.
+const CLAUDE_MODEL = import.meta.env.VITE_CLAUDE_MODEL || "claude-opus-5";
+const CLAUDE_MODEL_FAST = import.meta.env.VITE_CLAUDE_MODEL_FAST || "claude-haiku-4-5";
 
 async function generateContent(
     model: string,
     prompt: string,
-    options: { systemInstruction?: string; temperature?: number; maxOutputTokens?: number; thinkingBudget?: number } = {}
+    options: { systemInstruction?: string; maxOutputTokens?: number; effort?: Effort } = {}
 ): Promise<string> {
     const idToken = apiClient.getIdToken();
     if (!idToken) return '';
@@ -23,9 +27,8 @@ async function generateContent(
                 prompt,
                 systemInstruction: options.systemInstruction,
                 config: {
-                    temperature: options.temperature,
                     maxOutputTokens: options.maxOutputTokens,
-                    thinkingBudget: options.thinkingBudget,
+                    effort: options.effort,
                 },
             }),
         });
@@ -40,7 +43,7 @@ async function generateContent(
 async function* streamContent(
     model: string,
     prompt: string,
-    config: { temperature?: number; maxOutputTokens?: number; thinkingBudget?: number },
+    config: { maxOutputTokens?: number; effort?: Effort },
     signal?: AbortSignal
 ): AsyncGenerator<string> {
     const idToken = apiClient.getIdToken();
@@ -69,6 +72,7 @@ async function* streamContent(
                 if (!jsonStr || jsonStr === '[DONE]') continue;
                 try {
                     const parsed = JSON.parse(jsonStr);
+                    if (parsed.error) throw new Error(parsed.error);
                     if (parsed.text) yield parsed.text;
                 } catch {}
             }
@@ -131,8 +135,7 @@ function constructPrompt(currentInput: string, historyText: string, context: Int
 
     // ========== FOCUS/FULL MODE: Full context with Resume, Job, Company, KB ==========
     // Use TF-IDF search to get relevant context from knowledge base
-    // Reduced to 1500 chars to stay within Groq's 12k token limit
-    const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 1500);
+        const relevantKnowledge = knowledgeSearch.getRelevantContext(currentInput, 1500);
 
     // Get mode-specific prompt hints
     const currentConfig = isFocusMode ? focusConfig : fullConfig;
@@ -293,8 +296,8 @@ ${modeSpecificGuidelines}
 ВАЖЛИВО: Кожен тег на окремому рядку. Відповідай ТІЛЬКИ в цьому форматі.`;
 }
 
-// GEMINI IMPLEMENTATION via backend proxy (key never leaves server)
-async function generateViaGemini(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
+// CLAUDE IMPLEMENTATION via backend proxy (credentials never leave the server)
+async function generateViaClaude(prompt: string, onUpdate: (data: any) => void, signal?: AbortSignal) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let fullText = "";
@@ -302,7 +305,7 @@ async function generateViaGemini(prompt: string, onUpdate: (data: any) => void, 
     const UPDATE_INTERVAL = 100;
 
     try {
-        for await (const text of streamContent(GEMINI_MODEL, prompt, { temperature: 0.6, maxOutputTokens: 4096 }, signal)) {
+        for await (const text of streamContent(CLAUDE_MODEL, prompt, { effort: 'low', maxOutputTokens: 4096 }, signal)) {
             if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
             fullText += text;
@@ -335,7 +338,7 @@ export const generateInterviewAssist = async (
     const historyText = historyBuffer.join(" ");
     const combinedPrompt = constructPrompt(currentInput, historyText, context, context.systemInstruction);
 
-    await generateViaGemini(combinedPrompt, onUpdate, signal);
+    await generateViaClaude(combinedPrompt, onUpdate, signal);
 
   } catch (error: any) {
     if (error.name === 'AbortError') {
@@ -424,7 +427,7 @@ ${draftTranslation}
 Виправ переклад. Зроби його природним і граматично правильним ${nativeLanguage} мовою. Поверни ТІЛЬКИ виправлений переклад, без пояснень.`;
 
         if (signal?.aborted) return null;
-        const text = await generateContent(GEMINI_MODEL_LITE, prompt, { thinkingBudget: 0, temperature: 0.1, maxOutputTokens: 200 });
+        const text = await generateContent(CLAUDE_MODEL_FAST, prompt, { effort: 'low', maxOutputTokens: 200 });
         if (signal?.aborted) return null;
         return text || null;
     } catch (e: any) {
@@ -437,7 +440,7 @@ ${draftTranslation}
 
 /**
  * Generate structured topic summary from Norwegian speech transcript.
- * Uses Flash-Lite (fast, cheap) with thinking disabled.
+ * Uses the fast model (Haiku).
  */
 export async function generateTopicSummary(
     sourceText: string,
@@ -454,10 +457,9 @@ export async function generateTopicSummary(
             : `TEXT (${sourceLanguage}):\n${sourceText}`;
 
         if (signal?.aborted) return existingTopics || '';
-        const text = await generateContent(GEMINI_MODEL_LITE, userPrompt, {
+        const text = await generateContent(CLAUDE_MODEL_FAST, userPrompt, {
             systemInstruction: buildTopicSystemPrompt(sourceLanguage, targetLanguage),
-            thinkingBudget: 0,
-            temperature: 0.1,
+            effort: 'low',
             maxOutputTokens: 600,
         });
         if (signal?.aborted) return existingTopics || '';
@@ -533,10 +535,9 @@ export async function generateLiteraryTranslation(
             : `RAW TEXT (${sourceLanguage}):\n${rawText}`;
 
         if (signal?.aborted) return '';
-        const text = await generateContent(GEMINI_MODEL, userPrompt, {
+        const text = await generateContent(CLAUDE_MODEL, userPrompt, {
             systemInstruction: buildLiterarySystemPrompt(sourceLanguage, targetLanguage, hasTopics),
-            thinkingBudget: 0,
-            temperature: 0.3,
+            effort: 'low',
             maxOutputTokens: 1000,
         });
         if (signal?.aborted) return '';
@@ -597,10 +598,9 @@ export async function analyzeConversation(
             : `TEXT (${sourceLang}):\n${norwegianText}\n\nConversation log:`;
 
         if (signal?.aborted) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
-        const text = await generateContent(GEMINI_MODEL_LITE, userPrompt, {
+        const text = await generateContent(CLAUDE_MODEL_FAST, userPrompt, {
             systemInstruction: buildAnalyzerPrompt(sourceLang, targetLang),
-            thinkingBudget: 0,
-            temperature: 0.1,
+            effort: 'low',
             maxOutputTokens: 400,
         }) || existingLog || '';
         if (signal?.aborted) return { log: existingLog || '', hasNewQuestion: false, lastQuestion: '' };
@@ -629,7 +629,7 @@ export async function analyzeConversation(
 
 /**
  * Generate answer to interview question using candidate profile.
- * Uses full Gemini Flash for quality.
+ * Uses the main Claude model for quality.
  */
 export async function generateInterviewAnswer(
     question: string,
@@ -680,7 +680,7 @@ ${conversationContext.slice(-500)}
 переклад`;
 
         if (signal?.aborted) return { answer: '', answerTranslation: '' };
-        const text = await generateContent(GEMINI_MODEL, prompt, { thinkingBudget: 0, temperature: 0.4, maxOutputTokens: 500 });
+        const text = await generateContent(CLAUDE_MODEL, prompt, { effort: 'low', maxOutputTokens: 500 });
         if (signal?.aborted) return { answer: '', answerTranslation: '' };
 
         const answerMatch = text.match(/\[ANSWER\]\s*([\s\S]*?)(?:\[TRANSLATION\]|$)/i);
@@ -764,7 +764,7 @@ ${conversationContext.slice(-500)}
     };
 
     try {
-        for await (const text of streamContent(GEMINI_MODEL, prompt, { thinkingBudget: 0, temperature: 0.4, maxOutputTokens: 500 } as any, signal)) {
+        for await (const text of streamContent(CLAUDE_MODEL, prompt, { effort: 'low', maxOutputTokens: 500 } , signal)) {
             if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
             fullText += text;
@@ -830,7 +830,7 @@ export const generateStreamingTranslation = async (
             }
         };
 
-        await generateViaGemini(prompt, onUpdate, signal);
+        await generateViaClaude(prompt, onUpdate, signal);
 
         // Try to parse LLM-based intent first
         let intent = parseLLMIntent(fullResponseText);

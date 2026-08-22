@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/drive/1TCQKSwYRqFQTxRqJpyrrCI
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. LLM credentials are server-side only: set `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription) or `ANTHROPIC_API_KEY` on the Cloudflare Worker in `backend/worker` (`npx wrangler secret put ...`)
 3. Run the app:
    `npm run dev`

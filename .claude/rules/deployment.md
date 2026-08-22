@@ -33,19 +33,20 @@ npm run preview   # Preview production build locally
 Vite exposes env vars via `import.meta.env`:
 
 ```bash
-# .env.local (not committed)
-GEMINI_API_KEY=...              # Exposed as process.env.GEMINI_API_KEY and process.env.API_KEY
+# .env.local (optional, not committed) — frontend has NO LLM secrets
+VITE_API_URL=https://ghost.vitalii.no     # Worker proxy (default)
+VITE_CLAUDE_MODEL=claude-opus-5           # main model (default)
+VITE_CLAUDE_MODEL_FAST=claude-haiku-4-5   # fast helper model (default)
+```
 
-# Azure OpenAI (optional, can use Groq instead)
-VITE_AZURE_ENDPOINT=https://jobbot.openai.azure.com
-VITE_AZURE_API_KEY=...
-VITE_API_VERSION=2024-10-01-preview
-VITE_DEPLOYMENT=gpt-5.1-codex-mini
+### Worker secrets (backend/worker)
 
-# Groq (optional, key can be entered in UI)
-VITE_GROQ_ENDPOINT=https://api.groq.com/openai/v1/chat/completions
-VITE_GROQ_API_KEY=...
-VITE_GROQ_MODEL=llama-3.3-70b-versatile
+```bash
+cd backend/worker
+npx wrangler secret put CLAUDE_CODE_OAUTH_TOKEN   # Claude subscription token from `claude setup-token` (preferred)
+# or
+npx wrangler secret put ANTHROPIC_API_KEY         # console API key (pay-per-token)
+npx wrangler deploy
 ```
 
 ## Critical: Entry Point
@@ -64,7 +65,6 @@ Dependencies are loaded via CDN import maps in `index.html`, not bundled with th
 <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
     "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0"
@@ -95,7 +95,7 @@ Custom config (fonts, colors, animations) is defined inline in `index.html` via 
 Manual testing is required. Key test scenarios:
 - All three view modes (SIMPLE/FOCUS/FULL)
 - Both translation paths (Chrome API vs model-based)
-- Both LLM providers (Azure vs Groq)
+- Claude proxy: streaming answers + fast helper calls
 - Streaming mode toggle
 - Stop/restart sessions
 - Different languages
@@ -103,6 +103,5 @@ Manual testing is required. Key test scenarios:
 ## Security Notes
 
 - API keys must never be committed (`.env.local` is gitignored)
-- Groq API key stored in localStorage (client-side only)
 - No server component - all processing is client-side or via external APIs
-- Azure `sanitizeForAzure()` masks phrases that trigger jailbreak detection
+- LLM credentials exist only as Cloudflare Worker secrets; the Worker accepts only `claude-*` model ids and requires a Google id token

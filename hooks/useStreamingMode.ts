@@ -11,7 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { InterviewContext, SPEED_PRESETS, SpeedPresetConfig } from '../types';
 import { localTranslator } from '../services/localTranslator';
-import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, generateLiteraryTranslation, analyzeConversation, generateInterviewAnswerStreaming, refineTranslationPair } from '../services/geminiService';
+import { generateStreamingTranslation, StreamingTranslationResult, generateInterviewAssist, generateTopicSummary, generateLiteraryTranslation, analyzeConversation, generateInterviewAnswerStreaming, refineTranslationPair } from '../services/claudeService';
 import { metricsCollector } from '../services/metricsCollector';
 import { debugLogger } from '../services/debugLogger';
 import { cleanSpeechText } from '../services/speechCleaner';
@@ -364,7 +364,7 @@ export function useStreamingMode(
     }, [opts]);
 
     // === LLM SLIDING WINDOW REFINEMENT ===
-    // Takes PAIRS of blocks (14 words), sends to Gemini for quality translation
+    // Takes PAIRS of blocks (14 words), sends to Claude for quality translation
     // Result is a single coherent sentence that replaces both ghost drafts
     // Refined sentences are joined into continuous text
     const refinedSentencesRef = useRef<string[]>([]); // LLM-refined sentences (each from 2 blocks)

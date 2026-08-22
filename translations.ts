@@ -164,7 +164,7 @@ export const translations = {
       },
       llmModel: {
           label: "SMART ANALYSIS MODEL (STREAM 2)",
-          gemini: "Gemini 2.5 Flash",
+          claude: "Claude (Anthropic)",
       },
       // Mode-Centric Cards UI
       modeCards: {
@@ -435,7 +435,7 @@ Example:
       },
       llmModel: {
           label: "РОЗУМНИЙ АНАЛІЗ (STREAM 2)",
-          gemini: "Gemini 2.5 Flash",
+          claude: "Claude (Anthropic)",
       },
       // Mode-Centric Cards UI
       modeCards: {

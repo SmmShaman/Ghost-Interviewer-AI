@@ -4,14 +4,6 @@
 **Cause:** Missing `<script type="module" src="/index.tsx"></script>` in `index.html` body.
 **Fix:** Ensure the entry point script tag exists. Without it, React never mounts.
 
-## Azure Jailbreak Detection (Content Filtering)
-**Symptom:** Azure API returns 400 with content policy violation.
-**Cause:** Imperative phrases like "You are an assistant" or "Act as" trigger Azure's content filter.
-**Fix:** `sanitizeForAzure()` in `geminiService.ts` replaces problematic phrases:
-- "You are" -> "Task: Provide"
-- "Act as" -> "Function:"
-- "SYSTEM:" -> "CONTEXT:"
-
 ## LLM Tag Leaking Into Translation
 **Symptom:** Translation text contains `[/INPUT_TRANSLATION]` or `[INTENT]` fragments.
 **Cause:** Streaming captures partial tags before they're fully formed.
@@ -61,20 +53,10 @@
 **Symptom:** "..." or loading placeholders appear in frozen/active translation zones.
 **Fix:** Filter placeholder text before displaying in frozen/active zones. Commit: `b150af6`.
 
-## Azure max_tokens vs max_completion_tokens
-**Symptom:** Azure API rejects request with parameter error.
-**Cause:** `gpt-5.1-codex-mini` deployment requires `max_completion_tokens`, not `max_tokens`.
-**Fix:** Use `max_completion_tokens: 4096` in Azure request body. Note: temperature parameter is also not supported by this model (only default=1).
-
-## Groq Token Limit
-**Symptom:** Groq returns error about exceeding context length.
-**Cause:** Knowledge Base context sent to Groq exceeds its 12k token limit.
-**Fix:** Reduced relevant knowledge context to 1500 chars in `constructPrompt()` for Groq compatibility.
-
 ## Common Debugging Steps
 
 1. **Translation not working:** Check `localTranslator.getStatus()` in console - shows which method is active (Chrome/Pivot/Direct), model loaded, device (WebGPU/WASM)
-2. **LLM not responding:** Check if API key is set (`VITE_AZURE_API_KEY` or Groq key in UI). Check console for "Azure API Error" or "Groq API Error"
+2. **LLM not responding:** User must be signed in with Google (the Worker requires the id token). Check the Worker secret (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) — a 503 `AI service not configured` means neither is set; a 401 from Anthropic means the subscription token expired/revoked → regenerate with `claude setup-token`
 3. **Words missing:** Enable metrics via `metricsCollector.logMetrics()` in console - shows received vs displayed word counts and loss rate
 4. **Speech not recognized:** Verify Chrome/Edge browser, HTTPS in production, microphone permissions granted
 5. **Model download stuck:** Check console for download progress logs. Try clearing cache via DevTools > Application > Cache Storage

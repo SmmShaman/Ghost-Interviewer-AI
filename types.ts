@@ -43,11 +43,11 @@ export interface ModePrompts {
 
 export interface ModeConfig {
   full: ModePrompts & {
-    aiModel: 'gemini';
+    aiModel: 'claude';
     strategyDetailLevel: 'brief' | 'detailed' | 'comprehensive';
   };
   focus: ModePrompts & {
-    aiModel: 'gemini';
+    aiModel: 'claude';
   };
   simple: {
     translationPrompt: string;
@@ -163,7 +163,7 @@ export interface InterviewContext {
   listenThroughDeviceId: string; // Output device for VB-Cable audio passthrough (empty = disabled)
   viewMode: ViewMode; // Controls the layout and processing depth
   ghostModel: 'opus' | 'nllb'; // Select local model type
-  llmProvider: 'gemini'; // Cloud LLM Provider
+  llmProvider: 'claude'; // Cloud LLM Provider
   speedPreset: SpeedPresetId; // Translation speed preset
   googleTranslateKey: string; // Google Cloud Translation API key (Level 2 NMT)
 

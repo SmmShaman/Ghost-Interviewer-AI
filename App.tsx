@@ -12,7 +12,7 @@ import StreamingFocusModeLayout from './components/layouts/StreamingFocusModeLay
 import StreamingFullModeLayout from './components/layouts/StreamingFullModeLayout';
 import { MicIcon, StopIcon, DownloadIcon, TrashIcon } from './components/Icons';
 import { InterviewContext, AppState, Message, IWindow, ViewMode } from './types';
-import { generateInterviewAssist } from './services/geminiService';
+import { generateInterviewAssist } from './services/claudeService';
 import { localTranslator } from './services/localTranslator';
 import { apiClient } from './services/apiClient';
 import { knowledgeSearch } from './services/knowledgeSearch';
@@ -371,7 +371,7 @@ const App: React.FC = () => {
     const { id: messageIdToProcess, text: messageText, responseId, targetMessageId, pendingBlockId } = queueItem;
     const wordCount = messageText.split(/\s+/).length;
 
-    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words | responseId: ${responseId} | targetId: ${targetMessageId} | block: ${pendingBlockId} | provider: gemini`);
+    console.log(`🤖 [${Math.round(performance.now())}ms] LLM START: ${wordCount} words | responseId: ${responseId} | targetId: ${targetMessageId} | block: ${pendingBlockId} | provider: claude`);
 
     try {
 
