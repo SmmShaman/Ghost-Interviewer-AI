@@ -8,6 +8,9 @@ interface Env {
   // or a console API key. The OAuth token takes precedence when both are set.
   CLAUDE_CODE_OAUTH_TOKEN?: string;
   ANTHROPIC_API_KEY?: string;
+  // Shared secret that lets the owner's other Workers (e.g. kapital) use the
+  // Claude proxy server-to-server without a Google user token.
+  AI_INTERNAL_KEY?: string;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -861,14 +864,24 @@ function buildAnthropicBody(body: AiRequestBody, stream: boolean): Record<string
   return out;
 }
 
+function internalKeyOk(request: Request, env: Env): boolean {
+  const given = request.headers.get('X-Internal-Key');
+  if (!given || !env.AI_INTERNAL_KEY || given.length !== env.AI_INTERNAL_KEY.length) return false;
+  let diff = 0;
+  for (let i = 0; i < given.length; i++) diff |= given.charCodeAt(i) ^ env.AI_INTERNAL_KEY.charCodeAt(i);
+  return diff === 0;
+}
+
 async function authorizeAiRequest(request: Request, env: Env): Promise<{ headers: Record<string, string>; body: AiRequestBody } | Response> {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return jsonResponse({ error: 'Authorization required' }, 401);
-  }
-  const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
-  if (!tokenInfo) {
-    return jsonResponse({ error: 'Invalid token' }, 401);
+  if (!internalKeyOk(request, env)) {
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return jsonResponse({ error: 'Authorization required' }, 401);
+    }
+    const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
+    if (!tokenInfo) {
+      return jsonResponse({ error: 'Invalid token' }, 401);
+    }
   }
   const headers = anthropicHeaders(env);
   if (!headers) {
