@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { InterviewContext, ViewMode, AudioPresetId, SpeedPresetId, SPEED_PRESETS } from '../types';
+import { InterviewContext, ViewMode, AudioPresetId } from '../types';
 import { MicIcon } from './Icons';
 import GearMenu from './GearMenu';
 import SetupPanel from './SetupPanel';
@@ -45,12 +45,8 @@ const Tip: React.FC<{ text: string; color?: string }> = ({ text, color = 'gray' 
 interface LandingPageProps {
     context: InterviewContext;
     setContext: (context: InterviewContext) => void;
-    isModelReady: boolean;
-    modelError: boolean;
-    modelProgress: number;
     uiLang: 'en' | 'uk';
     t: {
-        modelDownload: string;
         selectMode: string;
         modes: {
             simple: string;
@@ -73,14 +69,15 @@ interface LandingPageProps {
     isAuthLoading: boolean;
     onSignOut: () => void;
     renderGoogleButton: (elementId: string) => void;
+    // Pre-interview briefing
+    isSignedIn: boolean;
+    briefingStatus: 'none' | 'stale' | 'ready';
+    onOpenBriefing: () => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({
     context,
     setContext,
-    isModelReady,
-    modelError,
-    modelProgress,
     uiLang,
     t,
     isSetupOpen,
@@ -91,7 +88,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
     googleUser,
     isAuthLoading,
     onSignOut,
-    renderGoogleButton
+    renderGoogleButton,
+    isSignedIn,
+    briefingStatus,
+    onOpenBriefing
 }) => {
     const audioDevices = useAudioDevices();
     const presets = audioDevices.getPresets();
@@ -147,22 +147,6 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 )}
             </div>
 
-            {/* Model loading indicator */}
-            {!isModelReady && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
-                    <div className={`flex items-center gap-3 px-4 py-2 rounded-full ${modelError ? 'bg-red-900/80 border-red-500' : 'bg-blue-900/80 border-blue-500/30'} border backdrop-blur-md`}>
-                        <span className={`text-[10px] font-bold uppercase tracking-widest ${modelError ? 'text-white' : 'text-blue-200 animate-pulse'}`}>
-                            {modelError ? "MODEL ERROR" : `${t.modelDownload} ${modelProgress}%`}
-                        </span>
-                        {!modelError && (
-                            <div className="w-20 h-1.5 bg-blue-950 rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-400 transition-all duration-300" style={{ width: `${modelProgress}%` }} />
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
             {/* Title + Language in one row */}
             <div className="text-center space-y-1 sm:space-y-2 shrink-0">
                 <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500">
@@ -213,34 +197,22 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
             </div>
 
-            {/* Warning: FOCUS/FULL with YouTube preset — compact */}
-            {(context.speedPreset === 'youtube') && (
-                <div className="w-full max-w-5xl shrink-0">
-                    <div className="px-3 py-1.5 rounded-lg bg-amber-900/20 border border-amber-500/30 text-center">
-                        <span className="text-amber-300 text-[10px]">
-                            ⚠️ YouTube — AI-відповіді вимкнені
-                        </span>
-                    </div>
-                </div>
-            )}
-
             {/* Mode Selection Cards — compact */}
             <div className="grid grid-cols-3 gap-2 sm:gap-4 w-full max-w-5xl shrink-0">
                 {/* SIMPLE Mode */}
                 <button
-                    onClick={() => { setContext({ ...context, speedPreset: 'youtube' }); startSessionWithMode('SIMPLE'); }}
-                    disabled={!isModelReady}
+                    onClick={() => { startSessionWithMode('SIMPLE'); }}
                     className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-amber-500/30 bg-gradient-to-b from-amber-950/20 to-gray-900/50
                         hover:border-amber-400 hover:from-amber-900/30 hover:shadow-[0_0_40px_rgba(245,158,11,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
-                        ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        cursor-pointer`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all"></div>
                     <div className="relative">
                         <div className="text-amber-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
                             {t.modes.simple}
-                            <Tip color="amber" text="Тільки переклад, без AI-відповідей. Ліворуч — субтитри мовлення. Праворуч — короткий зміст по темах. Для перегляду відео, подкастів, лекцій." />
+                            <Tip color="amber" text={uiLang === 'uk' ? "Лише живий переклад мовлення. Без підказок відповідей." : "Live translation only. No suggested answers."} />
                         </div>
                         <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.simpleDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-amber-500/70 text-xs font-mono hidden sm:flex">
@@ -252,22 +224,20 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FOCUS Mode */}
                 <button
-                    onClick={() => {
-                        setContext({ ...context, speedPreset: 'interview' });
+                    onClick={() => {
                         startSessionWithMode('FOCUS');
-                    }}
-                    disabled={!isModelReady}
+                    }}
                     className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-blue-500/30 bg-gradient-to-b from-blue-950/20 to-gray-900/50
                         hover:border-blue-400 hover:from-blue-900/30 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
-                        ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        cursor-pointer`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
                     <div className="relative">
                         <div className="text-blue-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
                             {t.modes.focus}
-                            <Tip color="blue" text="Переклад + підказка. Ліворуч — переклад що каже інтерв'юер. Праворуч — AI підказує що відповісти, коли задають питання. Для співбесід." />
+                            <Tip color="blue" text={uiLang === 'uk' ? "Переклад + підказка відповіді на кожне питання інтерв'юера, на основі ваших документів." : "Translation + a suggested answer to each interviewer question, grounded in your documents."} />
                         </div>
                         <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.focusDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-blue-500/70 text-xs font-mono hidden sm:flex">
@@ -279,22 +249,20 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
                 {/* FULL Mode */}
                 <button
-                    onClick={() => {
-                        setContext({ ...context, speedPreset: 'interview' });
+                    onClick={() => {
                         startSessionWithMode('FULL');
-                    }}
-                    disabled={!isModelReady}
+                    }}
                     className={`group p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-gray-900/50
                         hover:border-emerald-400 hover:from-emerald-900/30 hover:shadow-[0_0_40px_rgba(16,185,129,0.2)]
                         transition-all duration-300 text-left relative overflow-hidden
-                        ${!isModelReady ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        cursor-pointer`}
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all"></div>
                     <div className="relative">
                         <div className="text-emerald-400 font-black mb-1 sm:mb-3 tracking-widest text-xs sm:text-sm uppercase flex items-center gap-2">
                             <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
                             {t.modes.full}
-                            <Tip color="emerald" text="Максимальна допомога. Переклад + AI аналізує питання + пропонує стратегію + готова відповідь. Для важливих співбесід де потрібна повна підтримка." />
+                            <Tip color="emerald" text={uiLang === 'uk' ? "Те саме + коротка стратегія та аналіз того, що насправді питає інтерв'юер." : "The same plus a short strategy and an analysis of what the interviewer is really asking."} />
                         </div>
                         <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.fullDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-emerald-500/70 text-xs font-mono hidden sm:flex">
@@ -303,6 +271,51 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         </div>
                     </div>
                 </button>
+            </div>
+
+            {/* Pre-interview briefing + sign-in note — compact */}
+            <div className="w-full max-w-5xl shrink-0 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 py-2 rounded-xl border border-gray-700 bg-gray-900/50">
+                    <div className="flex-1 min-w-[200px]">
+                        <div className="text-[11px] font-bold text-gray-200 uppercase tracking-wider">
+                            {uiLang === 'uk' ? 'Брифінг перед співбесідою' : 'Pre-interview briefing'}
+                        </div>
+                        <div className="text-[10px] text-gray-500 leading-snug">
+                            {uiLang === 'uk'
+                                ? 'Компанія, вакансія і ваш профіль аналізуються один раз; відповіді спираються на це.'
+                                : 'Company, vacancy and your profile analysed once; answers rely on it.'}
+                        </div>
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border whitespace-nowrap ${
+                        briefingStatus === 'ready'
+                            ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                            : 'text-amber-300 border-amber-500/40 bg-amber-500/10'}`}>
+                        {briefingStatus === 'ready'
+                            ? (uiLang === 'uk' ? 'готовий' : 'ready')
+                            : briefingStatus === 'stale'
+                                ? (uiLang === 'uk' ? 'дані змінилися — оновіть' : 'data changed — refresh')
+                                : (uiLang === 'uk' ? 'не створено' : 'not created')}
+                    </span>
+                    <button
+                        onClick={onOpenBriefing}
+                        className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10 transition-colors whitespace-nowrap"
+                    >
+                        {briefingStatus === 'ready'
+                            ? (uiLang === 'uk' ? 'Відкрити' : 'Open')
+                            : briefingStatus === 'stale'
+                                ? (uiLang === 'uk' ? 'Оновити' : 'Refresh')
+                                : (uiLang === 'uk' ? 'Створити' : 'Create')}
+                    </button>
+                </div>
+                {!isSignedIn && (
+                    <div className="px-3 py-1 rounded-lg bg-amber-900/20 border border-amber-500/30 text-center">
+                        <span className="text-amber-300 text-[10px]">
+                            {uiLang === 'uk'
+                                ? 'Без входу через Google працює лише миттєвий чернетковий машинний переклад; LLM-переклад, відповіді та брифінг потребують входу.'
+                                : 'Without Google sign-in only the instant machine draft translation works; LLM translation, answers and the briefing need sign-in.'}
+                        </span>
+                    </div>
+                )}
             </div>
 
             {/* Audio Preset Buttons */}
@@ -419,51 +432,6 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     </div>
                 );
             })()}
-
-            {/* Speed Preset Buttons */}
-            <div className="w-full max-w-5xl shrink-0">
-                <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2">
-                    {uiLang === 'uk' ? 'ШВИДКІСТЬ' : 'SPEED'}
-                </p>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                    {(Object.entries(SPEED_PRESETS) as [SpeedPresetId, typeof SPEED_PRESETS[SpeedPresetId]][]).map(([id, preset]) => {
-                        const active = (context.speedPreset || 'interview') === id;
-                        const icons: Record<SpeedPresetId, string> = {
-                            youtube: '📺',
-                            interview: '🎙️',
-                            custom: '⚙️',
-                        };
-                        const tips: Record<SpeedPresetId, string> = {
-                            youtube: 'Тільки переклад, без AI-відповідей. Текст тече плавно як субтитри. Затримка ~3-5 секунд від мовлення. Обирається автоматично для режиму SIMPLE.',
-                            interview: 'Переклад + AI-відповіді на питання. Швидші реакції, менші блоки тексту. Обирається автоматично для режимів FOCUS та FULL.',
-                            custom: 'Змінити швидкість та поведінку вручну. Для просунутих користувачів які хочуть тонко налаштувати систему під себе.',
-                        };
-                        return (
-                            <button
-                                key={id}
-                                onClick={() => setContext({ ...context, speedPreset: id })}
-                                className={`group/btn relative p-2.5 sm:p-4 rounded-xl border-2 transition-all duration-300 text-center
-                                    ${active
-                                        ? 'border-amber-400 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
-                                        : 'border-gray-700 bg-gray-900/50 hover:border-gray-500 hover:bg-gray-800/50'
-                                    }`}
-                            >
-                                <div className="text-xl sm:text-2xl mb-1 sm:mb-2">{icons[id]}</div>
-                                <div className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${active ? 'text-amber-300' : 'text-gray-400'}`}>
-                                    {preset.label}
-                                    <Tip color="amber" text={tips[id]} />
-                                </div>
-                                <div className="text-[7px] sm:text-[8px] text-gray-500 mt-1 hidden sm:block">
-                                    {preset.description}
-                                </div>
-                                {active && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full border-2 border-gray-950" />
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
 
             {/* Footer hint */}
             <div className="text-center">

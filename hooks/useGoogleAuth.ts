@@ -18,11 +18,14 @@ interface UseGoogleAuthReturn {
   isLoading: boolean;
   error: string | null;
   signOut: () => void;
+  /** Call when the backend answered 401: drops the dead session. */
+  markExpired: () => void;
   renderButton: (elementId: string) => void;
 }
 
 export function useGoogleAuth(): UseGoogleAuthReturn {
-  const [user, setUser] = useState<GoogleUser | null>(null);
+  // Restore a still-valid session from a previous visit (no re-login after reload).
+  const [user, setUser] = useState<GoogleUser | null>(() => apiClient.getStoredUser());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initializedRef = useRef(false);
@@ -98,8 +101,24 @@ export function useGoogleAuth(): UseGoogleAuthReturn {
     console.log('[Auth] Signed out');
   }, []);
 
+  // The session can expire (or be rejected by the backend) while the page stays
+  // open; reflect that in the UI so the user is asked to sign in again.
+  const markExpired = useCallback(() => {
+    apiClient.clearAuth();
+    setUser(null);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(() => {
+      if (!apiClient.getIdToken()) setUser(null);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [user]);
+
   return {
     user,
+    markExpired,
     isSignedIn: user !== null,
     isLoading,
     error,

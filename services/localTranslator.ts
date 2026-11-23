@@ -1,24 +1,17 @@
-
+// Instant "draft" translator: shown in grey while the cloud LLM produces the real translation.
+// Fallback chain: Chrome on-device Translator API -> Google Cloud NMT -> in-browser Opus model.
+// Never blocks the session: translateDraft() returns null instead of waiting or throwing.
 
 import { pipeline, env, AutoModelForSeq2SeqLM, AutoTokenizer } from '@huggingface/transformers';
 import { glossaryProcessor } from './glossaryProcessor';
-import { pivotTranslator } from './pivotTranslator';
-import { confidenceFilter } from './confidenceFilter';
 import { debugLogger } from './debugLogger';
 import { googleTranslateNMT } from './googleTranslateNMT';
 
-// CRITICAL CONFIGURATION: LOAD FROM HUGGING FACE CDN WITH CACHING
+// Load models from Hugging Face CDN with browser caching
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
-env.useBrowserCache = true;  // Cache models in browser (IndexedDB/Cache API)
-env.useCustomCache = false;  // Use default browser caching mechanism
-
-export interface TranslatedWord {
-    original: string;
-    ghostTranslation: string;
-    finalTranslation?: string;
-    status: 'ghost' | 'final';
-}
+env.useBrowserCache = true;
+env.useCustomCache = false;
 
 // Chrome Translator API types (Chrome 138+)
 interface ChromeTranslator {
@@ -41,49 +34,33 @@ declare global {
     }
 }
 
+export type DraftMethod = 'chrome' | 'nmt' | 'opus' | 'none';
+
 class LocalTranslator {
-    private translator: any = null;
+    private translator: any = null; // Opus pipeline
 
     // Chrome Native Translator (Chrome 138+)
     private chromeTranslator: ChromeTranslator | null = null;
     private chromeTranslatorAvailable: boolean | null = null; // null = not checked yet
     private chromeInitPromise: Promise<boolean> | null = null; // Lock for init
 
-    // PRIMARY: Use the custom OPUS model (56MB)
-    private opusModelId = 'goldcc/opus-mt-no-uk-int8';
+    // Offline fallback: custom Opus no->uk model (56MB)
+    private readonly opusModelId = 'goldcc/opus-mt-no-uk-int8';
 
-    // SECONDARY: Fallback to NLLB if Opus fails (600MB+)
-    private nllbModelId = 'Xenova/nllb-200-distilled-600M';
-
-    private activeModelId = '';
-    private currentModelType: 'opus' | 'nllb' = 'opus';
-
-    private sourceLang: string = "nob_Latn";
-    private targetLang: string = "ukr_Cyrl";
-
-    // UI language names for Chrome API
-    private sourceLanguageName: string = "no"; // BCP-47 codes for Chrome
+    // BCP-47 codes
+    private sourceLanguageName: string = "no";
     private targetLanguageName: string = "uk";
 
     private isLoading = false;
+    private opusFailed = false;
+    private initPromise: Promise<void> | null = null;
     private progressCallback: ((progress: number) => void) | null = null;
     private activeDevice: 'webgpu' | 'wasm' | null = null;
+    private lastProgress = 0;
 
-    // PERFORMANCE OPTIMIZATION: Chunk translation cache
-    private chunkCache: Map<string, string> = new Map();
-    private static readonly CHUNK_SIZE = 5; // Larger chunks give OPUS model more context for coherent translations
-    private static readonly MAX_CACHE_SIZE = 100;
-
-    // PIVOT TRANSLATION: NO → EN → UK (better quality)
-    private usePivot: boolean = true;  // Enable pivot by default
-    private pivotInitialized: boolean = false;
-
-    // CONFIDENCE FILTERING: Reject low-quality translations
-    private useConfidenceFilter: boolean = true;
-    private lastConfidenceScore: number = 100;
-
-    // INCREMENTAL CACHE: Reuse prefix translation for growing text
-    private incrementalCache: { originalText: string; translatedText: string } = { originalText: '', translatedText: '' };
+    // LRU cache keyed by exact input text
+    private draftCache: Map<string, string> = new Map();
+    private static readonly MAX_CACHE_SIZE = 200;
 
     // ========== CHROME TRANSLATOR API (Chrome 138+) ==========
 
@@ -250,24 +227,7 @@ class LocalTranslator {
         }
     }
 
-    async switchModel(modelType: 'opus' | 'nllb', onProgress?: (progress: number) => void) {
-        if (this.currentModelType === modelType && this.translator) {
-            if (onProgress) onProgress(100);
-            return; 
-        }
-
-        console.log(`Swapping model to ${modelType}...`);
-        this.translator = null;
-        this.currentModelType = modelType;
-        
-        await this.initialize(onProgress);
-    }
-
-    getCurrentModelType() {
-        return this.currentModelType;
-    }
-
-    /** Configure Google Cloud NMT — direct key or proxy */
+    /** Configure Google Cloud NMT with a direct key */
     setGoogleNMTKey(key: string): void {
         if (key) {
             googleTranslateNMT.setApiKey(key);
@@ -279,54 +239,65 @@ class LocalTranslator {
         googleTranslateNMT.setProxy(proxyUrl, authToken);
     }
 
-    /** Update auth token for NMT proxy */
-    setGoogleNMTAuthToken(token: string): void {
-        googleTranslateNMT.setAuthToken(token);
+    // The Opus model only handles Norwegian -> Ukrainian
+    private opusSupportsPair(): boolean {
+        return (this.sourceLanguageName === 'no' || this.sourceLanguageName === 'nb') && this.targetLanguageName === 'uk';
     }
 
-    async initialize(onProgress?: (progress: number) => void) {
+    /** Safe to call repeatedly: concurrent calls share one in-flight init. */
+    initialize(onProgress?: (progress: number) => void): Promise<void> {
+        if (onProgress) this.progressCallback = onProgress;
+        if (this.initPromise) return this.initPromise;
+
+        this.initPromise = this.doInitialize(onProgress).finally(() => {
+            this.initPromise = null;
+        });
+        return this.initPromise;
+    }
+
+    private async doInitialize(onProgress?: (progress: number) => void): Promise<void> {
         // Initialize Google Cloud NMT if API key available (from env var)
         const nmtKey = (import.meta as any).env?.VITE_GOOGLE_TRANSLATE_KEY || '';
         if (nmtKey) {
             googleTranslateNMT.setApiKey(nmtKey);
         }
 
-        // OPTIMIZATION: Skip model loading if Chrome Translator API is available
-        const chromeAvailable = await this.checkChromeTranslator();
-        if (chromeAvailable) {
+        // Skip model download if Chrome Translator API is available
+        if (await this.checkChromeTranslator()) {
             console.log('✅ Chrome Translator API available - skipping model download');
             if (onProgress) onProgress(100);
-            this.finishInit();
+            this.progressCallback = null;
             return;
         }
 
-        // Also skip model loading if Google NMT is available
+        // Also skip model download if Google NMT is available
         if (googleTranslateNMT.isAvailable()) {
             console.log('✅ Google Cloud NMT available - skipping model download');
             if (onProgress) onProgress(100);
-            this.finishInit();
+            this.progressCallback = null;
             return;
         }
 
-        console.log('⚠️ Chrome Translator API not available - loading fallback model');
-
         if (this.translator) {
-             if (onProgress) onProgress(100);
-             return;
+            if (onProgress) onProgress(100);
+            return;
         }
 
-        if (this.isLoading) {
-             this.progressCallback = onProgress || null;
-             return;
+        if (!this.opusSupportsPair()) {
+            console.log('⚠️ Opus model only supports Norwegian→Ukrainian - skipping download');
+            return;
         }
 
+        console.log('⚠️ Chrome Translator API and NMT not available - loading Opus fallback model');
+        await this.loadOpus();
+    }
+
+    private async loadOpus(): Promise<void> {
         this.isLoading = true;
-        this.progressCallback = onProgress || null;
+        this.opusFailed = false;
+        const targetModelId = this.opusModelId;
 
-        const targetModelId = this.currentModelType === 'opus' ? this.opusModelId : this.nllbModelId;
-        const isQuantized = this.currentModelType === 'opus';
-
-        // Proper WebGPU detection: Actually check if adapter is available
+        // Proper WebGPU detection: actually check that an adapter is available
         let webgpuAvailable = false;
         if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
             try {
@@ -340,56 +311,40 @@ class LocalTranslator {
             }
         }
 
-        // Only try WebGPU if adapter is actually available
         const devicesToTry: ('webgpu' | 'wasm')[] = webgpuAvailable ? ['webgpu', 'wasm'] : ['wasm'];
 
         for (const device of devicesToTry) {
             try {
                 if (this.progressCallback) this.progressCallback(0);
-                console.log(`👻 Ghost Translator: Loading ${this.currentModelType.toUpperCase()} Model '${targetModelId}' (${device.toUpperCase()})...`);
+                console.log(`👻 Draft Translator: Loading Opus model '${targetModelId}' (${device.toUpperCase()})...`);
 
-                this.activeModelId = targetModelId;
+                // Make sure onnxruntime-web doesn't try WebGPU when we want WASM
+                const sessionOptions = device === 'wasm' ? { executionProviders: ['wasm'] } : undefined;
 
-                // Configure ONNX session options based on device
-                // This ensures onnxruntime-web doesn't try WebGPU when we want WASM
-                const sessionOptions = device === 'wasm' ? {
-                    executionProviders: ['wasm'],
-                } : undefined;
+                const model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
+                    quantized: true,
+                    device: device,
+                    session_options: sessionOptions,
+                    progress_callback: (data: any) => this.handleProgress(data),
+                } as any);
 
-                let model, tokenizer;
+                const tokenizer = await AutoTokenizer.from_pretrained(targetModelId, {
+                    progress_callback: (data: any) => this.handleProgress(data),
+                });
 
-                if (isQuantized) {
-                    model = await AutoModelForSeq2SeqLM.from_pretrained(targetModelId, {
-                        quantized: true,
-                        device: device,
-                        session_options: sessionOptions,
-                        progress_callback: (data: any) => this.handleProgress(data),
-                    } as any);
-
-                    tokenizer = await AutoTokenizer.from_pretrained(targetModelId, {
-                        progress_callback: (data: any) => this.handleProgress(data),
-                    });
-                }
-
-                if (isQuantized && model && tokenizer) {
-                     this.translator = await pipeline('translation', targetModelId, {
-                        model: model,
-                        tokenizer: tokenizer,
-                        device: device,
-                        session_options: sessionOptions,
-                        progress_callback: (data: any) => this.handleProgress(data),
-                    } as any);
-                } else {
-                    // Standard loading (NLLB)
-                    this.translator = await pipeline('translation', targetModelId, {
-                        device: device,
-                        session_options: sessionOptions,
-                        progress_callback: (data: any) => this.handleProgress(data),
-                    });
-                }
+                this.translator = await pipeline('translation', targetModelId, {
+                    model: model,
+                    tokenizer: tokenizer,
+                    device: device,
+                    session_options: sessionOptions,
+                    progress_callback: (data: any) => this.handleProgress(data),
+                } as any);
 
                 this.activeDevice = device;
-                this.finishInit();
+                this.isLoading = false;
+                if (this.progressCallback) this.progressCallback(100);
+                this.lastProgress = 100;
+                console.log(`👻 Draft Translator: Ready using ${targetModelId} (${device.toUpperCase()})`);
                 return;
 
             } catch (e: any) {
@@ -406,37 +361,34 @@ class LocalTranslator {
                                           errorMsg.includes('checksum') ||
                                           errorMsg.includes('corrupted');
 
-                // If cache corruption detected, try clearing cache and retry once
                 if (isCacheCorruption) {
                     console.warn(`⚠️ Cache corruption detected, clearing cache...`);
                     await this.clearModelCache();
-                    // Don't retry automatically - let user trigger reload
                     this.isLoading = false;
+                    this.opusFailed = true;
                     throw new Error(`Cache corruption detected. Please refresh the page to re-download the model.`);
                 }
 
-                // If WebGPU failed and we have WASM fallback, try it
                 if (device === 'webgpu' && devicesToTry.includes('wasm') && isWebGPUError) {
                     console.warn(`⚠️ WebGPU failed, falling back to WASM...`, errorMsg);
-                    continue; // Try WASM
+                    continue;
                 }
 
-                // If WASM also failed or it's a different error, throw
-                console.error(`❌ FAILED to load ${this.currentModelType} Model with ${device}.`, e);
+                console.error(`❌ FAILED to load Opus model with ${device}.`, e);
                 this.isLoading = false;
-                throw new Error(`Failed to load ${this.currentModelType} model.`);
+                this.opusFailed = true;
+                throw new Error(`Failed to load Opus model.`);
             }
         }
 
-        // Should not reach here, but just in case
         this.isLoading = false;
-        throw new Error(`Failed to load ${this.currentModelType} model - no backends available.`);
+        this.opusFailed = true;
+        throw new Error(`Failed to load Opus model - no backends available.`);
     }
 
-    // Clear model cache (IndexedDB for transformers.js)
+    // Clear model cache (Cache API + IndexedDB used by transformers.js)
     private async clearModelCache(): Promise<void> {
         try {
-            // Clear Cache API
             if ('caches' in window) {
                 const keys = await caches.keys();
                 for (const key of keys) {
@@ -447,7 +399,6 @@ class LocalTranslator {
                 }
             }
 
-            // Clear IndexedDB for transformers
             const databases = await indexedDB.databases?.() || [];
             for (const db of databases) {
                 if (db.name && (db.name.includes('transformers') || db.name.includes('onnx'))) {
@@ -463,40 +414,20 @@ class LocalTranslator {
     }
 
     private handleProgress(data: any) {
-        // Log cache status
         if (data.status === 'download') {
             console.log(`📥 Downloading: ${data.file} (not cached)`);
         } else if (data.status === 'cached') {
             console.log(`✅ Loaded from cache: ${data.file}`);
         }
 
-        if (data.status === 'progress' && this.progressCallback) {
-            const prog = data.progress || 0;
-            this.progressCallback(Math.round(prog));
+        if (data.status === 'progress') {
+            this.lastProgress = Math.round(data.progress || 0);
+            if (this.progressCallback) this.progressCallback(this.lastProgress);
         }
     }
 
-    private finishInit() {
-        this.isLoading = false;
-        if (this.progressCallback) this.progressCallback(100);
-        console.log(`👻 Ghost Translator: Ready using ${this.activeModelId} (${this.activeDevice?.toUpperCase() || 'unknown'})`);
-    }
-
-    // Convert UI language names to Model Codes
-    setLanguages(source: string, target: string) {
-        // Map common names to NLLB codes (Flores-200 format)
-        const codeMap: Record<string, string> = {
-            'Norwegian': 'nob_Latn',
-            'Ukrainian': 'ukr_Cyrl',
-            'English': 'eng_Latn',
-            'German': 'deu_Latn',
-            'Spanish': 'spa_Latn',
-            'French': 'fra_Latn',
-            'Russian': 'rus_Cyrl',
-            'Polish': 'pol_Latn'
-        };
-
-        // BCP-47 codes for Chrome Translator API
+    /** Language NAMES like 'Norwegian', 'Ukrainian'. */
+    setLanguages(source: string, target: string): void {
         const bcp47Map: Record<string, string> = {
             'Norwegian': 'no',
             'Ukrainian': 'uk',
@@ -508,349 +439,125 @@ class LocalTranslator {
             'Polish': 'pl'
         };
 
-        this.sourceLang = codeMap[source] || 'eng_Latn';
-        this.targetLang = codeMap[target] || 'eng_Latn';
-
-        // Set BCP-47 codes for Chrome API
         const newSourceLang = bcp47Map[source] || 'en';
         const newTargetLang = bcp47Map[target] || 'en';
 
-        // Reset Chrome translator if languages changed
-        if (this.sourceLanguageName !== newSourceLang || this.targetLanguageName !== newTargetLang) {
+        // Reset Chrome translator and cache if languages changed
+        // ('nb' is the Chrome fallback for 'no', not a real change)
+        const sourceChanged = this.sourceLanguageName !== newSourceLang &&
+            !(newSourceLang === 'no' && this.sourceLanguageName === 'nb');
+        if (sourceChanged || this.targetLanguageName !== newTargetLang) {
             this.destroyChromeTranslator();
+            this.draftCache.clear();
+            this.sourceLanguageName = newSourceLang;
         }
-
-        this.sourceLanguageName = newSourceLang;
         this.targetLanguageName = newTargetLang;
 
         // Sync Google NMT languages
         googleTranslateNMT.setLanguages(source, target);
     }
 
-    // Split text into chunks of CHUNK_SIZE words
-    private splitIntoChunks(text: string): string[] {
-        const words = text.trim().split(/\s+/);
-        const chunks: string[] = [];
-        for (let i = 0; i < words.length; i += LocalTranslator.CHUNK_SIZE) {
-            chunks.push(words.slice(i, i + LocalTranslator.CHUNK_SIZE).join(' '));
-        }
-        return chunks;
+    clearCache(): void {
+        this.draftCache.clear();
     }
 
-    // Translate a single chunk (internal, no caching logic)
-    private async translateSingleChunk(chunk: string): Promise<string> {
-        if (!chunk.trim()) return '';
+    private cacheSet(key: string, value: string) {
+        this.draftCache.delete(key);
+        this.draftCache.set(key, value);
+        if (this.draftCache.size > LocalTranslator.MAX_CACHE_SIZE) {
+            const oldest = this.draftCache.keys().next().value;
+            if (oldest !== undefined) this.draftCache.delete(oldest);
+        }
+    }
 
-        const chunkStart = performance.now();
+    private startBackgroundInit() {
+        if (this.initPromise || this.isLoading || this.opusFailed) return;
+        this.initialize().catch((e) => {
+            console.warn('👻 Draft Translator: background init failed', e?.message || e);
+        });
+    }
+
+    private async translateWithOpus(text: string): Promise<string | null> {
+        if (!this.translator || !this.opusSupportsPair()) return null;
+        const start = performance.now();
         try {
-            let output;
-            if (this.activeModelId.includes('nllb')) {
-                output = await this.translator(chunk, {
-                    src_lang: this.sourceLang,
-                    tgt_lang: this.targetLang
-                });
-            } else {
-                output = await this.translator(chunk);
-            }
-
+            const output = await this.translator(text);
             const result = Array.isArray(output) ? output[0] : output;
-            const chunkMs = performance.now() - chunkStart;
-            const modelName = this.activeModelId.includes('nllb') ? 'NLLB' : 'OPUS';
-            debugLogger.log(`${modelName}_CHUNK`, chunk.substring(0, 30), chunkMs, chunk.split(/\s+/).length);
-            return result?.translation_text || result?.generated_text || "⚠️";
+            const out = result?.translation_text || result?.generated_text || '';
+            if (!out) return null;
+            debugLogger.log('OPUS_CHUNK', text.substring(0, 30), performance.now() - start, text.split(/\s+/).length);
+            return out;
         } catch (e) {
-            console.error("❌ [GHOST] Chunk translation error", e);
-            return "❌";
+            console.error('❌ [DRAFT] Opus translation error', e);
+            return null;
         }
     }
 
-    // Clear cache (call when switching languages or models)
-    clearCache() {
-        this.chunkCache.clear();
-        this.incrementalCache = { originalText: '', translatedText: '' };
-    }
-
-    // OPTIMIZED: Translate phrase using chunked approach with caching
-    // Priority: 1. Chrome API (instant) → 2. Transformers.js (WASM/WebGPU)
-    // onProgress callback: Called after each chunk with partial translation
-    async translatePhraseChunked(
-        text: string,
-        forceFullTranslate = false,
-        onProgress?: (partialTranslation: string) => void
-    ): Promise<TranslatedWord[]> {
-        if (!text || !text.trim()) {
-            return [];
-        }
-
-        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
-        // INCREMENTAL CACHE: If text starts with previously translated prefix,
-        // only translate the new suffix and concatenate (keeps latency ~1-50ms)
-        const cache = this.incrementalCache;
-        if (cache.originalText && text.startsWith(cache.originalText) && text !== cache.originalText) {
-            const suffix = text.slice(cache.originalText.length).trim();
-            if (suffix) {
-                const suffixStart = performance.now();
-                const suffixResult = await this.translateWithChrome(suffix);
-                if (suffixResult !== null) {
-                    const fullTranslation = cache.translatedText + ' ' + suffixResult;
-                    const processedResult = glossaryProcessor.processTranslation(fullTranslation);
-                    // Update cache with full text
-                    this.incrementalCache = { originalText: text, translatedText: fullTranslation };
-                    debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - suffixStart, text.split(/\s+/).length);
-                    if (onProgress) onProgress(processedResult);
-                    return [{ original: text, ghostTranslation: processedResult, status: 'ghost' }];
-                }
-            }
-        }
-
-        const chromeStart = performance.now();
-        const chromeResult = await this.translateWithChrome(text);
-        if (chromeResult !== null) {
-            // POST-PROCESSING: Apply IT glossary
-            const processedResult = glossaryProcessor.processTranslation(chromeResult);
-            // Update incremental cache
-            this.incrementalCache = { originalText: text, translatedText: chromeResult };
-            debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - chromeStart, text.split(/\s+/).length);
-            if (onProgress) onProgress(processedResult);
-            return [{
-                original: text,
-                ghostTranslation: processedResult,
-                status: 'ghost'
-            }];
-        }
-
-        // === PRIORITY 2: Google Cloud NMT API (50-200ms, high quality) ===
-        if (googleTranslateNMT.isAvailable()) {
-            const nmtStart = performance.now();
-            const nmtResult = await googleTranslateNMT.translate(text);
-            if (nmtResult !== null) {
-                const processedResult = glossaryProcessor.processTranslation(nmtResult);
-                debugLogger.log('GNMT_OK', text.substring(0, 40), performance.now() - nmtStart, text.split(/\s+/).length);
-                if (onProgress) onProgress(processedResult);
-                return [{
-                    original: text,
-                    ghostTranslation: processedResult,
-                    status: 'ghost'
-                }];
-            }
-        }
-
-        // === PRIORITY 3: Direct OPUS model (56MB, 300-2000ms, offline fallback) ===
-        if (!this.translator) {
-            if (!this.isLoading) this.initialize();
-            return [{
-                original: text,
-                ghostTranslation: "⏳...",
-                status: 'ghost'
-            }];
-        }
-
-        const chunks = this.splitIntoChunks(text);
-        const translations: string[] = [];
-
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-
-            // Check cache first
-            if (!forceFullTranslate && this.chunkCache.has(chunk)) {
-                translations.push(this.chunkCache.get(chunk)!);
-
-                // PROGRESSIVE UPDATE: Show cached chunks immediately
-                if (onProgress) {
-                    const partialTranslation = translations.join(' ');
-                    onProgress(partialTranslation);
-                }
-            } else {
-                // Translate and cache
-                const translated = await this.translateSingleChunk(chunk);
-                this.chunkCache.set(chunk, translated);
-
-                // Limit cache size
-                if (this.chunkCache.size > LocalTranslator.MAX_CACHE_SIZE) {
-                    const firstKey = this.chunkCache.keys().next().value;
-                    if (firstKey) this.chunkCache.delete(firstKey);
-                }
-
-                translations.push(translated);
-
-                // PROGRESSIVE UPDATE: Call onProgress after EACH translated chunk
-                if (onProgress) {
-                    const partialTranslation = translations.join(' ');
-                    onProgress(partialTranslation);
-                }
-            }
-        }
-
-        const fullTranslation = translations.join(' ');
-
-        // POST-PROCESSING: Apply IT glossary for correct terminology
-        const processedTranslation = glossaryProcessor.processTranslation(fullTranslation);
-
-        return [{
-            original: text,
-            ghostTranslation: processedTranslation,
-            status: 'ghost'
-        }];
-    }
-
-    // Full phrase translation (used for finalized blocks)
-    // Priority: 1. Chrome API (instant) → 2. Pivot (NO→EN→UK) → 3. Direct Transformers.js
-    async translatePhrase(text: string): Promise<TranslatedWord[]> {
-        if (!text || !text.trim()) {
-            return [];
-        }
-
-        // === PRIORITY 1: Try Chrome Translator API (instant, native) ===
-        const chromeResult = await this.translateWithChrome(text);
-        if (chromeResult !== null) {
-            // POST-PROCESSING: Apply IT glossary + confidence filter
-            const processedResult = glossaryProcessor.processTranslation(chromeResult);
-            const filteredResult = this.applyConfidenceFilter(text, processedResult);
-            return [{
-                original: text,
-                ghostTranslation: filteredResult,
-                status: 'ghost'
-            }];
-        }
-
-        // === PRIORITY 2: Direct OPUS (fast) — Pivot skipped, too slow on WASM ===
-        if (!this.translator) {
-             if (!this.isLoading) this.initialize();
-             return [{
-                 original: text,
-                 ghostTranslation: "⏳...",
-                 status: 'ghost'
-             }];
-        }
-
+    /**
+     * Instant draft translation. Returns glossary-processed text from the first working
+     * engine, or null (empty input, nothing ready yet, or all engines failed). Never throws.
+     */
+    async translateDraft(text: string): Promise<string | null> {
         try {
-            let output;
+            if (!text || !text.trim()) return null;
 
-            if (this.activeModelId.includes('nllb')) {
-                 output = await this.translator(text, {
-                    src_lang: this.sourceLang,
-                    tgt_lang: this.targetLang
-                });
-            } else {
-                output = await this.translator(text);
+            const cached = this.draftCache.get(text);
+            if (cached !== undefined) {
+                this.cacheSet(text, cached); // refresh LRU position
+                return cached;
             }
 
-            const result = Array.isArray(output) ? output[0] : output;
-            let translatedText = result?.translation_text || result?.generated_text || "";
+            const words = text.split(/\s+/).length;
+            let raw: string | null = null;
 
-            if (!translatedText) translatedText = "⚠️";
+            // 1. Chrome on-device Translator
+            if (this.chromeTranslatorAvailable !== false) {
+                const t0 = performance.now();
+                raw = await this.translateWithChrome(text);
+                if (raw) debugLogger.log('CHROME_API', text.substring(0, 40), performance.now() - t0, words);
+            }
 
-            // POST-PROCESSING: Apply IT glossary + confidence filter
-            const processedText = glossaryProcessor.processTranslation(translatedText);
-            const filteredText = this.applyConfidenceFilter(text, processedText);
+            // 2. Google Cloud NMT
+            if (!raw && googleTranslateNMT.isAvailable()) {
+                const t0 = performance.now();
+                raw = await googleTranslateNMT.translate(text);
+                if (raw) debugLogger.log('GNMT_OK', text.substring(0, 40), performance.now() - t0, words);
+            }
 
-            return [{
-                original: text,
-                ghostTranslation: filteredText,
-                status: 'ghost'
-            }];
+            // 3. In-browser Opus model
+            if (!raw) {
+                raw = await this.translateWithOpus(text);
+            }
 
+            if (!raw) {
+                if (!this.translator) this.startBackgroundInit();
+                return null;
+            }
+
+            const processed = glossaryProcessor.processTranslation(raw);
+            if (!processed || !processed.trim()) return null;
+            this.cacheSet(text, processed);
+            return processed;
         } catch (e) {
-            console.error("❌ [GHOST] Translation error", e);
-            return [{ original: text, ghostTranslation: "❌", status: 'ghost' }];
+            console.error('❌ [DRAFT] translateDraft failed', e);
+            return null;
         }
     }
 
-    public getStatus() {
-        const pivotStatus = pivotTranslator.getStatus();
+    /** `method` = the engine that would be used right now. */
+    getStatus(): { method: DraftMethod; isReady: boolean; isLoading: boolean; progress: number } {
+        let method: DraftMethod = 'none';
+        if (this.chromeTranslator || this.chromeTranslatorAvailable === true) method = 'chrome';
+        else if (googleTranslateNMT.isAvailable()) method = 'nmt';
+        else if (this.translator && this.opusSupportsPair()) method = 'opus';
+
         return {
+            method,
+            isReady: method !== 'none',
             isLoading: this.isLoading,
-            isReady: !!this.translator || !!this.chromeTranslator || googleTranslateNMT.isAvailable() || pivotTranslator.isReady(),
-            useChromeAPI: this.chromeTranslatorAvailable === true,
-            useGoogleNMT: googleTranslateNMT.isAvailable(),
-            chromeChecked: this.chromeTranslatorAvailable !== null,
-            device: this.activeDevice, // 'webgpu' | 'wasm' | null
-            modelType: this.currentModelType,
-            // Pivot status
-            usePivot: this.usePivot,
-            pivotReady: pivotTranslator.isReady(),
-            pivotNoToEnReady: pivotStatus.noToEnReady,
-            pivotEnToUkReady: pivotStatus.enToUkReady,
-            // Confidence status
-            useConfidenceFilter: this.useConfidenceFilter,
-            lastConfidenceScore: this.lastConfidenceScore
+            progress: method !== 'none' && !this.isLoading ? 100 : this.lastProgress,
         };
     }
-
-    /**
-     * Apply confidence filter to translation result
-     * Returns filtered text and updates lastConfidenceScore
-     */
-    private applyConfidenceFilter(original: string, translation: string): string {
-        if (!this.useConfidenceFilter) {
-            return translation;
-        }
-
-        const result = confidenceFilter.calculate(original, translation);
-        this.lastConfidenceScore = result.confidence;
-
-        if (!result.isAcceptable) {
-            console.log(`⚠️ [Confidence] Low quality (${result.confidence}%): ${result.reasons.join(', ')}`);
-            // Return translation anyway but log warning
-            // In future, could show visual indicator or retry
-        }
-
-        return translation;
-    }
-
-    /**
-     * Get last confidence score
-     */
-    public getLastConfidenceScore(): number {
-        return this.lastConfidenceScore;
-    }
-
-    /**
-     * Enable or disable confidence filtering
-     */
-    public setConfidenceFilterEnabled(enabled: boolean): void {
-        this.useConfidenceFilter = enabled;
-        console.log(`📊 [Confidence] Filter ${enabled ? 'Enabled' : 'Disabled'}`);
-    }
-
-    // Check if using native Chrome API (for UI display)
-    public isUsingChromeAPI(): boolean {
-        return this.chromeTranslatorAvailable === true;
-    }
-
-    // ========== PIVOT CONTROL ==========
-
-    /**
-     * Enable or disable pivot translation
-     */
-    public setPivotEnabled(enabled: boolean): void {
-        this.usePivot = enabled;
-        console.log(`🔄 [Pivot] ${enabled ? 'Enabled' : 'Disabled'}`);
-    }
-
-    /**
-     * Check if pivot is enabled
-     */
-    public isPivotEnabled(): boolean {
-        return this.usePivot;
-    }
-
-    /**
-     * Check if pivot is ready to use
-     */
-    public isPivotReady(): boolean {
-        return pivotTranslator.isReady();
-    }
-
-    /**
-     * Initialize pivot translator
-     */
-    public async initPivot(onProgress?: (stage: string, progress: number) => void): Promise<boolean> {
-        const result = await pivotTranslator.initialize(onProgress);
-        this.pivotInitialized = result;
-        return result;
-    }
-
 }
 
-export const localTranslator = new LocalTranslator();
+export const localTranslator = new LocalTranslator();

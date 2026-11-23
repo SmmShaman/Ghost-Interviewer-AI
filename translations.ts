@@ -31,13 +31,6 @@ export const translations = {
       youtubeTestTitle: "📺 HOW TO TEST WITH YOUTUBE?",
       youtubeTestBody: "YouTube plays to Default Speakers, not Cable. To test: Click Windows Volume -> Select 'CABLE Input'. Don't forget to switch back for the interview!",
       
-      voiceMeeterTitle: "🍌 VOICEMEETER STEREO SPLIT (PRO)",
-      voiceMeeterBody: "Separate channels to detect WHO is speaking automatically.",
-      vmStep1: "Install VoiceMeeter Banana.",
-      vmStep2: "Input 1 (Your Mic): Pan fully LEFT (A1).",
-      vmStep3: "Input 2 (VB-Cable/Teams): Pan fully RIGHT (A1).",
-      vmStep4: "App Mic: Select 'VoiceMeeter Output'.",
-      stereoMode: "STEREO SEPARATION MODE",
 
       // Audio Presets
       presetGroupListen: "LISTEN & TRANSLATE",
@@ -140,7 +133,9 @@ export const translations = {
       },
       targetLang: "TARGET LANG (INTERVIEW)",
       nativeLang: "NATIVE LANG (FOR YOU)",
-      aiInstructions: "AI INSTRUCTIONS (PROMPT MANAGER)",
+      aiInstructions: "PERSONAL INSTRUCTIONS FOR ANSWERS",
+      aiInstructionsHint: "Content rules for suggested answers, e.g. \"I built project X alone\". The answer format is fixed by the app.",
+      chars: "chars",
       editLogic: "Edit logic manually",
       prompts: {
           select: "Select a Preset...",
@@ -156,41 +151,6 @@ export const translations = {
           focus: "FOCUS (No Strategy)",
           simple: "SIMPLE (Translation Only)"
       },
-      ghostModel: {
-          label: "LOCAL MODEL (GHOST - STREAM 1)",
-          opus: "Fast (Opus - 56MB)",
-          nllb: "High Quality (NLLB - 600MB)",
-          switching: "Switching models..."
-      },
-      llmModel: {
-          label: "SMART ANALYSIS MODEL (STREAM 2)",
-          claude: "Claude (Anthropic)",
-      },
-      // Mode-Centric Cards UI
-      modeCards: {
-          selectMode: "SELECT YOUR INTERVIEW MODE",
-          configure: "Configure",
-          active: "ACTIVE",
-          modeConfig: "MODE CONFIGURATION",
-          aiModel: "AI Model",
-          modePrompts: "Mode-Specific Prompts",
-          translationPrompt: "Translation Prompt",
-          translationPromptHelper: "Controls how the interviewer's question is translated",
-          analysisPrompt: "Analysis Prompt",
-          analysisPromptHelper: "Controls strategic analysis generation",
-          answerPrompt: "Answer Prompt",
-          answerPromptHelper: "Controls suggested answer generation",
-          additionalSettings: "Additional Settings",
-          chromeTranslationFallback: "Prefer Chrome Translation API",
-          strategyDetailLevel: "Strategy Detail Level",
-          strategyBrief: "Brief",
-          strategyDetailed: "Detailed",
-          strategyComprehensive: "Comprehensive",
-          saveChanges: "Save Changes",
-          resetToDefault: "Reset to Default",
-          testMode: "Test Mode",
-          confirmReset: "Reset all prompts for this mode to defaults?"
-      },
       // Accordion sections
       accordion: {
           yourProfile: "YOUR PROFILE",
@@ -200,17 +160,17 @@ export const translations = {
           advancedAudio: "ADVANCED AUDIO",
           audioSetupGuide: "SETUP GUIDE",
           languageSettings: "LANGUAGE SETTINGS",
-          advancedPrompts: "ADVANCED PROMPTS",
+          advancedPrompts: "PERSONAL INSTRUCTIONS",
           allSettings: "ALL SETTINGS"
       }
     },
     modes: {
         simple: "SIMPLE (TRANSLATION)",
-        simpleDesc: "Two columns. Original text + Parallel High-Quality Translation. No AI Strategy.",
+        simpleDesc: "Live translation only.",
         focus: "FOCUS (ANSWER ONLY)",
-        focusDesc: "Input + AI Suggested Answer. Hides the Strategy/Analysis column for cleaner view.",
+        focusDesc: "Translation + a suggested answer to each interviewer question, grounded in your documents.",
         full: "FULL (STRATEGIC)",
-        fullDesc: "Complete 3-column view: Input + Strategy/Analysis + Suggested Answer."
+        fullDesc: "The same plus a short strategy and an analysis of what the interviewer is really asking."
     },
     card: {
       strategy: "Strategy",
@@ -302,13 +262,6 @@ Example:
       youtubeTestTitle: "📺 ЯК ПРОТЕСТУВАТИ НА YOUTUBE?",
       youtubeTestBody: "YouTube грає в Динаміки, а не в Кабель. Для тесту: Гучність Windows -> Оберіть 'CABLE Input'. Поверніть назад перед інтерв'ю!",
       
-      voiceMeeterTitle: "🍌 VOICEMEETER СТЕРЕО СПЛІТ (PRO)",
-      voiceMeeterBody: "Розділення каналів для авто-визначення хто говорить.",
-      vmStep1: "Встановіть VoiceMeeter Banana.",
-      vmStep2: "Вхід 1 (Ваш мікрофон): Панорама вліво (LEFT) на A1.",
-      vmStep3: "Вхід 2 (VB-Cable/Teams): Панорама вправо (RIGHT) на A1.",
-      vmStep4: "Мікрофон Додатку: Оберіть 'VoiceMeeter Output'.",
-      stereoMode: "РЕЖИМ СТЕРЕО РОЗДІЛЕННЯ",
 
       // Audio Presets
       presetGroupListen: "СЛУХАТИ & ПЕРЕКЛАДАТИ",
@@ -411,7 +364,9 @@ Example:
       },
       targetLang: "МОВА ІНТЕРВ'Ю",
       nativeLang: "РІДНА МОВА (ПЕРЕКЛАД)",
-      aiInstructions: "ІНСТРУКЦІЯ ДЛЯ ШІ (МЕНЕДЖЕР ПРОМПТІВ)",
+      aiInstructions: "ОСОБИСТІ ІНСТРУКЦІЇ ДЛЯ ВІДПОВІДЕЙ",
+      aiInstructionsHint: "Правила змісту підказаних відповідей, напр. «Проєкт X я зробив сам». Формат відповіді задає застосунок.",
+      chars: "симв.",
       editLogic: "Редагувати логіку",
       prompts: {
           select: "Оберіть пресет...",
@@ -427,41 +382,6 @@ Example:
           focus: "ФОКУС (Без Стратегії)",
           simple: "ПРОСТИЙ (Лише Переклад)"
       },
-      ghostModel: {
-          label: "ЛОКАЛЬНА МОДЕЛЬ (GHOST - STREAM 1)",
-          opus: "Швидка (Opus - 56MB)",
-          nllb: "Висока Якість (NLLB - 600MB)",
-          switching: "Зміна моделі..."
-      },
-      llmModel: {
-          label: "РОЗУМНИЙ АНАЛІЗ (STREAM 2)",
-          claude: "Claude (Anthropic)",
-      },
-      // Mode-Centric Cards UI
-      modeCards: {
-          selectMode: "ОБЕРІТЬ РЕЖИМ ІНТЕРВ'Ю",
-          configure: "Налаштувати",
-          active: "АКТИВНИЙ",
-          modeConfig: "НАЛАШТУВАННЯ РЕЖИМУ",
-          aiModel: "ШІ Модель",
-          modePrompts: "Промпти для цього режиму",
-          translationPrompt: "Промпт перекладу",
-          translationPromptHelper: "Контролює переклад питання інтерв'юера",
-          analysisPrompt: "Промпт аналізу",
-          analysisPromptHelper: "Контролює генерацію стратегічного аналізу",
-          answerPrompt: "Промпт відповіді",
-          answerPromptHelper: "Контролює генерацію рекомендованої відповіді",
-          additionalSettings: "Додаткові налаштування",
-          chromeTranslationFallback: "Віддавати перевагу Chrome Translation API",
-          strategyDetailLevel: "Рівень деталізації стратегії",
-          strategyBrief: "Коротко",
-          strategyDetailed: "Детально",
-          strategyComprehensive: "Повно",
-          saveChanges: "Зберегти зміни",
-          resetToDefault: "Скинути до стандартних",
-          testMode: "Тестувати режим",
-          confirmReset: "Скинути всі промпти цього режиму до стандартних?"
-      },
       // Accordion sections
       accordion: {
           yourProfile: "ВАШ ПРОФІЛЬ",
@@ -471,17 +391,17 @@ Example:
           advancedAudio: "РОЗШИРЕНЕ АУДІО",
           audioSetupGuide: "ІНСТРУКЦІЯ",
           languageSettings: "НАЛАШТУВАННЯ МОВИ",
-          advancedPrompts: "РОЗШИРЕНІ ПРОМПТИ",
+          advancedPrompts: "ОСОБИСТІ ІНСТРУКЦІЇ",
           allSettings: "УСІ НАЛАШТУВАННЯ"
       }
     },
     modes: {
         simple: "ПРОСТИЙ (ПЕРЕКЛАД)",
-        simpleDesc: "Дві колонки. Оригінал + Паралельний Якісний Переклад. Без Стратегії.",
+        simpleDesc: "Лише живий переклад.",
         focus: "ФОКУС (ВІДПОВІДЬ)",
-        focusDesc: "Вхід + Рекомендована відповідь. Приховує колонку стратегії для чистоти екрану.",
+        focusDesc: "Переклад + підказка відповіді на кожне питання інтерв'юера, на основі ваших документів.",
         full: "ПОВНИЙ (СТРАТЕГІЧНИЙ)",
-        fullDesc: "Повний вид з 3 колонок: Вхід + Стратегія/Аналіз + Рекомендована Відповідь."
+        fullDesc: "Те саме + коротка стратегія та аналіз того, що насправді питає інтерв'юер."
     },
     card: {
       strategy: "Стратегія",

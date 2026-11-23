@@ -1,10 +1,8 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { InterviewContext, PromptPreset, InterviewProfile, CandidateProfile, JobProfile, ModeConfig } from '../types';
+import { InterviewContext, PromptPreset, InterviewProfile, CandidateProfile, JobProfile } from '../types';
 import { translations } from '../translations';
-import { localTranslator } from '../services/localTranslator';
-import { knowledgeSearch } from '../services/knowledgeSearch';
 import { buildDynamicGuide } from './AudioPresetSelector';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 
@@ -49,8 +47,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const audioDevices = useAudioDevices();
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [localModelReady, setLocalModelReady] = useState(false);
-  const [searchStats, setSearchStats] = useState({ chunks: 0, terms: 0, isReady: false });
 
   // Dropdown Section States
   const [profileOpen, setProfileOpen] = useState(false);
@@ -92,18 +88,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
     onContextChange({ ...context, [field]: value });
   };
 
-  // Handle mode config changes
-  const handleModeConfigChange = (mode: 'full' | 'focus' | 'simple', field: string, value: any) => {
-    const newModeConfig = {
-      ...context.modeConfig,
-      [mode]: {
-        ...context.modeConfig[mode],
-        [field]: value
-      }
-    };
-    onContextChange({ ...context, modeConfig: newModeConfig });
-  };
-
   // Click outside to close
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -116,24 +100,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, toggleOpen]);
-
-  // Poll local model status
-  useEffect(() => {
-      if(isOpen) {
-          const checkStatus = () => {
-             const status = localTranslator.getStatus();
-             setLocalModelReady(status.isReady);
-          }
-          checkStatus();
-          const interval = setInterval(checkStatus, 1000);
-          return () => clearInterval(interval);
-      }
-  }, [isOpen]);
-
-  // Update search stats when knowledge base changes
-  useEffect(() => {
-      setSearchStats(knowledgeSearch.getStats());
-  }, [context.knowledgeBase]);
 
   // Initialize profile/prompt names from saved context
   useEffect(() => {
@@ -497,9 +463,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
   const kbLength = context.knowledgeBase.length;
   const status = getLatencyStatus(kbLength);
 
-  // Get current mode config
-  const currentModeConfig = context.modeConfig[context.viewMode.toLowerCase() as 'full' | 'focus' | 'simple'];
-
 
   if (!isOpen) return null;
 
@@ -582,7 +545,7 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             <div className="flex justify-between items-end">
               <label className="text-[10px] font-medium text-emerald-400/80 uppercase">{t.knowledgeBase}</label>
               <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${kbLength > MAX_KB_SIZE ? 'border-red-500 bg-red-900/20' : 'border-gray-700'} flex items-center gap-1 ${status.color}`}>
-                <span>{(kbLength / 1024).toFixed(1)} KB</span>
+                <span>{kbLength.toLocaleString()} {t.chars}</span>
                 <span className={`w-1.5 h-1.5 rounded-full ${status.bg}`}></span>
               </div>
             </div>
@@ -754,17 +717,6 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             </div>
           </div>
 
-          {/* Stereo Mode Toggle */}
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] font-medium text-orange-400 uppercase">{t.stereoMode}</label>
-            <button
-              onClick={() => handleChange('stereoMode', !context.stereoMode)}
-              className={`w-10 h-5 rounded-full relative transition-colors duration-200 ${context.stereoMode ? 'bg-orange-600' : 'bg-gray-700'}`}
-            >
-              <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all duration-200 ${context.stereoMode ? 'left-6' : 'left-1'}`} />
-            </button>
-          </div>
-
           {/* Setup Guide (context-aware for active preset) */}
           {context.activeAudioPreset && context.activeAudioPreset !== 'manual' && context.activeAudioPreset !== 'best-available' && context.activeAudioPreset !== 'default-mic' && (() => {
             const steps = audioDevices.outputDevices.length > 0
@@ -833,52 +785,14 @@ const SetupPanel: React.FC<SetupPanelProps> = ({ context, onContextChange, isOpe
             </button>
           </div>
 
+          <label className="text-[10px] font-medium text-emerald-400/80 uppercase block">{t.aiInstructions}</label>
+          <p className="text-[9px] text-gray-500 leading-snug mb-1">{t.aiInstructionsHint}</p>
           <textarea
             className="w-full h-32 bg-gray-800 border border-gray-700 rounded-lg p-2 text-[10px] font-mono text-gray-300 focus:border-emerald-500 outline-none resize-none leading-relaxed"
             value={context.systemInstruction}
             onChange={(e) => handleChange('systemInstruction', e.target.value)}
           />
 
-          {/* Mode-Specific Prompts */}
-          {context.viewMode !== 'SIMPLE' && (
-            <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
-              <label className="text-[10px] text-gray-400 uppercase tracking-wide font-medium block">
-                📝 Mode-Specific Prompts
-              </label>
-
-              {/* Translation Prompt */}
-              <div>
-                <label className="text-[9px] text-gray-500 uppercase tracking-wide mb-1 block">Translation Prompt</label>
-                <textarea
-                  className="w-full h-14 bg-gray-900/80 border border-gray-700/40 rounded-lg p-2 text-[10px] font-mono text-gray-300 focus:border-cyan-500 outline-none resize-none"
-                  value={currentModeConfig.translationPrompt}
-                  onChange={(e) => handleModeConfigChange(context.viewMode.toLowerCase() as 'full' | 'focus' | 'simple', 'translationPrompt', e.target.value)}
-                />
-              </div>
-
-              {/* Analysis Prompt (FULL mode only) */}
-              {context.viewMode === 'FULL' && (
-                <div>
-                  <label className="text-[9px] text-gray-500 uppercase tracking-wide mb-1 block">Analysis Prompt</label>
-                  <textarea
-                    className="w-full h-14 bg-gray-900/80 border border-gray-700/40 rounded-lg p-2 text-[10px] font-mono text-gray-300 focus:border-purple-500 outline-none resize-none"
-                    value={(currentModeConfig as any).analysisPrompt || ''}
-                    onChange={(e) => handleModeConfigChange('full', 'analysisPrompt', e.target.value)}
-                  />
-                </div>
-              )}
-
-              {/* Answer Prompt */}
-              <div>
-                <label className="text-[9px] text-gray-500 uppercase tracking-wide mb-1 block">Answer Prompt</label>
-                <textarea
-                  className="w-full h-14 bg-gray-900/80 border border-gray-700/40 rounded-lg p-2 text-[10px] font-mono text-gray-300 focus:border-emerald-500 outline-none resize-none"
-                  value={(currentModeConfig as any).answerPrompt || ''}
-                  onChange={(e) => handleModeConfigChange(context.viewMode.toLowerCase() as 'full' | 'focus', 'answerPrompt', e.target.value)}
-                />
-              </div>
-            </div>
-          )}
         </DropdownSection>
 
       </div>

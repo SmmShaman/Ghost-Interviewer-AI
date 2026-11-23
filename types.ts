@@ -34,27 +34,6 @@ export interface InterviewProfile {
 
 export type ViewMode = 'FULL' | 'FOCUS' | 'SIMPLE';
 
-// Mode-Specific Configuration for Mode-Centric Cards UI
-export interface ModePrompts {
-  translationPrompt: string;     // How to translate input
-  analysisPrompt?: string;       // How to analyze question (not for SIMPLE)
-  answerPrompt?: string;         // How to generate answer (not for SIMPLE)
-}
-
-export interface ModeConfig {
-  full: ModePrompts & {
-    aiModel: 'claude';
-    strategyDetailLevel: 'brief' | 'detailed' | 'comprehensive';
-  };
-  focus: ModePrompts & {
-    aiModel: 'claude';
-  };
-  simple: {
-    translationPrompt: string;
-    useChromeAPI: boolean;       // Whether to prefer Chrome Translator API
-  };
-}
-
 export type AudioPresetId =
   | 'best-available'          // Auto-detect best mic (USB > headset > built-in > default)
   | 'default-mic'             // System default microphone (no device selection)
@@ -66,66 +45,14 @@ export type AudioPresetId =
   | 'manual'                  // User manually selected from dropdown
   | '';                       // No preset selected
 
-// Speed preset for translation pipeline tuning
-export type SpeedPresetId = 'youtube' | 'interview' | 'custom';
-
-export interface SpeedPresetConfig {
-  ghostBatchWords: number;       // Max words per Ghost translation batch
-  ghostDebounceMs: number;       // Debounce before Ghost translates
-  interimDebounceMs: number;     // Debounce before interim translates
-  holdN: number;                 // Hide last N interim words (reduces flicker)
-  llmEnabled: boolean;           // Enable LLM translation
-  llmTriggerWords: number;       // Words threshold to trigger LLM
-  llmPauseMs: number;            // Pause duration to trigger LLM
-  activeWindowWords: number;     // Words kept in active zone before freezing
-  paragraphPauseMs: number;      // Pause to trigger paragraph break (ms)
-  paragraphMarker: string;       // What to insert on pause: '\n\n' or '. ' or ' '
+// Pre-interview briefing: generated once per candidate+job pair, reused as the
+// grounded fact sheet for every live answer.
+export interface Briefing {
+  text: string;        // Human-readable briefing in the native language
+  keyterms: string[];  // Names/terms likely to be spoken (helps translation fix STT errors)
+  sourceHash: string;  // Hash of the documents it was built from (stale detection)
+  createdAt: number;
 }
-
-export const SPEED_PRESETS: Record<SpeedPresetId, SpeedPresetConfig & { label: string; description: string }> = {
-  youtube: {
-    label: 'YouTube / Підкасти',
-    description: 'Ghost only, суцільний текст як субтитри',
-    ghostBatchWords: 10,
-    ghostDebounceMs: 50,
-    interimDebounceMs: 50,
-    holdN: 2,
-    llmEnabled: false,
-    llmTriggerWords: 25,
-    llmPauseMs: 2000,
-    activeWindowWords: 25,
-    paragraphPauseMs: 8000,    // 8s — only on real long pauses
-    paragraphMarker: '. ',     // Dot + space instead of line break
-  },
-  interview: {
-    label: 'Live інтерв\'ю',
-    description: 'Максимальна швидкість Ghost + LLM для відповідей',
-    ghostBatchWords: 6,
-    ghostDebounceMs: 50,
-    interimDebounceMs: 50,
-    holdN: 1,
-    llmEnabled: true,
-    llmTriggerWords: 6,
-    llmPauseMs: 600,
-    activeWindowWords: 12,
-    paragraphPauseMs: 3000,    // 3s — separate interviewer phrases
-    paragraphMarker: '\n\n',   // Visual paragraph break
-  },
-  custom: {
-    label: 'Власні',
-    description: 'Ручне налаштування всіх параметрів',
-    ghostBatchWords: 8,
-    ghostDebounceMs: 100,
-    interimDebounceMs: 100,
-    holdN: 2,
-    llmEnabled: true,
-    llmTriggerWords: 8,
-    llmPauseMs: 800,
-    activeWindowWords: 18,
-    paragraphPauseMs: 2000,
-    paragraphMarker: '\n\n',
-  },
-};
 
 export interface InterviewContext {
   // === ACTIVE DATA (loaded from selected profiles) ===
@@ -157,60 +84,43 @@ export interface InterviewContext {
   activeProfileId: string; // Old profile ID
 
   // === UI & HARDWARE ===
-  stereoMode: boolean; // Enable VoiceMeeter Left/Right separation
   audioDeviceId: string; // Selected audio input device ID (empty = system default)
   activeAudioPreset: AudioPresetId; // Active audio routing preset
   listenThroughDeviceId: string; // Output device for VB-Cable audio passthrough (empty = disabled)
-  viewMode: ViewMode; // Controls the layout and processing depth
-  ghostModel: 'opus' | 'nllb'; // Select local model type
-  llmProvider: 'claude'; // Cloud LLM Provider
-  speedPreset: SpeedPresetId; // Translation speed preset
-  googleTranslateKey: string; // Google Cloud Translation API key (Level 2 NMT)
+  viewMode: ViewMode; // Depth of assistance: SIMPLE = translation, FOCUS = + answers, FULL = + strategy/analysis
+  googleTranslateKey: string; // Google Cloud Translation API key (dev fallback for the draft translator)
 
-  // === MODE-SPECIFIC CONFIGURATION ===
-  modeConfig: ModeConfig; // Mode-specific prompts and settings
+  // === BRIEFINGS (keyed by sourceHash) ===
+  briefings: Record<string, Briefing>;
 }
 
-export interface TextBlock {
-  id: string;
-  text: string;
-  wordCount: number;
-  status: 'collecting' | 'translating' | 'ai-processing' | 'complete';
-  ghostTranslation?: string;
-  aiResult?: {
-    analysis: string;
-    strategy: string;
-    answer: string;
-    answerTranslation: string;
-  };
+// One translated unit of interviewer speech (sentence / utterance).
+export interface Segment {
+  id: number;
+  source: string;                 // Original text from speech recognition
+  draft: string;                  // Instant machine translation (shown until the LLM answers)
+  translation: string;            // LLM translation (streams in)
+  status: 'draft' | 'translating' | 'done' | 'draft-only';
+  boundary: 'final' | 'pause' | 'length'; // Why the segment ended ('length' = cut mid-speech)
   timestamp: number;
+  latencyMs?: number;             // Segment creation -> first LLM token
 }
 
-export interface Message {
-  id: string;
-  role: 'interviewer' | 'assistant' | 'candidate';
-  text: string; // Original text (Answer Script)
-  translatedText?: string; // Deprecated (fallback)
-  ghostTranslation?: string; // New: Local Model (Draft)
-  aiTranslation?: string;    // New: Azure Model (Final)
-  isAiTranslated?: boolean; // New: True if AI has updated the translation
-  rationale?: string; // Deprecated/Fallback
-  analysis?: string; // New: Understanding the question
-  strategy?: string; // New: Bullet points
-  answerTranslation?: string; // New: Translation of the suggested answer
-  candidateTranslation?: string; // New: Translation of what the candidate said
+// A detected interviewer question with the suggested answer.
+export interface QAItem {
+  id: number;
+  question: string;               // In the interview language
+  questionTranslation: string;    // In the native language
+  strategy: string;               // FULL mode
+  analysis: string;               // FULL mode
+  answer: string;                 // In the interview language
+  answerTranslation: string;      // In the native language
+  status: 'generating' | 'done' | 'aborted' | 'error';
+  manual: boolean;                // Triggered by the user, not auto-detected
   timestamp: number;
-  latency?: number;
 }
 
 export enum AppState {
   IDLE = 'IDLE',
   LISTENING = 'LISTENING',
-  PROCESSING = 'PROCESSING',
-}
-
-// Browser Speech Recognition Types
-export interface IWindow extends Window {
-  webkitSpeechRecognition: any;
-  SpeechRecognition: any;
 }
