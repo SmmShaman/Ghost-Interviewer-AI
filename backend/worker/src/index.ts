@@ -11,6 +11,11 @@ interface Env {
   // Shared secret that lets the owner's other Workers (e.g. kapital) use the
   // Claude proxy server-to-server without a Google user token.
   AI_INTERNAL_KEY?: string;
+  // HMAC key for app session tokens. Optional: falls back to AI_INTERNAL_KEY.
+  SESSION_SECRET?: string;
+  // Google OAuth client id of this app. When set, ID tokens minted for any
+  // other app are rejected (set it: without it any Google sign-in is accepted).
+  GOOGLE_CLIENT_ID?: string;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -46,7 +51,7 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 // ─── Google OAuth helpers ───────────────────────────────────────────────────
 
-async function verifyGoogleToken(idToken: string): Promise<GoogleTokenInfo | null> {
+async function verifyGoogleToken(idToken: string, env?: Env): Promise<GoogleTokenInfo | null> {
   try {
     const response = await fetch(
       `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
@@ -54,10 +59,73 @@ async function verifyGoogleToken(idToken: string): Promise<GoogleTokenInfo | nul
     if (!response.ok) return null;
     const data = await response.json() as GoogleTokenInfo;
     if (!data.sub || !data.email) return null;
+    if (env?.GOOGLE_CLIENT_ID && data.aud !== env.GOOGLE_CLIENT_ID) return null;
     return data;
   } catch {
     return null;
   }
+}
+
+// ─── App session tokens ──────────────────────────────────────────────────────
+// A Google ID token lives one hour and verifying it costs a round trip to Google
+// on every request. For a live interview that means (a) the LLM dies mid-session
+// and (b) every translation waits on tokeninfo. After one Google verification we
+// therefore issue our own HMAC-signed token, checked locally with no network.
+
+const SESSION_PREFIX = 'gs1';
+const SESSION_TTL_SECONDS = 12 * 60 * 60;
+
+const b64url = (bytes: Uint8Array): string =>
+  btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+const b64urlDecode = (text: string): Uint8Array => {
+  const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(bin, c => c.charCodeAt(0));
+};
+
+async function sessionKey(env: Env): Promise<CryptoKey | null> {
+  const secret = env.SESSION_SECRET || env.AI_INTERNAL_KEY;
+  if (!secret) return null;
+  return crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(`ghost-session:${secret}`),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'],
+  );
+}
+
+async function issueSessionToken(env: Env, sub: string, email: string): Promise<{ token: string; expiresAt: number } | null> {
+  const key = await sessionKey(env);
+  if (!key) return null;
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  const payload = b64url(new TextEncoder().encode(JSON.stringify({ sub, email, exp })));
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
+  return { token: `${SESSION_PREFIX}.${payload}.${b64url(sig)}`, expiresAt: exp * 1000 };
+}
+
+async function verifySessionToken(env: Env, token: string): Promise<{ sub: string; email: string } | null> {
+  try {
+    const [prefix, payload, sig] = token.split('.');
+    if (prefix !== SESSION_PREFIX || !payload || !sig) return null;
+    const key = await sessionKey(env);
+    if (!key) return null;
+    const ok = await crypto.subtle.verify('HMAC', key, b64urlDecode(sig), new TextEncoder().encode(payload));
+    if (!ok) return null;
+    const data = JSON.parse(new TextDecoder().decode(b64urlDecode(payload))) as { sub: string; email: string; exp: number };
+    if (!data.sub || !data.exp || data.exp * 1000 < Date.now()) return null;
+    return { sub: data.sub, email: data.email };
+  } catch {
+    return null;
+  }
+}
+
+// Bearer auth for the stateless endpoints (AI proxy, translate proxy):
+// app session token (local check) or, as before, a raw Google ID token.
+async function verifyBearer(request: Request, env: Env): Promise<{ sub: string; email: string } | null> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7);
+  if (token.startsWith(`${SESSION_PREFIX}.`)) return verifySessionToken(env, token);
+  const info = await verifyGoogleToken(token, env);
+  return info ? { sub: info.sub, email: info.email } : null;
 }
 
 async function getOrCreateUser(
@@ -130,13 +198,13 @@ function matchRoute(method: string, path: string, pattern: string): Record<strin
 // ─── Route handlers ──────────────────────────────────────────────────────────
 
 // POST /api/auth/google
-async function authenticateGoogle(sql: SqlFunction, request: Request): Promise<Response> {
+async function authenticateGoogle(sql: SqlFunction, request: Request, env: Env): Promise<Response> {
   const body = await request.json() as { idToken?: string };
   if (!body.idToken) {
     return jsonResponse({ error: 'idToken is required' }, 400);
   }
 
-  const profile = await verifyGoogleToken(body.idToken);
+  const profile = await verifyGoogleToken(body.idToken, env);
   if (!profile) {
     return jsonResponse({ error: 'Invalid Google ID token' }, 401);
   }
@@ -153,7 +221,11 @@ async function authenticateGoogle(sql: SqlFunction, request: Request): Promise<R
     `;
   }
 
+  const session = await issueSessionToken(env, profile.sub, profile.email);
+
   return jsonResponse({
+    sessionToken: session?.token ?? null,
+    sessionExpiresAt: session?.expiresAt ?? null,
     id: user.id,
     email: user.email,
     name: user.name,
@@ -818,7 +890,13 @@ interface AiRequestBody {
   model: string;
   prompt: string;
   systemInstruction?: string;
-  config?: { maxOutputTokens?: number; effort?: 'low' | 'medium' | 'high' };
+  // Mark the system instruction as a prompt-cache breakpoint. Used for the
+  // answer prompt, whose system part (candidate documents + briefing) is
+  // identical for every question of a session.
+  cacheSystem?: boolean;
+  // `thinking: false` turns extended thinking off: live translation needs the
+  // first token as early as possible and gains nothing from deliberation.
+  config?: { maxOutputTokens?: number; effort?: 'low' | 'medium' | 'high'; thinking?: boolean };
 }
 
 function anthropicHeaders(env: Env): Record<string, string> | null {
@@ -846,8 +924,14 @@ function anthropicHeaders(env: Env): Record<string, string> | null {
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 function buildAnthropicBody(body: AiRequestBody, stream: boolean): Record<string, unknown> {
-  const system: { type: 'text'; text: string }[] = [{ type: 'text', text: CLAUDE_CODE_IDENTITY }];
-  if (body.systemInstruction) system.push({ type: 'text', text: body.systemInstruction });
+  const system: { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }[] = [{ type: 'text', text: CLAUDE_CODE_IDENTITY }];
+  if (body.systemInstruction) {
+    system.push({
+      type: 'text',
+      text: body.systemInstruction,
+      ...(body.cacheSystem ? { cache_control: { type: 'ephemeral' as const } } : {}),
+    });
+  }
   const out: Record<string, unknown> = {
     model: body.model,
     max_tokens: body.config?.maxOutputTokens ?? 4096,
@@ -857,7 +941,7 @@ function buildAnthropicBody(body: AiRequestBody, stream: boolean): Record<string
   };
   // Haiku 4.5 predates adaptive thinking; every newer model runs adaptive thinking
   // with a low default effort — this is a real-time interview aid, latency matters.
-  if (!body.model.includes('haiku-4-5')) {
+  if (!body.model.includes('haiku-4-5') && body.config?.thinking !== false) {
     out.thinking = { type: 'adaptive' };
     out.output_config = { effort: body.config?.effort ?? 'low' };
   }
@@ -874,12 +958,10 @@ function internalKeyOk(request: Request, env: Env): boolean {
 
 async function authorizeAiRequest(request: Request, env: Env): Promise<{ headers: Record<string, string>; body: AiRequestBody } | Response> {
   if (!internalKeyOk(request, env)) {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!request.headers.get('Authorization')) {
       return jsonResponse({ error: 'Authorization required' }, 401);
     }
-    const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
-    if (!tokenInfo) {
+    if (!(await verifyBearer(request, env))) {
       return jsonResponse({ error: 'Invalid token' }, 401);
     }
   }
@@ -1001,7 +1083,7 @@ export default {
 
       // Google auth endpoint (no auth needed — this IS the auth)
       if (method === 'POST' && path === '/api/auth/google') {
-        return authenticateGoogle(sql, request);
+        return authenticateGoogle(sql, request, env);
       }
 
       // Non-API routes — proxy to Netlify frontend
@@ -1029,12 +1111,10 @@ export default {
       // Translation proxy (requires auth, uses server-side API key)
       if (method === 'POST' && path === '/api/translate') {
         // Lightweight auth: just verify token, don't need DB user
-        const authHeader = request.headers.get('Authorization');
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        if (!request.headers.get('Authorization')) {
           return jsonResponse({ error: 'Authorization required' }, 401);
         }
-        const tokenInfo = await verifyGoogleToken(authHeader.slice(7));
-        if (!tokenInfo) {
+        if (!(await verifyBearer(request, env))) {
           return jsonResponse({ error: 'Invalid token' }, 401);
         }
 
