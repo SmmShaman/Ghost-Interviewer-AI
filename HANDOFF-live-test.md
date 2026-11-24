@@ -14,6 +14,8 @@
 ## 🔴 OPEN — сесія на НОУТБУЦІ (Windows, Claude Code з Claude in Chrome) робить це ПЕРШИМ
 Мета: живий тест нової гілки у справжньому Chrome власника, потім merge.
 
+Власник працюватиме в Claude Code (не у VS Code). Сесія має бути запущена на WINDOWS (застосунок Claude Code або `claude` у PowerShell), НЕ у WSL — у WSL браузерних інструментів нема ([[claude_in_chrome_windows_only]]). `claude-sync` — навпаки, лише з термінала WSL.
+
 00. НАЙПЕРШЕ на ноутбуці (WSL): `claude-sync pull` — памʼять із ПК запушено на VPS 24.11 ([[claude-sync-between-machines]]); якщо на ноутбуці були свої сесії після останнього pull — спершу `claude-sync push`. Потім перечитати `MEMORY.md` і цей файл.
 0. Підготовка: `cd C:\Users\stuar\Projects\Ghost-Interviewer-AI`, `git fetch`, `git status` (має бути гілка `rework/live-pipeline`, 0 behind/ahead; якщо ноутбук — окрема копія і гілки нема: `git checkout rework/live-pipeline`, НЕ pull поверх брудного дерева — показати власнику). `npm install`, `npm run dev` у фоні → http://localhost:3000. Потрібен `.env.local` з `VITE_GOOGLE_CLIENT_ID` (без нього кнопки входу Google нема; значення те саме, що в Netlify) — якщо файла на ноутбуці нема, попросити власника.
 1. Claude in Chrome: відкрити НОВУ вкладку `http://localhost:3000/?sim` (імітація норвезької співбесіди, мікрофон не потрібен). Попросити власника натиснути вхід Google (сам не логінюсь). Після входу в localStorage має зʼявитися `ghost_interviewer_auth_v1` із токеном, що починається на `gs1.` → сесійні токени працюють. Якщо токен не `gs1.` → Worker не видав сесійний токен, дивитися відповідь `/api/auth/google`.
