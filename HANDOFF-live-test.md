@@ -7,11 +7,14 @@
 - Worker `ghost-interviewer-api` (ghost.vitalii.no) задеплоєно з гілки `rework/live-pipeline`, код = коміт `96f3c58`. Версія `e3b05877-ba38-4101-b787-b1c7792976c8` (попередня `a531cd52`, 2026-09-09). Власник сказав «так» 24.11.
 - Перевірено після деплою: `/` → 200; `POST /api/ai/stream` без токена → 401; `POST /api/auth/google` з порожнім тілом → 400 `idToken is required` (новий маршрут є).
 - Секрети Worker (лише назви): `AI_INTERNAL_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `DATABASE_URL`, `GOOGLE_TRANSLATE_KEY`. `SESSION_SECRET` нема — сесійні токени підписуються `AI_INTERNAL_KEY`, цього досить.
-- Нових комітів нема. Фронтенд: гілка `rework/live-pipeline` = origin (`21760a9`), у `main` НЕ злито, Netlify показує старий фронтенд.
+- `53a99ca` docs: копія цього чекліста в репозиторії — `HANDOFF-live-test.md` у корені гілки `rework/live-pipeline` (запушено), щоб його бачила сесія на іншій машині.
+- Фронтенд: гілка `rework/live-pipeline` = origin (`53a99ca`), у `main` НЕ злито, Netlify показує старий фронтенд.
+- Нове правило власника: [[feedback-always-push-and-deploy]].
 
 ## 🔴 OPEN — сесія на НОУТБУЦІ (Windows, Claude Code з Claude in Chrome) робить це ПЕРШИМ
 Мета: живий тест нової гілки у справжньому Chrome власника, потім merge.
 
+00. НАЙПЕРШЕ на ноутбуці (WSL): `claude-sync pull` — памʼять із ПК запушено на VPS 24.11 ([[claude-sync-between-machines]]); якщо на ноутбуці були свої сесії після останнього pull — спершу `claude-sync push`. Потім перечитати `MEMORY.md` і цей файл.
 0. Підготовка: `cd C:\Users\stuar\Projects\Ghost-Interviewer-AI`, `git fetch`, `git status` (має бути гілка `rework/live-pipeline`, 0 behind/ahead; якщо ноутбук — окрема копія і гілки нема: `git checkout rework/live-pipeline`, НЕ pull поверх брудного дерева — показати власнику). `npm install`, `npm run dev` у фоні → http://localhost:3000. Потрібен `.env.local` з `VITE_GOOGLE_CLIENT_ID` (без нього кнопки входу Google нема; значення те саме, що в Netlify) — якщо файла на ноутбуці нема, попросити власника.
 1. Claude in Chrome: відкрити НОВУ вкладку `http://localhost:3000/?sim` (імітація норвезької співбесіди, мікрофон не потрібен). Попросити власника натиснути вхід Google (сам не логінюсь). Після входу в localStorage має зʼявитися `ghost_interviewer_auth_v1` із токеном, що починається на `gs1.` → сесійні токени працюють. Якщо токен не `gs1.` → Worker не видав сесійний токен, дивитися відповідь `/api/auth/google`.
 2. Режим FOCUS → Start. Перевірити: сегменти зʼявляються; сіра чернетка одразу; білий потоковий переклад її замінює; у рядку стану `LLM ok` і «~N s до перекладу» — ЗАПИСАТИ цифру (перший чесний замір; очікування ≤ 1.5–2 с); питання дають картку відповіді. У консолі НЕ має бути warning про перехід на `claude-haiku-4-5` — якщо є, токен підписки не віддає `claude-sonnet-5-5` через Worker (запит повертає 400/403/404): записати точний статус і тіло.
