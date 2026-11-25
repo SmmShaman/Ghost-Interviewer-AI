@@ -77,6 +77,7 @@ interface LandingPageProps {
     isSignedIn: boolean;
     briefingStatus: 'none' | 'stale' | 'ready';
     onOpenBriefing: () => void;
+    onOpenLogs: () => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({
@@ -95,7 +96,8 @@ const LandingPage: React.FC<LandingPageProps> = ({
     renderGoogleButton,
     isSignedIn,
     briefingStatus,
-    onOpenBriefing
+    onOpenBriefing,
+    onOpenLogs
 }) => {
     const audioDevices = useAudioDevices();
     const presets = audioDevices.getPresets();
@@ -446,7 +448,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
             <InstallAppButton uiLang={uiLang} />
 
             {/* Footer hint */}
-            <div className="text-center">
+            <div className="text-center space-y-2">
+                <button onClick={onOpenLogs} className="text-xs text-gray-400 underline underline-offset-4 decoration-gray-700 hover:text-gray-200">
+                    📋 {uiLang === 'uk' ? 'Логи тестів' : 'Test logs'}
+                </button>
                 <p className="text-xs text-gray-500 font-mono">
                     {IS_MOBILE ? (uiLang === 'uk' ? 'Натисніть режим, щоб почати.' : 'Tap a mode to start.') : t.pressMic}
                 </p>

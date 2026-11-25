@@ -54,6 +54,9 @@ npx wrangler secret put SESSION_SECRET            # HMAC key for 12 h session to
 npx wrangler secret put GOOGLE_TRANSLATE_KEY      # draft translation proxy /api/translate
 npx wrangler secret put DATABASE_URL              # Neon, profile/session API
 npx wrangler secret put AI_INTERNAL_KEY           # optional: server-to-server access via X-Internal-Key
+# D1 test logs: binding LOGS_DB -> database ghost-test-logs (id in wrangler.toml), schema:
+#   log_sessions(id, user_email, started_at, ended_at, meta, full_text, updated_at)
+#   log_events(session_id, seq, t, kind, data)  PRIMARY KEY (session_id, seq)
 npx wrangler deploy
 ```
 

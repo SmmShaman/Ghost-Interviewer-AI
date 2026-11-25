@@ -66,6 +66,9 @@ services/
   glossaryProcessor.ts         # IT term correction with Ukrainian morphology (160+ terms)
   apiClient.ts                 # Auth token storage (`ghost_interviewer_auth_v1`), Google -> session token exchange
   debugLogger.ts               # Event log: console helpers `__logs()`, dev-server file flush
+  sessionRecorder.ts           # Test log of every session (each interim/final, drafts, LLM translations, answers);
+                               #   localStorage + auto-upload to Worker `POST /api/logs` (D1 `ghost-test-logs`)
+  device.ts                    # Phone detection, screen Wake Lock
   speech/
     types.ts                   # SpeechSource interface and events
     webSpeechSource.ts         # Web Speech API: auto-restart, watchdog, fresh MediaStreamTrack per restart
@@ -170,6 +173,10 @@ node --experimental-strip-types tests/prompt-check.ts      # prints translation 
 ```
 
 There are no automated UI tests; use `?sim` for an end-to-end run without a microphone.
+
+## Test Logs
+
+Every listening session is recorded by `services/sessionRecorder.ts` and uploaded every 3 s (idempotent by `seq`) to the Worker: `POST /api/logs`, `GET /api/logs`, `GET /api/logs/<id>.txt` (per Google account). Storage is the D1 database `ghost-test-logs` (binding `LOGS_DB`, tables `log_sessions`, `log_events`). Unsent events stay in localStorage (`ghost_test_logs_v1`) and are sent later. The landing page has a "Test logs" panel. The phone version is an installable PWA (`public/manifest.webmanifest`, `public/sw.js`).
 
 ## Common Tasks
 

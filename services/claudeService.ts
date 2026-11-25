@@ -30,6 +30,8 @@ const MODEL_TRANSLATE = import.meta.env.VITE_CLAUDE_MODEL_FAST || 'claude-sonnet
 // translation model is rejected.
 const MODEL_TRANSLATE_FALLBACK = 'claude-haiku-4-5';
 let translationModel = MODEL_TRANSLATE;
+/** Model currently used for live translation (changes after a fallback). */
+export const getTranslationModel = (): string => translationModel;
 
 export class LLMError extends Error {
     constructor(public status: number, message: string) {

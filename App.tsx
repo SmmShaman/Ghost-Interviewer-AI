@@ -18,6 +18,9 @@ import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { useAudioPassthrough } from './hooks/useAudioPassthrough';
 import { DEFAULT_CONTEXT, STORAGE_KEY, LANG_MAP } from './config/constants';
 import { isMobileDevice, screenWakeLock } from './services/device';
+import { sessionRecorder } from './services/sessionRecorder';
+import { getTranslationModel } from './services/claudeService';
+import TestLogsPanel from './components/TestLogsPanel';
 
 const MAX_STORED_BRIEFINGS = 5;
 // Phones: the built-in microphone through recognition.start() only. Capturing a
@@ -45,6 +48,7 @@ const App: React.FC = () => {
   const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [uiLang, setUiLang] = useState<'en' | 'uk'>('uk');
   const [hasSessionStarted, setHasSessionStarted] = useState(false);
   const [speechError, setSpeechError] = useState('');
@@ -115,6 +119,17 @@ const App: React.FC = () => {
     setDebugLog(prev => [...prev.slice(-19), line]);
   }, []);
 
+  // Test log: keep recording a few seconds after Stop, so the translation and
+  // answer of the last phrase (still streaming) end up in the log too.
+  const recorderStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopRecorderLater = () => {
+    if (recorderStopTimerRef.current) clearTimeout(recorderStopTimerRef.current);
+    recorderStopTimerRef.current = setTimeout(() => {
+      recorderStopTimerRef.current = null;
+      sessionRecorder.stop();
+    }, 10_000);
+  };
+
   // The speech source lives outside React state: one instance for the app's lifetime.
   // Swap this constructor to move to a cloud streaming recognizer.
   const speechRef = useRef<SpeechSource | null>(null);
@@ -123,16 +138,18 @@ const App: React.FC = () => {
     const simulate = import.meta.env.DEV && new URLSearchParams(window.location.search).has('sim');
     const Source = simulate ? SimulatedSpeechSource : WebSpeechSource;
     speechRef.current = new Source({
-      onInterim: text => liveRef.current.handleInterim(text),
-      onFinal: text => liveRef.current.handleFinal(text),
+      onInterim: text => { sessionRecorder.interim(text); liveRef.current.handleInterim(text); },
+      onFinal: text => { sessionRecorder.final(text); liveRef.current.handleFinal(text); },
       onState: (state, detail) => {
         if (state === 'error') {
+          sessionRecorder.debug(`❌ recognizer stopped: ${detail || 'error'}`);
           setSpeechError(detail || 'speech recognition error');
           liveRef.current.stop();
           setAppState(AppState.IDLE);
+          stopRecorderLater();
         }
       },
-      onDebug: msg => addDebug(msg),
+      onDebug: msg => { sessionRecorder.debug(msg); addDebug(msg); },
     });
   }
 
@@ -227,6 +244,18 @@ const App: React.FC = () => {
       return;
     }
     live.start();
+    if (recorderStopTimerRef.current) { clearTimeout(recorderStopTimerRef.current); recorderStopTimerRef.current = null; }
+    const ctx = contextRef.current;
+    sessionRecorder.start({
+      'Режим': ctx.viewMode,
+      'Мови': `${ctx.targetLanguage} → ${ctx.nativeLanguage}`,
+      'Пристрій': `${IS_MOBILE ? 'телефон' : 'комп’ютер'} · ${navigator.userAgent}`,
+      'Аудіо': IS_MOBILE ? 'вбудований мікрофон' : (ctx.activeAudioPreset || 'default'),
+      'Чернетка': localTranslator.getStatus().method,
+      'Модель перекладу': getTranslationModel(),
+      'Брифінг': briefing ? 'є' : 'немає',
+      'Застосунок': window.location.origin,
+    }, live.state);
     setAppState(AppState.LISTENING);
     const deviceId = IS_MOBILE ? '' : await resolveDeviceId();
     // Stopped (or restarted) while the permission prompt was open.
@@ -241,6 +270,8 @@ const App: React.FC = () => {
     live.stop();
     speechRef.current?.stop();
     setAppState(AppState.IDLE);
+    sessionRecorder.debug('⏹ Stop');
+    stopRecorderLater();
   };
 
   const toggleListening = () => {
@@ -251,6 +282,12 @@ const App: React.FC = () => {
   useEffect(() => { speechRef.current?.setDevice(IS_MOBILE ? '' : context.audioDeviceId); }, [context.audioDeviceId]);
   useEffect(() => { speechRef.current?.setLang(LANG_MAP[context.targetLanguage] || 'en-US'); }, [context.targetLanguage]);
   useEffect(() => () => speechRef.current?.stop(), []);
+
+  // Test log: diff every session state change (segments, drafts, translations, answers).
+  useEffect(() => {
+    sessionRecorder.observe(live.state, draftMethod, getTranslationModel());
+  }, [live.state, draftMethod]);
+  useEffect(() => { sessionRecorder.debug(`режим → ${context.viewMode}`); }, [context.viewMode]);
 
   // Keep the screen on while listening: a locked phone kills the recognizer.
   useEffect(() => {
@@ -368,8 +405,10 @@ const App: React.FC = () => {
           isSignedIn={googleAuth.isSignedIn}
           briefingStatus={briefing ? 'ready' : staleBriefing ? 'stale' : 'none'}
           onOpenBriefing={() => setIsBriefingOpen(true)}
+          onOpenLogs={() => setIsLogsOpen(true)}
         />
         {briefingPanel}
+        <TestLogsPanel isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} uiLang={uiLang} />
       </>
     );
   }

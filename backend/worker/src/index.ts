@@ -16,6 +16,9 @@ interface Env {
   // Google OAuth client id of this app. When set, ID tokens minted for any
   // other app are rejected (set it: without it any Google sign-in is accepted).
   GOOGLE_CLIENT_ID?: string;
+  // D1 database with the app's test logs (every recognized word, drafts, LLM
+  // translations, answers). Optional: without the binding /api/logs answers 503.
+  LOGS_DB?: D1Database;
 }
 
 type SqlFunction = ReturnType<typeof neon>;
@@ -1061,6 +1064,83 @@ async function healthCheck(sql: SqlFunction): Promise<Response> {
   }
 }
 
+// ─── Test logs (D1) ──────────────────────────────────────────────────────────
+// The app streams each listening session's events here every few seconds
+// (append-only, idempotent by seq) and the full readable text when it stops.
+
+const MAX_LOG_EVENTS_PER_REQUEST = 500;
+const MAX_LOG_BODY_BYTES = 2_000_000;
+
+interface LogUpload {
+  session: { id: string; startedAt: number; endedAt?: number | null; meta?: Record<string, string> };
+  events?: Array<{ seq: number; t: number; k: string; [key: string]: unknown }>;
+  fullText?: string;
+}
+
+async function saveLogs(request: Request, env: Env, user: { email: string }): Promise<Response> {
+  const db = env.LOGS_DB;
+  if (!db) return jsonResponse({ error: 'Logs storage not configured' }, 503);
+  const raw = await request.text();
+  if (raw.length > MAX_LOG_BODY_BYTES) return jsonResponse({ error: 'Payload too large' }, 413);
+  let body: LogUpload;
+  try { body = JSON.parse(raw); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+  const s = body.session;
+  if (!s || typeof s.id !== 'string' || !/^[\w-]{1,64}$/.test(s.id) || typeof s.startedAt !== 'number') {
+    return jsonResponse({ error: 'session.id and session.startedAt are required' }, 400);
+  }
+  const events = Array.isArray(body.events) ? body.events : [];
+  if (events.length > MAX_LOG_EVENTS_PER_REQUEST) return jsonResponse({ error: 'Too many events' }, 413);
+
+  const owner = await db.prepare('SELECT user_email FROM log_sessions WHERE id = ?').bind(s.id).first<{ user_email: string }>();
+  if (owner && owner.user_email !== user.email) return jsonResponse({ error: 'Forbidden' }, 403);
+
+  const now = Date.now();
+  const stmts: D1PreparedStatement[] = [
+    db.prepare(
+      `INSERT INTO log_sessions (id, user_email, started_at, ended_at, meta, full_text, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(id) DO UPDATE SET
+         ended_at = COALESCE(excluded.ended_at, log_sessions.ended_at),
+         meta = COALESCE(excluded.meta, log_sessions.meta),
+         full_text = COALESCE(excluded.full_text, log_sessions.full_text),
+         updated_at = excluded.updated_at`
+    ).bind(s.id, user.email, s.startedAt, s.endedAt ?? null, s.meta ? JSON.stringify(s.meta) : null,
+      typeof body.fullText === 'string' ? body.fullText : null, now),
+  ];
+  for (const e of events) {
+    if (typeof e?.seq !== 'number' || typeof e.t !== 'number' || typeof e.k !== 'string') continue;
+    const { seq, t, k, ...data } = e;
+    stmts.push(db.prepare('INSERT OR IGNORE INTO log_events (session_id, seq, t, kind, data) VALUES (?, ?, ?, ?, ?)')
+      .bind(s.id, seq, t, k.slice(0, 32), JSON.stringify(data)));
+  }
+  await db.batch(stmts);
+  return jsonResponse({ ok: true, saved: stmts.length - 1 });
+}
+
+async function listLogs(env: Env, user: { email: string }): Promise<Response> {
+  const db = env.LOGS_DB;
+  if (!db) return jsonResponse({ error: 'Logs storage not configured' }, 503);
+  const { results } = await db.prepare(
+    `SELECT s.id, s.started_at, s.ended_at, s.meta, (SELECT COUNT(*) FROM log_events e WHERE e.session_id = s.id) AS events
+     FROM log_sessions s WHERE s.user_email = ? ORDER BY s.started_at DESC LIMIT 50`
+  ).bind(user.email).all();
+  return jsonResponse({ sessions: results });
+}
+
+async function getLogText(env: Env, user: { email: string }, id: string): Promise<Response> {
+  const db = env.LOGS_DB;
+  if (!db) return jsonResponse({ error: 'Logs storage not configured' }, 503);
+  const s = await db.prepare('SELECT user_email, full_text FROM log_sessions WHERE id = ?').bind(id).first<{ user_email: string; full_text: string | null }>();
+  if (!s || s.user_email !== user.email) return jsonResponse({ error: 'Not found' }, 404);
+  let text = s.full_text;
+  if (!text) {
+    // Session still running (or the app was killed): raw event list.
+    const { results } = await db.prepare('SELECT t, kind, data FROM log_events WHERE session_id = ? ORDER BY seq').bind(id).all<{ t: number; kind: string; data: string }>();
+    text = results.map(r => `${(r.t / 1000).toFixed(1)}s\t${r.kind}\t${r.data}`).join('\n');
+  }
+  return new Response(text, { headers: { 'Content-Type': 'text/plain; charset=utf-8', ...corsHeaders() } });
+}
+
 // ─── Main router ─────────────────────────────────────────────────────────────
 
 export default {
@@ -1106,6 +1186,17 @@ export default {
       }
       if (method === 'POST' && path === '/api/ai/stream') {
         return claudeStream(request, env);
+      }
+
+      // Test logs (requires auth; stored per Google account)
+      if (path === '/api/logs' || path.startsWith('/api/logs/')) {
+        const user = await verifyBearer(request, env);
+        if (!user) return jsonResponse({ error: 'Authorization required' }, 401);
+        if (method === 'POST' && path === '/api/logs') return saveLogs(request, env, user);
+        if (method === 'GET' && path === '/api/logs') return listLogs(env, user);
+        const m = path.match(/^\/api\/logs\/([\w-]{1,64})\.txt$/);
+        if (method === 'GET' && m) return getLogText(env, user, m[1]);
+        return jsonResponse({ error: 'Not found', path, method }, 404);
       }
 
       // Translation proxy (requires auth, uses server-side API key)

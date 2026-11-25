@@ -7,6 +7,12 @@ routes = [
   { pattern = "ghost.vitalii.no", custom_domain = true }
 ]
 
+# Test logs of the app (POST/GET /api/logs)
+[[d1_databases]]
+binding = "LOGS_DB"
+database_name = "ghost-test-logs"
+database_id = "80cc2afa-335a-4a22-8a76-5bf438dfa20e"
+
 [vars]
 ENVIRONMENT = "production"
 
