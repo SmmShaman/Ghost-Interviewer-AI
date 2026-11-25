@@ -44,6 +44,14 @@ export interface SegmenterConfig {
     minWords: number;
     /** Trailing interim words never committed on a 'length' cut (still unstable). */
     holdWords: number;
+    /**
+     * A shorter hypothesis with a different first word ends the previous
+     * utterance. True only for Chrome on Android, which replaces the hypothesis
+     * without a final. Desktop Chrome merely flickers between two competing
+     * hypotheses ("Nora sjef" / "Store" / "Nora sjefstrateg"), and the rule
+     * would cut the phrase at every flicker.
+     */
+    replacementEndsUtterance: boolean;
 }
 
 export const DEFAULT_SEGMENTER_CONFIG: SegmenterConfig = {
@@ -53,6 +61,7 @@ export const DEFAULT_SEGMENTER_CONFIG: SegmenterConfig = {
     hardMaxWords: 22,
     minWords: 5,
     holdWords: 3,
+    replacementEndsUtterance: false,
 };
 
 // Words that reliably OPEN a new clause in Norwegian/English/German speech.
@@ -151,6 +160,7 @@ export class Segmenter {
      * word such as "for" -> "forsvinner" is a revision, not a new utterance).
      */
     private isNewUtterance(words: string[]): boolean {
+        if (!this.config.replacementEndsUtterance) return false;
         const old = this.interimWords;
         if (old.length === 0 || words.length === 0 || words.length >= old.length) return false;
         const a = old[0].toLowerCase();

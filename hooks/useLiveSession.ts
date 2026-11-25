@@ -17,6 +17,7 @@ import type { Briefing, InterviewContext, QAItem, Segment } from '../types';
 import { Segmenter, RawSegment } from '../services/segmenter';
 import { localTranslator } from '../services/localTranslator';
 import { debugLogger } from '../services/debugLogger';
+import { isMobileDevice } from '../services/device';
 import { LLMError, generateAnswer, isLLMAvailable, translateSegment } from '../services/claudeService';
 import { CandidateDocs, questionSimilarity } from '../services/prompts';
 
@@ -73,7 +74,8 @@ export function useLiveSession(context: InterviewContext, options: Options) {
     useEffect(() => { contextRef.current = context; }, [context]);
     useEffect(() => { optionsRef.current = options; }, [options]);
 
-    const segmenterRef = useRef(new Segmenter());
+    const segmenterRef = useRef<Segmenter>(null as unknown as Segmenter);
+    if (!segmenterRef.current) segmenterRef.current = new Segmenter({ replacementEndsUtterance: isMobileDevice() });
     const segmentsRef = useRef<Segment[]>([]);
     const qaRef = useRef<QAItem[]>([]);
     const nextIdRef = useRef(1);

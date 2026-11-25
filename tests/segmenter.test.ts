@@ -179,7 +179,7 @@ function speak(seg: Segmenter, sentence: string, startAt: number, out: string[],
 // 14. Android Chrome: a new utterance replaces the hypothesis without any final
 //     (replay of a real phone log, 2026-11-25). Nothing may be lost.
 {
-    const seg = new Segmenter();
+    const seg = new Segmenter({ replacementEndsUtterance: true });
     const out: string[] = [];
     const feed = (text: string, t: number) => { for (const s of seg.pushInterim(text, t)) out.push(s.text); };
     const wait = (t: number) => { for (const s of seg.tick(t)) out.push(s.text); };
@@ -196,6 +196,21 @@ function speak(seg: Segmenter, sentence: string, startAt: number, out: string[],
     feed('fremover', 24454); feed('fremover historien', 24591);
     for (const s of seg.flush()) out.push(s.text);
     check('android: nothing lost or repeated', out.join(' | ') === 'forsvinner ett helt eventyr | aksjonærene har tjent svært godt og selskapet selv | Nå kan festen likevel være | fremover historien', JSON.stringify(out));
+}
+
+// 15. Desktop Chrome flickers between two competing hypotheses (replay of a real
+//     desktop log, 2026-11-25): the phrase must come out once, not three times.
+{
+    const seg = new Segmenter();
+    const out: string[] = [];
+    const feed = (text: string, t: number) => { for (const s of seg.pushInterim(text, t)) out.push(s.text); };
+    feed('NOR', 30515); feed('Store', 30563); feed('Nora', 30586); feed('Store', 30812);
+    feed('Nora sjef', 30930); feed('Store', 31023); feed('Nora sjefstrateg', 31194);
+    feed('Nora sjefstrateg jo', 31399); feed('Store', 31504); feed('Nora sjefstrateg Joakim', 31579);
+    feed('Nora sjefstrateg Joakim Bernhardsen advarer om at uroen i teknologisektoren', 34000);
+    check('desktop: hypothesis flicker does not cut the phrase', out.length === 0, JSON.stringify(out));
+    for (const s of seg.pushFinal('Nora sjefstrateg Joakim Bernhardsen advarer om at uroen i teknologisektoren vil prege markedet denne uken', 36008)) out.push(s.text);
+    check('desktop: the phrase is emitted once and whole', out.join(' ') === 'Nora sjefstrateg Joakim Bernhardsen advarer om at uroen i teknologisektoren vil prege markedet denne uken', JSON.stringify(out));
 }
 
 console.log(failed === 0 ? '\nALL PASSED' : `\n${failed} FAILED`);
