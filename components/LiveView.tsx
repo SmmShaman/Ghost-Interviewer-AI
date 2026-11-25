@@ -224,7 +224,7 @@ const LiveView: React.FC<LiveViewProps> = ({ mode, state, uiLang, draftMethod, o
                                 disabled={segments.length === 0 || llmStatus === 'offline' || llmStatus === 'auth'}
                                 className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                             >
-                                ⚡ {t.answerLast} <span className="ml-1 text-[9px] text-emerald-400/60 font-mono">{t.answerLastHint}</span>
+                                ⚡ {t.answerLast} <span className="hidden sm:inline ml-1 text-[9px] text-emerald-400/60 font-mono">{t.answerLastHint}</span>
                             </button>
                         </div>
                         <div ref={qaRef} className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -239,13 +239,13 @@ const LiveView: React.FC<LiveViewProps> = ({ mode, state, uiLang, draftMethod, o
             </div>
 
             {/* STATUS BAR */}
-            <div className="shrink-0 mt-2 px-3 py-1.5 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between text-[11px] text-gray-500 font-mono">
-                <div className="flex items-center gap-3">
-                    <span>{segments.length} {t.segments}</span>
+            <div className="shrink-0 mt-2 px-3 py-1.5 bg-gray-900/50 rounded-xl border border-gray-800/50 flex items-center justify-between gap-2 text-[11px] text-gray-500 font-mono whitespace-nowrap">
+                <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="hidden sm:inline">{segments.length} {t.segments}</span>
                     {avgLatency !== null && <span className={avgLatency <= 2 ? 'text-emerald-400/80' : avgLatency <= 4 ? 'text-amber-400/80' : 'text-red-400/80'}>~{avgLatency}s {t.latency}</span>}
                 </div>
-                <div className="flex items-center gap-3">
-                    <span>{t.draftEngine}: {draftMethod === 'none' ? t.none : draftMethod}</span>
+                <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="hidden sm:inline">{t.draftEngine}: {draftMethod === 'none' ? t.none : draftMethod}</span>
                     <span className={llmStatus === 'ok' ? 'text-emerald-400/80' : 'text-amber-400/80'}>LLM {llmStatus}</span>
                     {isListening && (
                         <span className="text-red-400 flex items-center gap-1">

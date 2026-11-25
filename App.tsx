@@ -17,8 +17,13 @@ import { useLiveSession } from './hooks/useLiveSession';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { useAudioPassthrough } from './hooks/useAudioPassthrough';
 import { DEFAULT_CONTEXT, STORAGE_KEY, LANG_MAP } from './config/constants';
+import { isMobileDevice, screenWakeLock } from './services/device';
 
 const MAX_STORED_BRIEFINGS = 5;
+// Phones: the built-in microphone through recognition.start() only. Capturing a
+// separate getUserMedia track for start(track) competes with the recognizer for
+// the mic on Android, and there are no VB-Cable/AUX presets on a phone anyway.
+const IS_MOBILE = isMobileDevice();
 
 const loadContext = (): InterviewContext => {
   try {
@@ -223,7 +228,7 @@ const App: React.FC = () => {
     }
     live.start();
     setAppState(AppState.LISTENING);
-    const deviceId = await resolveDeviceId();
+    const deviceId = IS_MOBILE ? '' : await resolveDeviceId();
     // Stopped (or restarted) while the permission prompt was open.
     if (token !== startTokenRef.current) return;
     await speech.start({ lang: LANG_MAP[contextRef.current.targetLanguage] || 'en-US', deviceId });
@@ -243,9 +248,15 @@ const App: React.FC = () => {
   };
 
   // Follow device / language changes made during a session.
-  useEffect(() => { speechRef.current?.setDevice(context.audioDeviceId); }, [context.audioDeviceId]);
+  useEffect(() => { speechRef.current?.setDevice(IS_MOBILE ? '' : context.audioDeviceId); }, [context.audioDeviceId]);
   useEffect(() => { speechRef.current?.setLang(LANG_MAP[context.targetLanguage] || 'en-US'); }, [context.targetLanguage]);
   useEffect(() => () => speechRef.current?.stop(), []);
+
+  // Keep the screen on while listening: a locked phone kills the recognizer.
+  useEffect(() => {
+    if (appState === AppState.LISTENING) void screenWakeLock.enable();
+    else screenWakeLock.disable();
+  }, [appState]);
 
   // Space: "I am speaking" (pause processing). Enter: answer the last remark.
   useEffect(() => {
@@ -380,7 +391,7 @@ const App: React.FC = () => {
     <div className="relative w-screen flex flex-col bg-gray-950" style={{ height: '100dvh' }}>
       {isClearModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full shadow-2xl animate-fade-in-up">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl animate-fade-in-up">
             <h3 className="text-xl font-bold text-white mb-2">{t.modal.title}</h3>
             <p className="text-gray-400 mb-6">{t.modal.subtitle}</p>
             <div className="flex flex-col gap-3">
@@ -402,7 +413,7 @@ const App: React.FC = () => {
       {briefingPanel}
 
       {/* HEADER */}
-      <div className="shrink-0 flex justify-between items-center p-2 sm:p-3 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800">
+      <div className="shrink-0 flex justify-between items-center p-2 sm:p-3 gap-2 z-40 bg-gray-900/50 backdrop-blur border-b border-gray-800" style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             onClick={goHome}
@@ -453,7 +464,7 @@ const App: React.FC = () => {
               <span className="text-[10px] text-gray-400 max-w-[80px] truncate hidden md:inline">{googleAuth.user.name}</span>
             </div>
           )}
-          <div className="flex items-center gap-1 mr-1 sm:mr-2 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
+          <div className="hidden sm:flex items-center gap-1 mr-2 bg-gray-900/50 rounded-lg border border-gray-800 p-1">
             <button onClick={handleSaveSession} disabled={!hasContent} className="p-1.5 sm:p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-emerald-400 transition-colors disabled:opacity-30" title={t.saveSession}>
               <DownloadIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
@@ -465,7 +476,7 @@ const App: React.FC = () => {
           {isListening && (
             <button
               onClick={() => live.setPaused(!live.state.isPaused)}
-              className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border text-xs font-bold transition-all ${live.state.isPaused ? 'border-blue-500/60 bg-blue-500/20 text-blue-200' : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-blue-500/40'}`}
+              className={`hidden sm:block px-3 py-2 rounded-lg border text-xs font-bold transition-all ${live.state.isPaused ? 'border-blue-500/60 bg-blue-500/20 text-blue-200' : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-blue-500/40'}`}
               title={uiLang === 'uk' ? 'Пробіл: поки ви говорите, мовлення не обробляється' : 'Space: speech is ignored while you talk'}
             >
               {live.state.isPaused ? (uiLang === 'uk' ? '▶ СЛУХАТИ' : '▶ LISTEN') : (uiLang === 'uk' ? '🗣 Я ГОВОРЮ' : '🗣 I SPEAK')}
@@ -511,9 +522,44 @@ const App: React.FC = () => {
         />
       </div>
 
+      {/* PHONE ACTION BAR: thumb-reachable controls (no Space/Enter keys on a phone) */}
+      <div
+        className="sm:hidden shrink-0 flex items-stretch gap-2 px-2 pt-1 border-t border-gray-800 bg-gray-900/70"
+        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      >
+        {isListening ? (
+          <button
+            onClick={() => live.setPaused(!live.state.isPaused)}
+            className={`flex-1 min-h-[52px] rounded-xl border text-sm font-black tracking-wide transition-colors ${live.state.isPaused ? 'border-blue-400 bg-blue-500/30 text-blue-100' : 'border-gray-700 bg-gray-800 text-gray-200 active:bg-gray-700'}`}
+          >
+            {live.state.isPaused ? (uiLang === 'uk' ? '▶ СЛУХАТИ ІНТЕРВ’ЮЕРА' : '▶ LISTEN') : (uiLang === 'uk' ? '🗣 Я ГОВОРЮ' : '🗣 I AM SPEAKING')}
+          </button>
+        ) : (
+          <button
+            onClick={() => void startListening()}
+            className="flex-1 min-h-[52px] rounded-xl border border-emerald-500/50 bg-emerald-600/20 text-emerald-200 text-sm font-black tracking-wide active:bg-emerald-600/40"
+          >
+            🎤 {uiLang === 'uk' ? 'СЛУХАТИ' : 'START'}
+          </button>
+        )}
+        <button
+          onClick={() => setIsBriefingOpen(true)}
+          className={`min-h-[52px] px-3 rounded-xl border text-[11px] font-black ${briefing ? 'bg-gray-800 text-emerald-400 border-gray-700' : 'bg-amber-500/10 text-amber-300 border-amber-500/40'}`}
+          aria-label={uiLang === 'uk' ? 'Брифінг перед співбесідою' : 'Pre-interview briefing'}
+        >
+          {uiLang === 'uk' ? 'БРИФІНГ' : 'BRIEF'}{!briefing && ' !'}
+        </button>
+        <button onClick={handleSaveSession} disabled={!hasContent} className="min-h-[52px] w-12 flex items-center justify-center rounded-xl border border-gray-700 bg-gray-800 text-gray-300 disabled:opacity-30" aria-label={t.saveSession}>
+          <DownloadIcon className="w-5 h-5" />
+        </button>
+        <button onClick={() => hasContent && setIsClearModalOpen(true)} disabled={!hasContent} className="min-h-[52px] w-12 flex items-center justify-center rounded-xl border border-gray-700 bg-gray-800 text-gray-300 disabled:opacity-30" aria-label={t.clearSession}>
+          <TrashIcon className="w-5 h-5" />
+        </button>
+      </div>
+
       {/* DEBUG OVERLAY: speech recognizer diagnostics, visible with ?debug in the URL */}
       {debugLog.length > 0 && new URLSearchParams(window.location.search).has('debug') && (
-        <div id="debug-overlay" className="fixed bottom-0 right-0 z-[9999] bg-black/90 border-t border-l border-yellow-500/50 px-2 py-1 max-h-[100px] w-[400px] overflow-y-auto font-mono text-[8px] leading-tight rounded-tl-lg">
+        <div id="debug-overlay" className="fixed bottom-0 right-0 z-[9999] bg-black/90 border-t border-l border-yellow-500/50 px-2 py-1 max-h-[100px] w-[400px] max-w-full overflow-y-auto font-mono text-[8px] leading-tight rounded-tl-lg">
           {debugLog.map((line, i) => (
             <div key={i} className={line.includes('❌') ? 'text-red-400' : line.includes('🐕') ? 'text-yellow-400' : 'text-green-400/70'}>{line}</div>
           ))}

@@ -5,6 +5,10 @@ import GearMenu from './GearMenu';
 import SetupPanel from './SetupPanel';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import type { GoogleUser } from '../services/apiClient.ts';
+import InstallAppButton from './InstallAppButton';
+import { isMobileDevice } from '../services/device';
+
+const IS_MOBILE = isMobileDevice();
 
 // Tooltip component — hover over ? to see explanation
 // Uses fixed positioning to escape any overflow:hidden containers
@@ -109,9 +113,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
     }, [googleUser, isAuthLoading, renderGoogleButton]);
 
     return (
-        <div className="h-dvh w-screen bg-gray-950 flex flex-col items-center justify-between overflow-hidden px-3 sm:px-6 pt-14 sm:pt-8 pb-4" style={{ height: '100dvh' }}>
+        <div className="h-dvh w-screen bg-gray-950 flex flex-col items-center justify-start gap-4 sm:gap-0 sm:justify-between overflow-y-auto sm:overflow-hidden px-3 sm:px-6 pt-16 sm:pt-8 pb-4" style={{ height: '100dvh', paddingTop: IS_MOBILE ? 'max(4rem, calc(env(safe-area-inset-top) + 3.5rem))' : undefined }}>
             {/* Settings Gear: top-left corner */}
-            <div className="absolute top-4 left-4 z-50">
+            <div className="absolute left-4 z-50" style={{ top: 'max(1rem, env(safe-area-inset-top))' }}>
                 <GearMenu
                     context={context}
                     onContextChange={setContext}
@@ -122,7 +126,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Google Auth: top-right corner */}
-            <div className="absolute top-4 right-4 z-50">
+            <div className="absolute right-4 z-50" style={{ top: 'max(1rem, env(safe-area-inset-top))' }}>
                 {isAuthLoading ? (
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-800/80 border border-gray-700">
                         <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
@@ -198,7 +202,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Mode Selection Cards — compact */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-4 w-full max-w-5xl shrink-0">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 w-full max-w-5xl shrink-0">
                 {/* SIMPLE Mode */}
                 <button
                     onClick={() => { startSessionWithMode('SIMPLE'); }}
@@ -214,7 +218,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             {t.modes.simple}
                             <Tip color="amber" text={uiLang === 'uk' ? "Лише живий переклад мовлення. Без підказок відповідей." : "Live translation only. No suggested answers."} />
                         </div>
-                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.simpleDesc}</div>
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed">{t.modes.simpleDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-amber-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
@@ -239,7 +243,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             {t.modes.focus}
                             <Tip color="blue" text={uiLang === 'uk' ? "Переклад + підказка відповіді на кожне питання інтерв'юера, на основі ваших документів." : "Translation + a suggested answer to each interviewer question, grounded in your documents."} />
                         </div>
-                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.focusDesc}</div>
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed">{t.modes.focusDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-blue-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
@@ -264,7 +268,7 @@ const LandingPage: React.FC<LandingPageProps> = ({
                             {t.modes.full}
                             <Tip color="emerald" text={uiLang === 'uk' ? "Те саме + коротка стратегія та аналіз того, що насправді питає інтерв'юер." : "The same plus a short strategy and an analysis of what the interviewer is really asking."} />
                         </div>
-                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed hidden sm:block">{t.modes.fullDesc}</div>
+                        <div className="text-gray-300 text-xs sm:text-sm leading-relaxed">{t.modes.fullDesc}</div>
                         <div className="mt-2 sm:mt-4 flex items-center gap-2 text-emerald-500/70 text-xs font-mono hidden sm:flex">
                             <MicIcon className="w-4 h-4" />
                             <span>Click to start</span>
@@ -318,8 +322,14 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 )}
             </div>
 
-            {/* Audio Preset Buttons */}
-            {(() => {
+            {/* Audio Preset Buttons (desktop: VB-Cable / AUX routing). Phones use the built-in mic. */}
+            {IS_MOBILE ? (
+                <div className="w-full max-w-5xl shrink-0 px-3 py-2 rounded-xl border border-gray-800 bg-gray-900/40 text-center text-xs text-gray-400">
+                    🎤 {uiLang === 'uk'
+                        ? 'Мікрофон телефона. Покладіть телефон ближче до співрозмовника або до динаміка.'
+                        : 'Phone microphone. Keep the phone close to the interviewer or the speaker.'}
+                </div>
+            ) : (() => {
                 const meta: Record<string, { icon: string; label: string; labelUk: string; tip: string }> = {
                     'best-available': {
                         icon: '🎤', label: 'Best Mic', labelUk: 'Найкращий мік',
@@ -433,9 +443,13 @@ const LandingPage: React.FC<LandingPageProps> = ({
                 );
             })()}
 
+            <InstallAppButton uiLang={uiLang} />
+
             {/* Footer hint */}
             <div className="text-center">
-                <p className="text-xs text-gray-500 font-mono">{t.pressMic}</p>
+                <p className="text-xs text-gray-500 font-mono">
+                    {IS_MOBILE ? (uiLang === 'uk' ? 'Натисніть режим, щоб почати.' : 'Tap a mode to start.') : t.pressMic}
+                </p>
             </div>
 
             {/* Settings Panel (available from landing) */}
