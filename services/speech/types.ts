@@ -7,6 +7,12 @@
  * the rest of the pipeline.
  */
 
+/**
+ * Pseudo device id: instead of a microphone, capture the audio of a browser tab
+ * (or the whole system) picked by the user in Chrome's share dialog. Desktop only.
+ */
+export const DISPLAY_AUDIO_DEVICE_ID = 'display-audio';
+
 export type SpeechSourceState = 'idle' | 'listening' | 'restarting' | 'error';
 
 export interface SpeechSourceEvents {

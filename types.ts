@@ -37,6 +37,7 @@ export type ViewMode = 'FULL' | 'FOCUS' | 'SIMPLE';
 export type AudioPresetId =
   | 'best-available'          // Auto-detect best mic (USB > headset > built-in > default)
   | 'default-mic'             // System default microphone (no device selection)
+  | 'tab-audio'               // Audio of a browser tab / the system (Chrome share dialog), no microphone
   | 'headphones-youtube'      // VB-Cable: system audio capture to headphones
   | 'speakers'                // VB-Cable: system audio to speakers
   | 'monitor-speakers'        // VB-Cable: system audio to monitor speakers

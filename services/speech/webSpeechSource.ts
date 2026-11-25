@@ -10,11 +10,15 @@
 
 import { debugLogger } from '../debugLogger';
 import { isMobileDevice } from '../device';
+import { DISPLAY_AUDIO_DEVICE_ID } from './types';
 import type { SpeechSource, SpeechSourceConfig, SpeechSourceEvents, SpeechSourceState } from './types';
 
 const WATCHDOG_TICK_MS = 3000;
 const WATCHDOG_SILENCE_MS = 6000;
 const WATCHDOG_FALLBACK_MS = 3000;
+// A fresh run needs up to ~6 s before its first words (measured on desktop Chrome);
+// restarting it earlier only adds another deaf start-up period.
+const WATCHDOG_STARTUP_MS = 12000;
 // Chrome on Android stops listening after the end of an utterance but neither
 // finalizes the result nor ends the session until stop() is called: the
 // recognizer stays deaf until the watchdog fires. Once a run has produced
@@ -41,6 +45,10 @@ export class WebSpeechSource implements SpeechSource {
     private readonly events: SpeechSourceEvents;
     private recognition: any = null;
     private stream: MediaStream | null = null;
+    /** Tab/system audio shared by the user (kept for the whole session; each run gets a clone of its track). */
+    private displayStream: MediaStream | null = null;
+    private displayClone: MediaStreamTrack | null = null;
+    private runStartedAt = 0;
     private lang = 'en-US';
     private deviceId = '';
 
@@ -143,6 +151,7 @@ export class WebSpeechSource implements SpeechSource {
         // Chrome's stop() is async: results can trail in after stop(); drop them.
         if (!this.active || this.ignoreUntilEnd) return;
         this.lastEventTime = Date.now();
+        if (!this.heardInRun) this.debug(`👂 first result ${Date.now() - this.runStartedAt} ms after start`);
         this.heardInRun = true;
         this.noSpeechCount = 0;
         this.audioCaptureErrors = 0;
@@ -285,6 +294,8 @@ export class WebSpeechSource implements SpeechSource {
                 this.debug(`▶️ ${reason} with default mic`);
             }
             this.running = true;
+            this.runStartedAt = Date.now();
+            this.lastEventTime = this.runStartedAt; // the watchdog counts from the real start, not from the share dialog
             this.setState('listening');
         } catch (e: any) {
             if (e?.name === 'InvalidStateError' || e?.message?.includes('already started')) {
@@ -317,6 +328,18 @@ export class WebSpeechSource implements SpeechSource {
      * passed to start(track) once recognition stops. Empty deviceId = default mic.
      */
     private async acquireTrack(deviceId: string): Promise<MediaStreamTrack | undefined> {
+        if (deviceId === DISPLAY_AUDIO_DEVICE_ID) {
+            try {
+                return await this.acquireDisplayTrack();
+            } catch (e: any) {
+                // Cancelled dialog or no audio shared: retrying would only reopen the dialog.
+                const detail = e?.message === 'display-audio-missing' ? 'display-audio-missing' : 'display-audio-denied';
+                this.debug(`❌ tab audio: ${e?.name || ''} ${e?.message || ''}`);
+                if (this.active && e?.message !== 'stopped') this.fail(detail);
+                return undefined;
+            }
+        }
+        this.releaseDisplay();
         if (!deviceId) {
             this.releaseStream();
             return undefined;
@@ -349,6 +372,67 @@ export class WebSpeechSource implements SpeechSource {
         }
     }
 
+    /**
+     * Audio of a tab / the system instead of a microphone. The share dialog is shown
+     * once per session; Chrome invalidates the track given to start(track) when the
+     * run ends, so every run gets a clone and the shared track itself stays alive.
+     */
+    private async acquireDisplayTrack(): Promise<MediaStreamTrack> {
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+            this.stream = null;
+        }
+        this.displayClone?.stop();
+        this.displayClone = null;
+
+        let master = this.displayStream?.getAudioTracks()[0];
+        if (!master || master.readyState !== 'live') {
+            this.releaseDisplay();
+            const options: any = {
+                video: { frameRate: 1 }, // Chrome refuses audio-only capture; the picture is not used
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                systemAudio: 'include',
+            };
+            try {
+                // Keep this tab in front: by default Chrome jumps to the shared tab.
+                const Controller = (window as any).CaptureController;
+                if (Controller) {
+                    const controller = new Controller();
+                    controller.setFocusBehavior?.('no-focus-change');
+                    options.controller = controller;
+                }
+            } catch { /* older Chrome: focus moves to the shared tab */ }
+            const gen = this.generation;
+            const stream: MediaStream = await (navigator.mediaDevices as any).getDisplayMedia(options);
+            if (!this.active || gen !== this.generation) {
+                stream.getTracks().forEach(t => t.stop());
+                throw new Error('stopped');
+            }
+            master = stream.getAudioTracks()[0];
+            if (!master) {
+                stream.getTracks().forEach(t => t.stop());
+                throw new Error('display-audio-missing');
+            }
+            this.displayStream = stream;
+            this.debug(`🖥️ tab audio: ${master.label.slice(0, 40) || 'shared audio'}`);
+            master.addEventListener('ended', () => {
+                if (this.displayStream !== stream) return;
+                this.debug('🖥️ tab audio: sharing stopped');
+                if (this.active && this.deviceId === DISPLAY_AUDIO_DEVICE_ID) this.fail('display-audio-ended');
+            });
+        }
+        this.displayClone = master.clone();
+        return this.displayClone;
+    }
+
+    private releaseDisplay(): void {
+        this.displayClone?.stop();
+        this.displayClone = null;
+        const stream = this.displayStream;
+        this.displayStream = null; // before stop(): the 'ended' listener must not report it
+        stream?.getTracks().forEach(t => t.stop());
+    }
+
     /** Backstop for Chrome's silent hangs: no events for >6 s → stop; if onend never restarts → direct restart. */
     private startWatchdog(): void {
         this.clearWatchdog();
@@ -358,7 +442,9 @@ export class WebSpeechSource implements SpeechSource {
             if (!this.active) return;
             if (this.isRestarting || this.restartTimer || this.watchdogFallbackTimer) return;
             const silenceMs = Date.now() - this.lastEventTime;
-            const limit = mobile && this.heardInRun ? MOBILE_AFTER_SPEECH_SILENCE_MS : WATCHDOG_SILENCE_MS;
+            const limit = mobile
+                ? (this.heardInRun ? MOBILE_AFTER_SPEECH_SILENCE_MS : WATCHDOG_SILENCE_MS)
+                : (this.heardInRun ? WATCHDOG_SILENCE_MS : WATCHDOG_STARTUP_MS);
             if (silenceMs <= limit) return;
 
             debugLogger.log('RECOG', `WATCHDOG ${Math.round(silenceMs / 1000)}s silence`);
@@ -402,6 +488,7 @@ export class WebSpeechSource implements SpeechSource {
         if (this.running) this.ignoreUntilEnd = true;
         try { this.recognition?.stop(); } catch { /* ignore */ }
         this.releaseStream();
+        this.releaseDisplay();
         this.emittedFinals = 0;
     }
 

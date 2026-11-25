@@ -12,6 +12,7 @@ import { translations } from './translations';
 import { CandidateDocs, hashDocs } from './services/prompts';
 import { WebSpeechSource } from './services/speech/webSpeechSource';
 import { SimulatedSpeechSource } from './services/speech/simulatedSource';
+import { DISPLAY_AUDIO_DEVICE_ID } from './services/speech/types';
 import type { SpeechSource } from './services/speech/types';
 import { useLiveSession } from './hooks/useLiveSession';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
@@ -27,6 +28,13 @@ const MAX_STORED_BRIEFINGS = 5;
 // separate getUserMedia track for start(track) competes with the recognizer for
 // the mic on Android, and there are no VB-Cable/AUX presets on a phone anyway.
 const IS_MOBILE = isMobileDevice();
+
+// Recognizer stop reasons that need a human explanation.
+const SPEECH_ERROR_TEXT: Record<string, string> = {
+  'display-audio-denied': 'вибір вкладки скасовано. Натисніть Start ще раз і оберіть вкладку зі звуком / tab selection was cancelled',
+  'display-audio-missing': 'звук не передано. У вікні вибору позначте «Також поділитися звуком вкладки» / no audio was shared: tick “Also share tab audio”',
+  'display-audio-ended': 'спільний доступ до вкладки зупинено / tab sharing was stopped',
+};
 
 const loadContext = (): InterviewContext => {
   try {
@@ -62,7 +70,7 @@ const App: React.FC = () => {
   const audioPassthrough = useAudioPassthrough({
     inputDeviceId: context.audioDeviceId,
     outputDeviceId: context.listenThroughDeviceId || '',
-    enabled: !!context.audioDeviceId && !!context.listenThroughDeviceId,
+    enabled: !!context.audioDeviceId && context.audioDeviceId !== DISPLAY_AUDIO_DEVICE_ID && !!context.listenThroughDeviceId,
   });
 
   // ---- briefing ------------------------------------------------------------
@@ -143,7 +151,7 @@ const App: React.FC = () => {
       onState: (state, detail) => {
         if (state === 'error') {
           sessionRecorder.debug(`❌ recognizer stopped: ${detail || 'error'}`);
-          setSpeechError(detail || 'speech recognition error');
+          setSpeechError(SPEECH_ERROR_TEXT[detail || ''] || detail || 'speech recognition error');
           liveRef.current.stop();
           setAppState(AppState.IDLE);
           stopRecorderLater();
@@ -201,6 +209,8 @@ const App: React.FC = () => {
     let deviceId = ctx.audioDeviceId;
     const preset = ctx.activeAudioPreset;
     if (!preset || preset === 'manual') return deviceId;
+    // Tab audio: no microphone prompt here, it would use up the click that Chrome's share dialog needs.
+    if (preset === 'tab-audio') return DISPLAY_AUDIO_DEVICE_ID;
     try {
       // Device labels are only available after a permission grant.
       const temp = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -417,6 +427,7 @@ const App: React.FC = () => {
   const presetLabels: Record<string, { icon: string; label: string; source: string }> = {
     'best-available': { icon: '🎤', label: 'Best Mic', source: 'Мікрофон' },
     'default-mic': { icon: '🔇', label: 'System', source: 'Мікрофон' },
+    'tab-audio': { icon: '🖥️', label: 'Звук вкладки', source: 'Вкладка' },
     'speakers': { icon: '🔊', label: 'Колонки', source: 'VB-Cable' },
     'headphones-youtube': { icon: '🎧', label: 'Навушники+Відео', source: 'VB-Cable' },
     'monitor-speakers': { icon: '🖥️', label: 'Монітор', source: 'VB-Cable' },

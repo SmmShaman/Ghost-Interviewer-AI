@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AudioPresetId, InterviewContext } from '../types';
+import { DISPLAY_AUDIO_DEVICE_ID } from '../services/speech/types';
+import { isMobileDevice } from '../services/device';
 
 export type DeviceType = 'stereo-mix' | 'vb-cable' | 'voicemeeter' | 'line-in' | 'realtek-mic' | 'usb-mic' | 'headset-mic' | 'webcam-mic' | 'unknown';
 
@@ -184,6 +186,16 @@ export function useAudioDevices() {
             listenThroughLabel: '',
         };
 
+        // 🖥️ Tab audio: the sound of a browser tab / the system, picked in Chrome's share dialog at Start
+        const tabAudioPreset: PresetInfo = {
+            id: 'tab-audio',
+            available: !isMobileDevice() && typeof navigator !== 'undefined' && !!(navigator.mediaDevices as any)?.getDisplayMedia,
+            matchedDeviceId: DISPLAY_AUDIO_DEVICE_ID,
+            matchedDeviceLabel: 'Chrome tab / system audio',
+            listenThroughDeviceId: '',
+            listenThroughLabel: '',
+        };
+
         // === VB-CABLE PRESETS (require virtual audio driver) ===
 
         // 🔊 Speakers via VB-Cable: input=CABLE, output=Speakers
@@ -214,7 +226,7 @@ export function useAudioDevices() {
             ? { id: 'phone-aux', available: true, matchedDeviceId: lineIn.device.deviceId, matchedDeviceLabel: lineIn.friendlyName, listenThroughDeviceId: headphones?.id || speakers?.id || '', listenThroughLabel: headphones?.label || speakers?.label || '' }
             : { id: 'phone-aux', available: false, matchedDeviceId: '', matchedDeviceLabel: '', listenThroughDeviceId: '', listenThroughLabel: '', warning: 'line-in-needed' };
 
-        return [bestAvailablePreset, defaultMicPreset, speakersPreset, headphonesPreset, monitorPreset, interviewPreset, phoneAuxPreset];
+        return [bestAvailablePreset, defaultMicPreset, tabAudioPreset, speakersPreset, headphonesPreset, monitorPreset, interviewPreset, phoneAuxPreset];
     }, [classifiedDevices, outputDevices, findOutput, getBestMic]);
 
     const applyPreset = useCallback((context: InterviewContext, preset: PresetInfo): Partial<InterviewContext> => {

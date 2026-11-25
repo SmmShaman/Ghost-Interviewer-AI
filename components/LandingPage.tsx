@@ -357,15 +357,19 @@ const LandingPage: React.FC<LandingPageProps> = ({
                         icon: '🎙️', label: 'Interview Call', labelUk: 'Співбесіда',
                         tip: 'Для Zoom/Teams/Meet. Звук співрозмовника через VB-Cable.'
                     },
+                    'tab-audio': {
+                        icon: '🖥️', label: 'Tab audio', labelUk: 'Звук вкладки',
+                        tip: 'Чистий звук вкладки (YouTube, Meet, Teams у браузері) або всієї системи, без мікрофона. Після Start Chrome покаже вікно вибору: оберіть вкладку і позначте «Також поділитися звуком вкладки».'
+                    },
                     'phone-aux': {
                         icon: '📱', label: 'Phone (AUX)', labelUk: 'Телефон (AUX)',
                         tip: 'Телефонний дзвінок через AUX кабель в синій роз\'єм Line In. Говориш в телефон, додаток чує співрозмовника.'
                     },
                 };
 
-                const universalPresets = presets.filter(p => p.id === 'best-available' || p.id === 'default-mic');
+                const universalPresets = presets.filter(p => p.id === 'best-available' || p.id === 'default-mic' || (p.id === 'tab-audio' && p.available));
                 const devicePresets = presets.filter(p => p.id === 'phone-aux');
-                const vbCablePresets = presets.filter(p => p.id !== 'best-available' && p.id !== 'default-mic' && p.id !== 'phone-aux');
+                const vbCablePresets = presets.filter(p => p.id !== 'best-available' && p.id !== 'default-mic' && p.id !== 'tab-audio' && p.id !== 'phone-aux');
                 const hasAnyVBCable = vbCablePresets.some(p => p.available);
                 const hasAnyDevice = devicePresets.length > 0;
 
@@ -412,9 +416,9 @@ const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="w-full max-w-5xl shrink-0">
                         {/* Universal presets — always available */}
                         <p className="text-[10px] text-gray-500 font-mono tracking-[0.2em] uppercase text-center mb-2">
-                            {uiLang === 'uk' ? 'МІКРОФОН' : 'MICROPHONE'}
+                            {uiLang === 'uk' ? 'ДЖЕРЕЛО ЗВУКУ' : 'AUDIO SOURCE'}
                         </p>
-                        <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-3 sm:mb-6">
+                        <div className={`grid ${universalPresets.length > 2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 sm:gap-3 mb-3 sm:mb-6`}>
                             {universalPresets.map(renderPresetButton)}
                         </div>
 
