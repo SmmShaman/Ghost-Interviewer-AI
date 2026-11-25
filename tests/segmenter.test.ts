@@ -176,5 +176,27 @@ function speak(seg: Segmenter, sentence: string, startAt: number, out: string[],
     check('flushPending: no repeat on later final', a[0]?.text === 'takk for det' && b.length === 1 && b[0].text === 'svaret', JSON.stringify([a, b]));
 }
 
+// 14. Android Chrome: a new utterance replaces the hypothesis without any final
+//     (replay of a real phone log, 2026-11-25). Nothing may be lost.
+{
+    const seg = new Segmenter();
+    const out: string[] = [];
+    const feed = (text: string, t: number) => { for (const s of seg.pushInterim(text, t)) out.push(s.text); };
+    const wait = (t: number) => { for (const s of seg.tick(t)) out.push(s.text); };
+    feed('for', 11170); feed('forsv', 11270); feed('forsvinner', 11335);
+    feed('forsvinner ett helt', 11844); feed('forsvinner ett helt eventyr', 12242);
+    feed('a', 12945);
+    check('android: replaced short phrase is emitted, not lost', out.length === 1 && out[0] === 'forsvinner ett helt eventyr', JSON.stringify(out));
+    feed('aksjonærene har tjent svært godt og selskapet selv', 15239);
+    wait(16247);
+    check('android: pause segment', out[1] === 'aksjonærene har tjent svært godt og selskapet selv', JSON.stringify(out));
+    feed('nå', 18006); feed('Nå kan festen likevel være', 18895);
+    wait(19900);
+    check('android: phrase after an unfinalized one is emitted on pause', out[2] === 'Nå kan festen likevel være', JSON.stringify(out));
+    feed('fremover', 24454); feed('fremover historien', 24591);
+    for (const s of seg.flush()) out.push(s.text);
+    check('android: nothing lost or repeated', out.join(' | ') === 'forsvinner ett helt eventyr | aksjonærene har tjent svært godt og selskapet selv | Nå kan festen likevel være | fremover historien', JSON.stringify(out));
+}
+
 console.log(failed === 0 ? '\nALL PASSED' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

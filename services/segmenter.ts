@@ -116,6 +116,16 @@ export class Segmenter {
     /** New interim hypothesis (replaces the previous one). */
     pushInterim(text: string, now: number): RawSegment[] {
         const words = splitWords(text);
+        const out: RawSegment[] = [];
+        // Chrome on Android starts the next utterance without ever finalizing
+        // the previous one: the hypothesis is simply replaced by a shorter one
+        // that begins differently. Close the old utterance here, otherwise its
+        // unsent words are lost and `consumed` hides the start of the new one.
+        if (this.isNewUtterance(words)) {
+            const rest = this.pendingText;
+            if (rest) out.push({ text: rest, boundary: 'final' });
+            this.consumed = 0;
+        }
         if (words.join(' ') !== this.interimWords.join(' ')) {
             this.lastInterimChange = now;
         }
@@ -125,7 +135,6 @@ export class Segmenter {
         // re-emit the same words when the hypothesis grows back.
         if (words.length === 0) this.consumed = 0;
 
-        const out: RawSegment[] = [];
         // Long uninterrupted speech: peel off complete clauses from the front.
         for (;;) {
             const cut = this.findLengthCut();
@@ -134,6 +143,19 @@ export class Segmenter {
             this.consumed = cut;
         }
         return out;
+    }
+
+    /**
+     * True when `words` cannot be a revision of the current hypothesis: it is
+     * shorter and its first word is unrelated to the old first word (a growing
+     * word such as "for" -> "forsvinner" is a revision, not a new utterance).
+     */
+    private isNewUtterance(words: string[]): boolean {
+        const old = this.interimWords;
+        if (old.length === 0 || words.length === 0 || words.length >= old.length) return false;
+        const a = old[0].toLowerCase();
+        const b = words[0].toLowerCase();
+        return !a.startsWith(b) && !b.startsWith(a);
     }
 
     /** The recognizer finalized the current utterance. */
