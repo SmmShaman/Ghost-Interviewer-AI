@@ -16,6 +16,9 @@ interface Env {
   // Google OAuth client id of this app. When set, ID tokens minted for any
   // other app are rejected (set it: without it any Google sign-in is accepted).
   GOOGLE_CLIENT_ID?: string;
+  // Comma-separated Google accounts that may sign in. When set, every other
+  // account is refused (403 at sign-in, 401 on the API). Empty = anyone.
+  ALLOWED_EMAILS?: string;
   // D1 database with the app's test logs (every recognized word, drafts, LLM
   // translations, answers). Optional: without the binding /api/logs answers 503.
   LOGS_DB?: D1Database;
@@ -53,6 +56,12 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 // ─── Google OAuth helpers ───────────────────────────────────────────────────
+
+function isAllowedEmail(env: Env | undefined, email: string | undefined, verified = true): boolean {
+  const list = (env?.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (list.length === 0) return true;
+  return verified && !!email && list.includes(email.toLowerCase());
+}
 
 async function verifyGoogleToken(idToken: string, env?: Env): Promise<GoogleTokenInfo | null> {
   try {
@@ -126,9 +135,13 @@ async function verifyBearer(request: Request, env: Env): Promise<{ sub: string; 
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7);
-  if (token.startsWith(`${SESSION_PREFIX}.`)) return verifySessionToken(env, token);
+  if (token.startsWith(`${SESSION_PREFIX}.`)) {
+    const session = await verifySessionToken(env, token);
+    return session && isAllowedEmail(env, session.email) ? session : null;
+  }
   const info = await verifyGoogleToken(token, env);
-  return info ? { sub: info.sub, email: info.email } : null;
+  if (!info || !isAllowedEmail(env, info.email, info.email_verified === 'true')) return null;
+  return { sub: info.sub, email: info.email };
 }
 
 async function getOrCreateUser(
@@ -159,14 +172,15 @@ async function getOrCreateUser(
 // Extract and verify user from Authorization header
 async function getUserFromRequest(
   sql: SqlFunction,
-  request: Request
+  request: Request,
+  env: Env
 ): Promise<{ id: string; googleId: string; email: string; name: string | null; picture: string | null } | null> {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
 
   const idToken = authHeader.slice(7);
-  const profile = await verifyGoogleToken(idToken);
-  if (!profile) return null;
+  const profile = await verifyGoogleToken(idToken, env);
+  if (!profile || !isAllowedEmail(env, profile.email, profile.email_verified === 'true')) return null;
 
   return getOrCreateUser(sql, profile);
 }
@@ -210,6 +224,9 @@ async function authenticateGoogle(sql: SqlFunction, request: Request, env: Env):
   const profile = await verifyGoogleToken(body.idToken, env);
   if (!profile) {
     return jsonResponse({ error: 'Invalid Google ID token' }, 401);
+  }
+  if (!isAllowedEmail(env, profile.email, profile.email_verified === 'true')) {
+    return jsonResponse({ error: 'Цей Google-акаунт не має доступу до застосунку' }, 403);
   }
 
   const user = await getOrCreateUser(sql, profile);
@@ -1244,7 +1261,7 @@ export default {
       }
 
       // All other /api/ routes require auth
-      const user = await getUserFromRequest(sql, request);
+      const user = await getUserFromRequest(sql, request, env);
       const authError = requireAuth(user);
       if (authError) return authError;
       const userId = user!.id;
