@@ -9,11 +9,18 @@
  */
 
 import { debugLogger } from '../debugLogger';
+import { isMobileDevice } from '../device';
 import type { SpeechSource, SpeechSourceConfig, SpeechSourceEvents, SpeechSourceState } from './types';
 
 const WATCHDOG_TICK_MS = 3000;
 const WATCHDOG_SILENCE_MS = 6000;
 const WATCHDOG_FALLBACK_MS = 3000;
+// Chrome on Android stops listening after the end of an utterance but neither
+// finalizes the result nor ends the session until stop() is called: the
+// recognizer stays deaf until the watchdog fires. Once a run has produced
+// words, a much shorter silence is therefore enough to restart it there.
+const MOBILE_WATCHDOG_TICK_MS = 500;
+const MOBILE_AFTER_SPEECH_SILENCE_MS = 2500;
 const RESTART_GUARD_RELEASE_MS = 500;
 const MAX_AUDIO_CAPTURE_RETRIES = 3;
 const GET_USER_MEDIA_TIMEOUT_MS = 8000;
@@ -54,6 +61,8 @@ export class WebSpeechSource implements SpeechSource {
     private noSpeechCount = 0;
     private audioCaptureErrors = 0;
     private lastEventTime = 0;
+    /** The current recognizer run has delivered at least one result. */
+    private heardInRun = false;
 
     private restartTimer: ReturnType<typeof setTimeout> | null = null;
     private releaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -134,6 +143,7 @@ export class WebSpeechSource implements SpeechSource {
         // Chrome's stop() is async: results can trail in after stop(); drop them.
         if (!this.active || this.ignoreUntilEnd) return;
         this.lastEventTime = Date.now();
+        this.heardInRun = true;
         this.noSpeechCount = 0;
         this.audioCaptureErrors = 0;
 
@@ -258,6 +268,7 @@ export class WebSpeechSource implements SpeechSource {
             // A new run starts with a fresh event.results list.
             debugLogger.log('RECOG', `${reason} (reset ${this.emittedFinals} finals)`);
             this.emittedFinals = 0;
+            this.heardInRun = false;
             this.recognition.lang = this.lang;
 
             if (track && track.readyState === 'live') {
@@ -342,11 +353,13 @@ export class WebSpeechSource implements SpeechSource {
     private startWatchdog(): void {
         this.clearWatchdog();
         this.lastEventTime = Date.now();
+        const mobile = isMobileDevice();
         this.watchdogTimer = setInterval(() => {
             if (!this.active) return;
             if (this.isRestarting || this.restartTimer || this.watchdogFallbackTimer) return;
             const silenceMs = Date.now() - this.lastEventTime;
-            if (silenceMs <= WATCHDOG_SILENCE_MS) return;
+            const limit = mobile && this.heardInRun ? MOBILE_AFTER_SPEECH_SILENCE_MS : WATCHDOG_SILENCE_MS;
+            if (silenceMs <= limit) return;
 
             debugLogger.log('RECOG', `WATCHDOG ${Math.round(silenceMs / 1000)}s silence`);
             this.debug(`🐕 WATCHDOG: no events ${Math.round(silenceMs / 1000)}s — force restart`);
@@ -364,7 +377,7 @@ export class WebSpeechSource implements SpeechSource {
                 this.running = false;
                 this.scheduleRestart(0);
             }, WATCHDOG_FALLBACK_MS);
-        }, WATCHDOG_TICK_MS);
+        }, mobile ? MOBILE_WATCHDOG_TICK_MS : WATCHDOG_TICK_MS);
     }
 
     private clearWatchdog(): void {
