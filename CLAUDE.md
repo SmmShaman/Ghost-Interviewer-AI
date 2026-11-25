@@ -1,5 +1,7 @@
 # CLAUDE.md - Ghost Interviewer AI
 
+> **Start here:** read `HANDOFF.md` first — current state, open tasks (Worker deploy for `/api/logs`, where the Cloudflare token is) and gotchas.
+
 ## Project Overview
 
 Real-time interview assistance app. Transcribes interviewer speech via a pluggable speech source (Web Speech API today), shows an instant machine draft translation, replaces it with a streamed LLM translation that sees the previous phrases as context, and generates grounded answers to the interviewer's questions via cloud LLMs. Designed for multilingual job interviews (primary: Norwegian to Ukrainian).
