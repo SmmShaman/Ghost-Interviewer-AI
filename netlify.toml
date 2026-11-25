@@ -4,6 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # onnxruntime-node (dep of transformers.js) tries to download CUDA binaries on
+  # Linux; that release URL now returns 404 and fails npm install. Not needed in the browser.
+  ONNXRUNTIME_NODE_INSTALL_CUDA = "skip"
 
 # SPA redirect - all routes go to index.html
 [[redirects]]
